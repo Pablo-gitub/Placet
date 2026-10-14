@@ -89,7 +89,16 @@ La PWA è poi raggiungibile su `https://<nome-macchina>.<tailnet>.ts.net`.
 
 > **Limite noto:** gli agenti girano con il tuo stesso utente Linux, quindi possono comunque raggiungere il socket e il file SQLite. La separazione diventa effettiva eseguendo il backend con un utente dedicato o in un container.
 
-### 5. Notifiche push con ntfy self-hosted
+### 5. Sviluppo del frontend
+
+Il dev server Vite inoltra `/api` al socket della PWA e aggiunge l'header di identità che in produzione mette `tailscale serve`:
+```bash
+cd frontend
+PLACET_DEV_LOGIN=paolo@github npx vite
+```
+`PLACET_DEV_LOGIN` deve comparire in `PLACET_ALLOWED_USERS`. Il dev server ascolta solo su `127.0.0.1`.
+
+### 6. Notifiche push con ntfy self-hosted
 
 La notifica annuncia la richiesta e apre la PWA. Non ha bottoni Approva/Rifiuta: si decide solo dalla PWA, vedendo il testo completo. Prompt e contesto finiscono nella notifica solo se il server ntfy è privato; con `ntfy.sh` pubblico la notifica dice solo chi ha scritto.
 
@@ -151,8 +160,9 @@ Aggiungi Placet alla configurazione MCP del tuo client (es. `claude_desktop_conf
 
 ## 🛠️ Strumenti MCP Disponibili
 
-1. `placet_ask_human(question, options, context, timeout_seconds)`
+1. `placet_ask_human(question, options, multiple, context, timeout_seconds)`
    - Richiede una decisione/scelta all'utente umano su iPhone.
+   - Senza `options` è una domanda di conferma (approva/rifiuta) con nota facoltativa. Con `options` è una scelta singola, oppure multipla con `multiple=True`. L'opzione "Altro" a testo libero è sempre disponibile e non va passata tra le opzioni.
 2. `placet_send_to_agent(target_agent, prompt, context, require_human_approval, timeout_seconds)`
    - Invia un compito a un'altra sessione tmux registrata (es. `gemini`).
 3. `placet_reply(request_id, response)`

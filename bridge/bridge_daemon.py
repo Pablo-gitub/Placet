@@ -42,7 +42,8 @@ class BridgeDaemon:
             if req.selected_options:
                 lines.append(f"Opzioni scelte: {', '.join(req.selected_options)}")
             if req.custom_text:
-                lines.append(f"Testo libero: {req.custom_text}")
+                label = "Altro" if req.options else "Nota dell'utente"
+                lines.append(f"{label}: {req.custom_text}")
             if req.edited_prompt is not None and req.edited_prompt != req.prompt:
                 lines.append(f"Testo modificato dall'utente: {req.edited_prompt}")
         else:

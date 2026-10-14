@@ -304,3 +304,43 @@ header {
   color: var(--text-main);
   margin-bottom: 0.4rem;
 }
+
+.question-text {
+  font-size: 0.95rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  margin-bottom: 1rem;
+}
+
+fieldset.options-list {
+  border: none;
+  min-width: 0;
+}
+
+.option-item input {
+  width: 1.1rem;
+  height: 1.1rem;
+  accent-color: var(--primary);
+  flex-shrink: 0;
+}
+
+.free-text {
+  min-height: 80px;
+  margin-bottom: 1rem;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.card-highlight {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.35);
+}
+
+.status-expired, .status-cancelled {
+  background: rgba(148, 163, 184, 0.15);
+  color: var(--text-muted);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+}

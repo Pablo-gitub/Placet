@@ -12,7 +12,7 @@ import pytest
 from backend.app.config import AgentSpec, PlacetConfig
 from backend.app.database import Database
 from backend.app.main import create_app
-from backend.app.models import RequestCreate, RequestStatus
+from backend.app.models import QuestionType, RequestCreate, RequestStatus
 from bridge.bridge_daemon import BridgeDaemon
 from bridge.tmux_controller import TmuxController
 from tests.helpers import agent_client, human_client
@@ -56,7 +56,8 @@ def _injected(tmux):
 
 def test_human_decision_is_injected_into_sender_session(db, tmux):
     req = db.create_request(RequestCreate(
-        sender_id="claude", recipient_id="human", prompt="Pubblico?", options=["Sì", "No"]
+        sender_id="claude", recipient_id="human", prompt="Pubblico?", options=["Sì", "No"],
+        question_type=QuestionType.SINGLE_CHOICE,
     ))
     db.update_request_decision(req.id, RequestStatus.APPROVED, selected_options=["Sì"],
                                custom_text="ma senza emoji")
@@ -68,7 +69,7 @@ def test_human_decision_is_injected_into_sender_session(db, tmux):
     [(session, text)] = _injected(tmux)
     assert session == "agent-claude"
     assert text.startswith(f"[Placet] Decisione dell'utente sulla richiesta #{req.id}: APPROVED")
-    assert "Sì" in text and "ma senza emoji" in text
+    assert "Sì" in text and "Altro: ma senza emoji" in text
     assert db.get_request(req.id).delivered_at is not None
 
     # Never delivered twice.

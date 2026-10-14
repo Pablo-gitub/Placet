@@ -175,7 +175,7 @@ async def test_complex_and_multiline_payloads(edge_setup):
         resp = await client.post("/api/requests", json={
             "sender_id": "claude",
             "recipient_id": "human",
-            "question_type": "prompt_review",
+            "question_type": "single_choice",
             "prompt": complex_prompt,
             "context": "Verifica robustezza escape",
             "options": ["Opzione 1: € / $", "Opzione 2: 'virgolette' e \"doppie\""],

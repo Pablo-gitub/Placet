@@ -57,7 +57,13 @@ describe("Placet Frontend PWA App", () => {
     },
   };
 
+  const decisionBody = (id) => {
+    const call = global.fetch.mock.calls.find(([url]) => url === `/api/requests/${id}/decision`);
+    return call ? JSON.parse(call[1].body) : undefined;
+  };
+
   beforeEach(() => {
+    window.location.hash = "";
     vi.restoreAllMocks();
     global.fetch = vi.fn((url, options) => {
       if (url === "/api/requests" && (!options || options.method === "GET")) {
@@ -114,17 +120,11 @@ describe("Placet Frontend PWA App", () => {
     fireEvent.click(approveBtn);
 
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith(
-        "/api/requests/1/decision",
-        expect.objectContaining({
-          method: "POST",
-          body: JSON.stringify({
-            status: "APPROVED",
-            edited_prompt: "Modified prompt by Paolo",
-            selected_options: [],
-          }),
-        })
-      );
+      expect(decisionBody(1)).toEqual({
+        status: "APPROVED",
+        edited_prompt: "Modified prompt by Paolo",
+        selected_options: [],
+      });
     });
   });
 

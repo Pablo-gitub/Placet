@@ -26,7 +26,9 @@ from backend.app.models import (
     RequestCreate,
     RequestModel,
     RequestStatus,
+    QuestionType,
     RequestDecision,
+    decision_error,
     is_settled,
 )
 from backend.app.notifier import NtfyConfig, send_ntfy_notification
@@ -210,6 +212,16 @@ def create_app(
                 detail=f"Route from {req.sender_id} to {req.recipient_id} not allowed by AGENTS.md rules.",
             )
 
+        if req.recipient_id == "human":
+            if req.question_type == QuestionType.PROMPT_REVIEW:
+                # Older clients sent open questions to the human as prompt_review.
+                req = req.model_copy(update={"question_type": QuestionType.CONFIRMATION})
+        elif req.question_type != QuestionType.PROMPT_REVIEW:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Requests to an agent must be of type prompt_review.",
+            )
+
         # Check if approval required
         needs_approval = config.requires_approval(req.sender_id, req.recipient_id)
 
@@ -275,6 +287,10 @@ def create_app(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Request {request_id} is in {req.status.value} state, not in PENDING state.",
             )
+
+        problem = decision_error(req, decision)
+        if problem:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=problem)
 
         updated = db.update_request_decision(
             request_id=request_id,

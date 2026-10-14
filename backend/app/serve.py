@@ -37,6 +37,12 @@ async def serve(
     human_socket = human_socket or os.environ.get("PLACET_HUMAN_SOCKET") or default_human_socket()
 
     socket_path = Path(human_socket)
+    # sun_path is limited to 108 bytes on Linux (104 on macOS).
+    if len(os.fsencode(socket_path)) > 100:
+        raise SystemExit(
+            f"PLACET_HUMAN_SOCKET path is too long for a Unix socket ({socket_path}); "
+            "use a shorter one, e.g. $XDG_RUNTIME_DIR/placet/human.sock."
+        )
     socket_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     # uvicorn makes the socket itself world-writable (0666): access is
     # restricted by its directory instead (tailscaled runs as root).

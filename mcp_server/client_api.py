@@ -26,7 +26,7 @@ class PlacetClient:
         self,
         question: str,
         options: Optional[List[str]] = None,
-        allow_custom_text: bool = True,
+        multiple: bool = False,
         context: Optional[str] = None,
         timeout_seconds: int = 180,
     ) -> Dict[str, Any]:
@@ -35,7 +35,9 @@ class PlacetClient:
         payload = {
             "sender_id": self.agent_id,
             "recipient_id": "human",
-            "question_type": "single_choice" if (options and len(options) > 0) else "prompt_review",
+            "question_type": (
+                ("multi_choice" if multiple else "single_choice") if options else "confirmation"
+            ),
             "prompt": question,
             "context": context,
             "options": options or [],

@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import List, Optional
 from datetime import datetime, timezone
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class RequestStatus(str, Enum):
@@ -34,10 +34,13 @@ MAX_EXPIRES_IN_SECONDS = 7 * 24 * 3600
 
 
 class QuestionType(str, Enum):
-    SINGLE_CHOICE = "single_choice"
-    MULTI_CHOICE = "multi_choice"
-    PROMPT_REVIEW = "prompt_review"
-    CONFIRMATION = "confirmation"
+    SINGLE_CHOICE = "single_choice"    # one option, or "Altro" with free text
+    MULTI_CHOICE = "multi_choice"      # any options, plus optional "Altro"
+    PROMPT_REVIEW = "prompt_review"    # agent-to-agent prompt the human may edit
+    CONFIRMATION = "confirmation"      # yes/no question to the human, optional note
+
+
+CHOICE_TYPES = frozenset({QuestionType.SINGLE_CHOICE, QuestionType.MULTI_CHOICE})
 
 
 class ResponseModel(BaseModel):
@@ -63,6 +66,24 @@ class RequestCreate(BaseModel):
         DEFAULT_EXPIRES_IN_SECONDS, ge=10, le=MAX_EXPIRES_IN_SECONDS
     )
 
+    @field_validator("options")
+    @classmethod
+    def _clean_options(cls, v: List[str]) -> List[str]:
+        cleaned = [o.strip() for o in v]
+        if any(not o for o in cleaned):
+            raise ValueError("options must not be empty strings")
+        if len(set(cleaned)) != len(cleaned):
+            raise ValueError("options must be unique")
+        return cleaned
+
+    @model_validator(mode="after")
+    def _options_match_type(self) -> "RequestCreate":
+        if self.question_type in CHOICE_TYPES and not self.options:
+            raise ValueError(f"{self.question_type.value} requires at least one option")
+        if self.question_type not in CHOICE_TYPES and self.options:
+            raise ValueError(f"{self.question_type.value} does not take options")
+        return self
+
 
 class RequestDecision(BaseModel):
     status: RequestStatus
@@ -76,6 +97,11 @@ class RequestDecision(BaseModel):
         if v not in (RequestStatus.APPROVED, RequestStatus.REJECTED):
             raise ValueError("decision status must be APPROVED or REJECTED")
         return v
+
+    @field_validator("custom_text", "edited_prompt")
+    @classmethod
+    def _blank_is_none(cls, v: Optional[str]) -> Optional[str]:
+        return v if v is not None and v.strip() else None
 
 
 class RequestModel(BaseModel):
@@ -99,6 +125,38 @@ class RequestModel(BaseModel):
     # long-polling or a bridge injection into its session).
     updated_at: Optional[datetime] = None
     delivered_at: Optional[datetime] = None
+
+
+def decision_error(req: "RequestModel", decision: RequestDecision) -> Optional[str]:
+    """
+    Checks a decision against the question it answers (RF-02, RF-03).
+    Returns a message describing the problem, or None if it is valid.
+    """
+    selected = decision.selected_options
+    if decision.edited_prompt is not None and req.question_type != QuestionType.PROMPT_REVIEW:
+        return "edited_prompt is only allowed when reviewing a prompt for an agent"
+
+    if req.question_type not in CHOICE_TYPES:
+        if selected:
+            return f"{req.question_type.value} has no options to select"
+        return None
+
+    if len(set(selected)) != len(selected):
+        return "selected_options must be unique"
+    unknown = [o for o in selected if o not in req.options]
+    if unknown:
+        return f"unknown options: {', '.join(unknown)}"
+    if decision.status == RequestStatus.REJECTED:
+        if selected:
+            return "a rejection cannot select options"
+        return None
+
+    if req.question_type == QuestionType.SINGLE_CHOICE:
+        if len(selected) + (1 if decision.custom_text else 0) != 1:
+            return "single_choice needs exactly one option, or 'Altro' with a text"
+    elif not selected and not decision.custom_text:
+        return "multi_choice needs at least one option or 'Altro' with a text"
+    return None
 
 
 def is_settled(req: RequestModel) -> bool:

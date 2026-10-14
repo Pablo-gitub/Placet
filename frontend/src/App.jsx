@@ -1,25 +1,25 @@
 import React, { useState, useEffect } from "react";
 import {
   CheckCircle,
-  XCircle,
   Radio,
-  Send,
   Bot,
-  User,
   Clock,
   ArrowRight,
   ShieldCheck,
-  RefreshCw,
   AlertCircle,
-  Loader2,
 } from "lucide-react";
+import RequestCard from "./RequestCard";
+import { requestIdFromHash } from "./decisions";
+
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("inbox");
   const [requests, setRequests] = useState([]);
   const [agentsData, setAgentsData] = useState({ agents: {}, rules: {} });
-  const [editedPrompts, setEditedPrompts] = useState({});
-  const [selectedOpts, setSelectedOpts] = useState({});
+  const [focusId, setFocusId] = useState(() => requestIdFromHash(window.location.hash));
+  // Request to jump to once it is loaded; cleared after the jump, so that
+  // answering it does not drag the view to the history tab.
+  const [jumpId, setJumpId] = useState(focusId);
   const [connected, setConnected] = useState(false);
   const [submittingId, setSubmittingId] = useState(null);
   const [feedback, setFeedback] = useState(null);
@@ -92,36 +92,49 @@ export default function App() {
     };
   }, []);
 
+  // Deep links from ntfy notifications: #request-N.
+  useEffect(() => {
+    const onHashChange = () => {
+      const id = requestIdFromHash(window.location.hash);
+      setFocusId(id);
+      setJumpId(id);
+    };
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  const jumpStatus = requests.find((r) => r.id === jumpId)?.status;
+
+  useEffect(() => {
+    if (jumpId === null || jumpStatus === undefined) return;
+    setActiveTab(jumpStatus === "PENDING" ? "inbox" : "history");
+    setJumpId(null);
+    // Wait for the tab to render before scrolling.
+    requestAnimationFrame(() => {
+      document.getElementById(`request-${jumpId}`)?.scrollIntoView?.({ block: "center" });
+    });
+  }, [jumpId, jumpStatus]);
+
   const showFeedback = (text, isError = false) => {
     setFeedback({ text, isError });
     setTimeout(() => setFeedback(null), 4000);
   };
 
-  const handleDecision = async (requestId, status) => {
-    const targetReq = requests.find((r) => r.id === requestId);
-    let promptVal = editedPrompts[requestId];
-    if (promptVal !== undefined && promptVal.trim() === "" && targetReq) {
-      promptVal = targetReq.prompt;
-    }
-
-    const opts = selectedOpts[requestId] ? [selectedOpts[requestId]] : [];
+  const handleDecision = async (requestId, body) => {
+    const status = body.status;
     setSubmittingId(requestId);
 
     try {
       const res = await fetch(`/api/requests/${requestId}/decision`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          status,
-          edited_prompt: promptVal,
-          selected_options: opts,
-        }),
+        body: JSON.stringify(body),
       });
 
       if (res.ok) {
         showFeedback(
           status === "APPROVED"
-            ? `Richiesta #${requestId} approvata ed inviata!`
+            ? `Richiesta #${requestId} inviata.`
             : `Richiesta #${requestId} rifiutata.`
         );
         await fetchRequests();
@@ -232,84 +245,13 @@ export default function App() {
               </div>
             ) : (
               pendingRequests.map((req) => (
-                <div key={req.id} className="card" data-testid={`request-card-${req.id}`}>
-                  <div className="card-header">
-                    <div className="agent-route">
-                      <span className="agent-badge">{req.sender_id}</span>
-                      <ArrowRight size={14} style={{ color: "var(--text-muted)" }} />
-                      <span className="agent-badge">{req.recipient_id}</span>
-                    </div>
-                    <span className="status-badge status-pending">In Attesa</span>
-                  </div>
-
-                  {req.context && (
-                    <div className="card-context">
-                      <strong>Contesto:</strong> {req.context}
-                    </div>
-                  )}
-
-                  <label className="prompt-editor-label">
-                    {req.recipient_id === "human"
-                      ? "Domanda / Scelta per te:"
-                      : "Prompt proposto per l'agente (modificabile prima dell'invio):"}
-                  </label>
-                  <textarea
-                    data-testid={`prompt-textarea-${req.id}`}
-                    className="prompt-textarea"
-                    value={
-                      editedPrompts[req.id] !== undefined
-                        ? editedPrompts[req.id]
-                        : req.prompt
-                    }
-                    onChange={(e) =>
-                      setEditedPrompts({
-                        ...editedPrompts,
-                        [req.id]: e.target.value,
-                      })
-                    }
-                  />
-
-                  {req.options && req.options.length > 0 && (
-                    <div className="options-list">
-                      <label className="prompt-editor-label">Opzioni di scelta:</label>
-                      {req.options.map((opt, idx) => (
-                        <label key={idx} className="option-item">
-                          <input
-                            type="radio"
-                            name={`opt-${req.id}`}
-                            value={opt}
-                            checked={selectedOpts[req.id] === opt}
-                            onChange={() =>
-                              setSelectedOpts({ ...selectedOpts, [req.id]: opt })
-                            }
-                          />
-                          <span>{opt}</span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-
-                  <div className="actions-row">
-                    <button
-                      data-testid={`btn-approve-${req.id}`}
-                      className="btn btn-primary"
-                      disabled={submittingId === req.id}
-                      onClick={() => handleDecision(req.id, "APPROVED")}
-                    >
-                      <CheckCircle size={16} />
-                      {submittingId === req.id ? "Invio in corso..." : "Approva ed Invia"}
-                    </button>
-                    <button
-                      data-testid={`btn-reject-${req.id}`}
-                      className="btn btn-danger"
-                      disabled={submittingId === req.id}
-                      onClick={() => handleDecision(req.id, "REJECTED")}
-                    >
-                      <XCircle size={16} />
-                      Rifiuta
-                    </button>
-                  </div>
-                </div>
+                <RequestCard
+                  key={req.id}
+                  req={req}
+                  submitting={submittingId === req.id}
+                  highlighted={req.id === focusId}
+                  onDecide={handleDecision}
+                />
               ))
             )}
           </div>
@@ -383,7 +325,12 @@ export default function App() {
               </div>
             ) : (
               historyRequests.map((req) => (
-                <div key={req.id} className="card" data-testid={`history-card-${req.id}`}>
+                <div
+                  key={req.id}
+                  id={`request-${req.id}`}
+                  className={`card${req.id === focusId ? " card-highlight" : ""}`}
+                  data-testid={`history-card-${req.id}`}
+                >
                   <div className="card-header">
                     <div className="agent-route">
                       <span className="agent-badge">{req.sender_id}</span>
@@ -397,8 +344,23 @@ export default function App() {
                     </span>
                   </div>
                   <p style={{ fontSize: "0.9rem", marginBottom: "0.6rem" }}>
-                    <strong>Prompt:</strong> {req.edited_prompt || req.prompt}
+                    <strong>{req.recipient_id === "human" ? "Domanda:" : "Prompt:"}</strong>{" "}
+                    {req.edited_prompt || req.prompt}
                   </p>
+                  {(req.selected_options?.length > 0 || req.custom_text) && (
+                    <p
+                      data-testid={`history-answer-${req.id}`}
+                      style={{ fontSize: "0.85rem", marginBottom: "0.6rem" }}
+                    >
+                      <strong>Risposta:</strong>{" "}
+                      {[
+                        ...(req.selected_options || []),
+                        ...(req.custom_text
+                          ? [req.options?.length ? `Altro: ${req.custom_text}` : `Nota: ${req.custom_text}`]
+                          : []),
+                      ].join(" · ")}
+                    </p>
+                  )}
                   {req.response && (
                     <div
                       style={{

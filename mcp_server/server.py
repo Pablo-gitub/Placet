@@ -42,11 +42,17 @@ def _format_error(e: Exception) -> str:
 def placet_ask_human(
     question: str,
     options: Optional[List[str]] = None,
+    multiple: bool = False,
     context: Optional[str] = None,
     timeout_seconds: int = 180,
 ) -> str:
     """
     Richiede una decisione, un'approvazione o una scelta all'utente umano (Paolo su iPhone).
+    - Senza `options`: domanda di conferma (approva/rifiuta) con eventuale nota libera dell'utente.
+    - Con `options`: l'utente sceglie un'opzione (`multiple=False`) o più opzioni (`multiple=True`).
+      L'utente ha sempre anche l'opzione "Altro" con testo libero: non aggiungerla tu.
+    Nella risposta: `status` (APPROVED = risposto/approvato, REJECTED = rifiutato),
+    `selected_options` e `custom_text` (testo di "Altro" o nota).
     La richiesta viene notificata istantaneamente su iPhone. Se l'utente risponde entro il timeout,
     lo strumento restituisce la decisione, le opzioni scelte o il testo inserito/modificato.
     Se scade il timeout, restituisce lo stato PENDING con request_id: in quel caso termina il turno
@@ -57,6 +63,7 @@ def placet_ask_human(
         res = client.ask_human(
             question=question,
             options=options or [],
+            multiple=multiple,
             context=context,
             timeout_seconds=timeout_seconds,
         )
