@@ -20,6 +20,13 @@ from backend.app.auth import HumanListener
 logger = logging.getLogger(__name__)
 
 
+class _SkipBridgePolling(logging.Filter):
+    """The bridge polls /api/bridge/work every 2 seconds: keep it out of the access log."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "/api/bridge/work" not in record.getMessage()
+
+
 def default_human_socket() -> str:
     runtime_dir = os.environ.get("XDG_RUNTIME_DIR") or "/tmp"
     return str(Path(runtime_dir) / "placet" / "human.sock")
@@ -54,6 +61,7 @@ async def serve(
     if socket_path.exists():
         socket_path.unlink()
 
+    logging.getLogger("uvicorn.access").addFilter(_SkipBridgePolling())
     agent_server = uvicorn.Server(
         uvicorn.Config(app, host=host, port=port, log_level=log_level)
     )
@@ -72,4 +80,14 @@ async def serve(
         f"Human listener on unix:{socket_path} "
         f"(expose it with: tailscale serve --bg unix:{socket_path})"
     )
-    await asyncio.gather(agent_server.serve(), human_server.serve())
+    servers = [agent_server, human_server]
+    tasks = [asyncio.create_task(server.serve()) for server in servers]
+    # If either listener stops (e.g. its port is taken), stop the other too:
+    # half a backend must not look healthy to systemd.
+    done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    for server in servers:
+        server.should_exit = True
+    await asyncio.gather(*tasks, return_exceptions=True)
+    failed = [t for t in done if t.exception() is not None]
+    if failed:
+        raise SystemExit(f"Placet listener stopped: {failed[0].exception()!r}")

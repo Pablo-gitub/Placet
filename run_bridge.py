@@ -8,6 +8,8 @@ if __name__ == "__main__":
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+    # One request every 2 seconds: do not log each one.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     # Talks to the backend over REST (PLACET_API_URL, PLACET_BRIDGE_TOKEN):
     # the bridge needs no access to the database.
     BridgeDaemon(store=HttpStore()).run_forever()
