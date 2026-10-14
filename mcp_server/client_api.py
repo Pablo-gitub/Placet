@@ -35,6 +35,7 @@ class PlacetClient:
         multiple: bool = False,
         context: Optional[str] = None,
         timeout_seconds: int = 180,
+        priority: Optional[str] = None,
     ) -> Dict[str, Any]:
         timeout = max(5, min(int(timeout_seconds), 600))
         url = f"{self.base_url}/api/requests"
@@ -48,6 +49,8 @@ class PlacetClient:
             "context": context,
             "options": options or [],
         }
+        if priority:
+            payload["priority"] = priority
         with httpx.Client(timeout=float(timeout + 5)) as client:
             resp = client.post(
                 url,
@@ -64,6 +67,7 @@ class PlacetClient:
         prompt: str,
         context: Optional[str] = None,
         timeout_seconds: int = 180,
+        priority: Optional[str] = None,
     ) -> Dict[str, Any]:
         timeout = max(5, min(int(timeout_seconds), 600))
         url = f"{self.base_url}/api/requests"
@@ -75,6 +79,8 @@ class PlacetClient:
             "context": context,
             "options": [],
         }
+        if priority:
+            payload["priority"] = priority
         with httpx.Client(timeout=float(timeout + 5)) as client:
             resp = client.post(
                 url,

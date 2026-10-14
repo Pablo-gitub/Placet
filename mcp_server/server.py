@@ -1,6 +1,8 @@
 import json
 import logging
-from typing import List, Optional
+from typing import List, Literal, Optional
+
+PriorityLevel = Literal["low", "normal", "high", "urgent"]
 import httpx
 from mcp.server.mcpserver import MCPServer
 from mcp_server.client_api import PlacetClient
@@ -45,6 +47,7 @@ def placet_ask_human(
     multiple: bool = False,
     context: Optional[str] = None,
     timeout_seconds: int = 180,
+    priority: Optional[PriorityLevel] = None,
 ) -> str:
     """
     Richiede una decisione, un'approvazione o una scelta all'utente umano (Paolo su iPhone).
@@ -53,6 +56,8 @@ def placet_ask_human(
       L'utente ha sempre anche l'opzione "Altro" con testo libero: non aggiungerla tu.
     Nella risposta: `status` (APPROVED = risposto/approvato, REJECTED = rifiutato),
     `selected_options` e `custom_text` (testo di "Altro" o nota).
+    `priority` (low/normal/high/urgent, default high) decide quanto è insistente la notifica:
+    usa urgent solo se un'attesa blocca qualcosa di importante.
     La richiesta viene notificata istantaneamente su iPhone. Se l'utente risponde entro il timeout,
     lo strumento restituisce la decisione, le opzioni scelte o il testo inserito/modificato.
     Se scade il timeout, restituisce lo stato PENDING con request_id: in quel caso termina il turno
@@ -66,6 +71,7 @@ def placet_ask_human(
             multiple=multiple,
             context=context,
             timeout_seconds=timeout_seconds,
+            priority=priority,
         )
         return json.dumps(res, indent=2, ensure_ascii=False)
     except Exception as e:
@@ -78,6 +84,7 @@ def placet_send_to_agent(
     prompt: str,
     context: Optional[str] = None,
     timeout_seconds: int = 180,
+    priority: Optional[PriorityLevel] = None,
 ) -> str:
     """
     Invia un prompt o un compito a un'altra sessione aperta e attiva di un agente registrato
@@ -94,6 +101,7 @@ def placet_send_to_agent(
             prompt=prompt,
             context=context,
             timeout_seconds=timeout_seconds,
+            priority=priority,
         )
         return json.dumps(res, indent=2, ensure_ascii=False)
     except Exception as e:

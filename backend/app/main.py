@@ -29,6 +29,7 @@ from backend.app.models import (
     RequestEvent,
     RequestModel,
     RequestStatus,
+    Priority,
     QuestionType,
     RequestDecision,
     RESULT_GRACE_SECONDS,
@@ -230,6 +231,11 @@ def create_app(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Requests to an agent must be of type prompt_review.",
             )
+
+        if req.priority is None:
+            req = req.model_copy(update={
+                "priority": Priority.HIGH if req.recipient_id == "human" else Priority.NORMAL
+            })
 
         # Check if approval required
         needs_approval = config.requires_approval(req.sender_id, req.recipient_id)

@@ -209,3 +209,13 @@ describe("history timeline", () => {
     expect(global.fetch).toHaveBeenCalledWith("/api/requests/40/events");
   });
 });
+
+describe("priority badge", () => {
+  it("shows urgent and high, hides normal", () => {
+    const { unmount } = render(<RequestCard req={{ ...confirm, priority: "urgent" }} onDecide={vi.fn()} />);
+    expect(screen.getByTestId("priority-12")).toHaveTextContent("Urgente");
+    unmount();
+    render(<RequestCard req={{ ...confirm, priority: "normal" }} onDecide={vi.fn()} />);
+    expect(screen.queryByTestId("priority-12")).toBeNull();
+  });
+});

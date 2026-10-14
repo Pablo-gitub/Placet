@@ -46,19 +46,19 @@ Questo file definisce le sessioni attive conosciute da Placet, le credenziali di
 
 ## 1. Claude Code (`claude`)
 - **Ruolo Primario:** Architettura software, refactoring, orchestrazione e redazione di codice testato.
-- **Provider:** Anthropic Claude (Claude 3.7 Sonnet).
+- **Provider:** Anthropic (modello configurato nella CLI Claude Code).
 - **Sessione tmux:** `agent-claude`
 - **Quando consultarlo:** Per implementazione dettagliata, review di codice, design pattern e refactoring complessi.
 
 ## 2. Gemini / Antigravity (`gemini`)
 - **Ruolo Primario:** Ragionamento su contesti estesi, analisi documentale e standard ufficiali, validazione edge cases e supporto algoritmico.
-- **Provider:** Google Gemini.
+- **Provider:** Google (modello configurato nella Gemini CLI).
 - **Sessione tmux:** `agent-gemini`
 - **Quando consultarlo:** Per verifiche su ampia documentazione, analisi comparative o compiti ad alta intensità contestuale.
 
 ## 3. OpenAI Codex / ChatGPT (`codex`)
 - **Ruolo Primario:** Scrittura di script, prototipazione rapida, data transformations e compiti mirati di sintesi.
-- **Provider:** OpenAI (GPT-4o / o1 / o3-mini).
+- **Provider:** OpenAI (modello configurato nella CLI Codex).
 - **Sessione tmux:** `agent-codex`
 - **Quando consultarlo:** Per generazioni veloci, compiti di scripting mirati e cross-validation.
 

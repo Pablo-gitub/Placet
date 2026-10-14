@@ -37,7 +37,14 @@ export default function RequestCard({ req, submitting, highlighted, onDecide }) 
           <ArrowRight size={14} style={{ color: "var(--text-muted)" }} />
           <span className="agent-badge">{req.recipient_id}</span>
         </div>
-        <span className="status-badge status-pending">In attesa</span>
+        <div className="badges">
+          {(req.priority === "high" || req.priority === "urgent") && (
+            <span className={`status-badge priority-${req.priority}`} data-testid={`priority-${req.id}`}>
+              {req.priority === "urgent" ? "Urgente" : "Alta"}
+            </span>
+          )}
+          <span className="status-badge status-pending">In attesa</span>
+        </div>
       </div>
 
       {req.context && (

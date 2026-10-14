@@ -49,7 +49,7 @@ Placet risolve due problemi strutturali dei flussi di lavoro con agenti AI:
   - Esporre le REST API per creazione, lettura, aggiornamento e annullamento delle richieste.
   - Gestire stream SSE (Server-Sent Events) o WebSocket per aggiornare la PWA in tempo reale.
   - Inviare notifiche push su smartphone tramite webhook `ntfy` self-hosted in tailnet. La notifica contiene solo il link alla PWA; prompt e contesto sono inclusi solo se il server ntfy non è pubblico.
-  - Gestire la sincronizzazione bidirezionale con `AGENTS.md`.
+  - Leggere all'avvio agenti, token e regole di routing da `AGENTS.md` (in sola lettura: per applicare modifiche si riavvia il backend).
   - Fornire endpoint di long-polling per le chiamate MCP sincrone.
 
 ### 2.2 Server MCP (`placet-mcp`)
@@ -209,11 +209,11 @@ rules:
 
 ## Claude Code (`claude`)
 - **Ruolo:** Agente di sviluppo principale, refactoring, architettura, orchestrazione e redazione test.
-- **Provider:** Anthropic Claude 3.7 Sonnet.
+- **Provider:** Anthropic (modello configurato nella CLI).
 
 ## Gemini / Antigravity (`gemini`)
 - **Ruolo:** Analisi di contesti ampi, ricerca su documentazione aggiornata, verifica di casi limite, supporto algoritmico.
-- **Provider:** Google Gemini.
+- **Provider:** Google (modello configurato nella CLI).
 ```
 
 ---

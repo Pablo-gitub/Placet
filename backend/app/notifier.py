@@ -14,11 +14,20 @@ from urllib.parse import urlparse
 
 import httpx
 
-from backend.app.models import RequestModel
+from backend.app.models import Priority, RequestModel
 
 logger = logging.getLogger(__name__)
 
 PUBLIC_NTFY_HOSTS = frozenset({"ntfy.sh"})
+
+# ntfy priorities: min, low, default, high, urgent.
+NTFY_PRIORITY = {
+    Priority.LOW: "low",
+    Priority.NORMAL: "default",
+    Priority.HIGH: "high",
+    Priority.URGENT: "urgent",
+}
+
 BODY_PREVIEW_CHARS = 300
 
 
@@ -83,7 +92,7 @@ def build_notification(
 
     headers = {
         "Title": _ascii_header(title),
-        "Priority": "high" if request.recipient_id == "human" else "default",
+        "Priority": NTFY_PRIORITY[request.priority],
         "Tags": "robot",
         "Click": open_url,
         "Actions": f"view, Apri, {open_url}, clear=true",

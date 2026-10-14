@@ -11,6 +11,7 @@ from backend.app.models import (
     RequestEvent,
     RequestModel,
     RequestStatus,
+    Priority,
     QuestionType,
     ResponseModel,
     is_settled,
@@ -63,7 +64,8 @@ class Database:
                 decided_at TEXT,
                 completed_at TEXT,
                 updated_at TEXT,
-                delivered_at TEXT
+                delivered_at TEXT,
+                priority TEXT
             );
             """)
             cursor.execute("""
@@ -92,7 +94,7 @@ class Database:
             )
             cursor.execute("PRAGMA table_info(requests);")
             cols = [r["name"] for r in cursor.fetchall()]
-            for col in ("expires_at", "updated_at", "delivered_at"):
+            for col in ("expires_at", "updated_at", "delivered_at", "priority"):
                 if col not in cols:
                     cursor.execute(f"ALTER TABLE requests ADD COLUMN {col} TEXT;")
 
@@ -144,8 +146,8 @@ class Database:
                 """
                 INSERT INTO requests (
                     sender_id, recipient_id, question_type, prompt, context,
-                    options, status, created_at, expires_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    options, status, created_at, expires_at, updated_at, priority
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     req.sender_id,
@@ -158,6 +160,7 @@ class Database:
                     now.isoformat(),
                     expires_at.isoformat(),
                     now.isoformat(),
+                    (req.priority or Priority.NORMAL).value,
                 ),
             )
             req_id = cursor.lastrowid
@@ -200,6 +203,7 @@ class Database:
             context=row["context"],
             options=json.loads(row["options"]) if row["options"] else [],
             status=RequestStatus(row["status"]),
+            priority=Priority(row["priority"]) if row["priority"] else Priority.NORMAL,
             edited_prompt=row["edited_prompt"],
             selected_options=json.loads(row["selected_options"]) if row["selected_options"] else [],
             custom_text=row["custom_text"],

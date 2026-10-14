@@ -46,6 +46,14 @@ class QuestionType(str, Enum):
     CONFIRMATION = "confirmation"      # yes/no question to the human, optional note
 
 
+class Priority(str, Enum):
+    """RF-07: decides how insistent the notification is."""
+    LOW = "low"
+    NORMAL = "normal"
+    HIGH = "high"
+    URGENT = "urgent"
+
+
 CHOICE_TYPES = frozenset({QuestionType.SINGLE_CHOICE, QuestionType.MULTI_CHOICE})
 
 
@@ -67,6 +75,8 @@ class RequestCreate(BaseModel):
     prompt: str
     context: Optional[str] = None
     options: List[str] = Field(default_factory=list)
+    # Defaults to high for questions to the human, normal for agent-to-agent.
+    priority: Optional[Priority] = None
     # Lifetime of the request, independent of how long the caller waits for it.
     expires_in_seconds: int = Field(
         DEFAULT_EXPIRES_IN_SECONDS, ge=10, le=MAX_EXPIRES_IN_SECONDS
@@ -119,6 +129,7 @@ class RequestModel(BaseModel):
     context: Optional[str] = None
     options: List[str] = Field(default_factory=list)
     status: RequestStatus = RequestStatus.PENDING
+    priority: Priority = Priority.NORMAL
     edited_prompt: Optional[str] = None
     selected_options: List[str] = Field(default_factory=list)
     custom_text: Optional[str] = None

@@ -402,3 +402,21 @@ fieldset.options-list {
 .timeline-error {
   color: var(--danger);
 }
+
+.badges {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.priority-high {
+  background: rgba(56, 189, 248, 0.15);
+  color: var(--accent);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.priority-urgent {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}

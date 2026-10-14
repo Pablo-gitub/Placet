@@ -11,8 +11,8 @@ Placet permette ad agenti attivi su terminali diversi (Claude Code, Gemini CLI /
 ```text
  ┌────────────────────────────────────────────────────────┐
  │                    iPhone (Paolo)                      │
- │  • Notifiche push ntfy con bottoni Approva / Rifiuta   │
- │  • PWA (Tailscale HTTPS): revisione ed edit prompt     │
+ │  • Notifiche push ntfy con link alla richiesta         │
+ │  • PWA (Tailscale HTTPS): decisioni, edit, cronologia  │
  └───────────────────────────▲────────────────────────────┘
                              │ REST API / SSE
  ┌───────────────────────────┴────────────────────────────┐
