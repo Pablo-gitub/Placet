@@ -2,6 +2,8 @@ import os
 import tempfile
 import pytest
 from httpx import AsyncClient, ASGITransport
+
+from tests.helpers import agent_client, human_client
 from backend.app.main import create_app
 from backend.app.database import Database
 from backend.app.config import load_agents_config
@@ -58,8 +60,15 @@ async def test_api_list_agents(test_setup):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get("/api/agents")
+        assert response.status_code == 401
+
+    async with agent_client(app, "token-claude") as client:
+        response = await client.get("/api/agents")
         assert response.status_code == 200
         data = response.json()
+        # Tokens are secrets and must never be exposed.
+        assert "token" not in data["agents"]["claude"]
+        assert "token-claude" not in response.text
         assert "claude" in data["agents"]
         assert "gemini" in data["agents"]
         assert data["agents"]["claude"]["tmux_session"] == "agent-claude"
@@ -94,7 +103,8 @@ async def test_api_create_and_decide_request(test_setup):
             "status": "APPROVED",
             "edited_prompt": "Prompt modificato da Paolo",
         }
-        dec_resp = await client.post(f"/api/requests/{req_id}/decision", json=decision)
+        async with human_client(app) as human:
+            dec_resp = await human.post(f"/api/requests/{req_id}/decision", json=decision)
         assert dec_resp.status_code == 200
         dec_data = dec_resp.json()
         assert dec_data["status"] == RequestStatus.APPROVED.value
@@ -105,7 +115,11 @@ async def test_api_create_and_decide_request(test_setup):
             "responder_id": "gemini",
             "content": "Risposta completata con successo",
         }
-        rep_resp = await client.post(f"/api/requests/{req_id}/reply", json=reply_payload)
+        rep_resp = await client.post(
+            f"/api/requests/{req_id}/reply",
+            json=reply_payload,
+            headers={"Authorization": "Bearer token-gemini"},
+        )
         assert rep_resp.status_code == 200
         rep_data = rep_resp.json()
         assert rep_data["status"] == RequestStatus.COMPLETED.value
@@ -147,7 +161,9 @@ async def test_api_unauthorized_route(test_setup):
             "recipient_id": "unknown_bot",
             "prompt": "Fail",
         }
-        resp = await client.post("/api/requests", json=payload)
+        resp = await client.post(
+            "/api/requests", json=payload, headers={"Authorization": "Bearer token-claude"}
+        )
         assert resp.status_code == 403
 
 

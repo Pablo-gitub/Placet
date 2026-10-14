@@ -3,19 +3,19 @@ agents:
   claude:
     name: "Claude Code"
     tmux_session: "agent-claude"
-    token: "${PLACET_TOKEN_CLAUDE:-secret-token-claude}"
+    token: "${PLACET_TOKEN_CLAUDE}"
     allowed_targets: ["gemini", "codex", "human"]
     default_timeout_seconds: 180
   gemini:
     name: "Gemini CLI / Antigravity"
     tmux_session: "agent-gemini"
-    token: "${PLACET_TOKEN_GEMINI:-secret-token-gemini}"
+    token: "${PLACET_TOKEN_GEMINI}"
     allowed_targets: ["claude", "codex", "human"]
     default_timeout_seconds: 180
   codex:
     name: "OpenAI Codex / ChatGPT CLI"
     tmux_session: "agent-codex"
-    token: "${PLACET_TOKEN_CODEX:-secret-token-codex}"
+    token: "${PLACET_TOKEN_CODEX}"
     allowed_targets: ["claude", "gemini", "human"]
     default_timeout_seconds: 180
 

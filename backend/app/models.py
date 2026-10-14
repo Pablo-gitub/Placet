@@ -50,7 +50,9 @@ class ResponseModel(BaseModel):
 
 
 class RequestCreate(BaseModel):
-    sender_id: str
+    # Filled in by the backend from the authenticated agent; if a client sends
+    # it, it must match.
+    sender_id: Optional[str] = None
     recipient_id: str
     question_type: QuestionType = QuestionType.PROMPT_REVIEW
     prompt: str

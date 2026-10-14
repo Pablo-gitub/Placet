@@ -221,5 +221,7 @@ rules:
 ## 6. Sicurezza e Accesso
 
 1. **Isolamento di Rete:** Il backend non è esposto sul web pubblico. È accessibile esclusivamente sulla tailnet privata tramite Tailscale.
-2. **Autenticazione Agente-to-Placet:** Ogni processo MCP include l'identità autenticata via variabile d'ambiente (`PLACET_AGENT_ID` + token univoco), prevenendo allucinazioni o impersonificazioni non autorizzate.
-3. **Principio del Minimo Privilegio (RS-04):** Gli agenti non possiedono chiavi per pubblicare sui social o applicare modifiche critiche in autonomia: possono solo proporre e attendere la validazione di Placet.
+2. **Autenticazione Agente-to-Placet:** Ogni agente si autentica con un Bearer token univoco (`PLACET_API_TOKEN`). L'identità è quella associata al token in `AGENTS.md`, mai un campo del corpo della richiesta. Un agente vede e annulla solo le proprie richieste e risponde solo a quelle indirizzate a lui. I token non vengono mai esposti da `/api/agents`.
+3. **Autenticazione Umano (PWA):** Il backend ascolta su due ingressi. Il listener TCP `127.0.0.1` è per gli agenti. Il socket Unix è esposto sulla tailnet con `tailscale serve unix:<socket>`, e solo lì è accettato l'header `Tailscale-User-Login`, ristretto agli utenti in `PLACET_ALLOWED_USERS`. Decisioni, lista delle richieste e flusso SSE sono riservati all'umano.
+   - *Limite noto:* finché backend e agenti girano con lo stesso utente Linux, gli agenti possono raggiungere socket e DB. L'isolamento completo richiede un utente dedicato o un container.
+4. **Principio del Minimo Privilegio (RS-04):** Gli agenti non possiedono chiavi per pubblicare sui social o applicare modifiche critiche in autonomia: possono solo proporre e attendere la validazione di Placet.

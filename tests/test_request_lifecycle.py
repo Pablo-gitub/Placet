@@ -8,12 +8,12 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from httpx import AsyncClient, ASGITransport
 
 from backend.app.config import load_agents_config
 from backend.app.database import Database
 from backend.app.main import create_app
 from backend.app.models import RequestCreate, RequestStatus
+from tests.helpers import agent_client, human_client
 
 AUTH_CLAUDE = {"Authorization": "Bearer tok-claude"}
 AUTH_GEMINI = {"Authorization": "Bearer tok-gemini"}
@@ -45,14 +45,10 @@ rules:
     yield app, db
 
 
-def _client(app):
-    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
-
-
 @pytest.mark.asyncio
 async def test_long_poll_waits_for_human_decision(setup):
     app, db = setup
-    async with _client(app) as client:
+    async with agent_client(app) as client, human_client(app) as human:
         create = asyncio.create_task(client.post(
             "/api/requests?wait_seconds=10",
             json={"sender_id": "claude", "recipient_id": "human", "prompt": "Ok?"},
@@ -64,7 +60,7 @@ async def test_long_poll_waits_for_human_decision(setup):
 
         pending = db.list_requests(status=RequestStatus.PENDING)
         assert len(pending) == 1
-        resp = await client.post(
+        resp = await human.post(
             f"/api/requests/{pending[0].id}/decision", json={"status": "APPROVED"}
         )
         assert resp.status_code == 200
@@ -76,7 +72,7 @@ async def test_long_poll_waits_for_human_decision(setup):
 @pytest.mark.asyncio
 async def test_long_poll_agent_request_waits_for_reply_not_approval(setup):
     app, db = setup
-    async with _client(app) as client:
+    async with agent_client(app) as client, human_client(app) as human:
         create = asyncio.create_task(client.post(
             "/api/requests?wait_seconds=10",
             json={"sender_id": "claude", "recipient_id": "gemini", "prompt": "Analizza"},
@@ -85,7 +81,7 @@ async def test_long_poll_agent_request_waits_for_reply_not_approval(setup):
         await asyncio.sleep(0.3)
         req_id = db.list_requests()[0].id
 
-        await client.post(f"/api/requests/{req_id}/decision", json={"status": "APPROVED"})
+        await human.post(f"/api/requests/{req_id}/decision", json={"status": "APPROVED"})
         await asyncio.sleep(0.3)
         # Approval alone does not settle an agent-to-agent request.
         assert not create.done()
@@ -105,7 +101,7 @@ async def test_long_poll_agent_request_waits_for_reply_not_approval(setup):
 @pytest.mark.asyncio
 async def test_long_poll_timeout_returns_pending(setup):
     app, _ = setup
-    async with _client(app) as client:
+    async with agent_client(app) as client, human_client(app) as human:
         resp = await client.post(
             "/api/requests?wait_seconds=1",
             json={"sender_id": "claude", "recipient_id": "human", "prompt": "Ok?"},
@@ -117,7 +113,7 @@ async def test_long_poll_timeout_returns_pending(setup):
 @pytest.mark.asyncio
 async def test_request_survives_wait_timeout_and_can_be_decided_later(setup):
     app, _ = setup
-    async with _client(app) as client:
+    async with agent_client(app) as client, human_client(app) as human:
         created = (await client.post(
             "/api/requests?wait_seconds=1",
             json={"sender_id": "claude", "recipient_id": "human", "prompt": "Ok?"},
@@ -126,8 +122,8 @@ async def test_request_survives_wait_timeout_and_can_be_decided_later(setup):
         assert created["status"] == "PENDING"
 
         await asyncio.sleep(0.2)
-        await client.get("/api/requests")  # used to trigger expiration
-        resp = await client.post(
+        await human.get("/api/requests")  # used to trigger expiration
+        resp = await human.post(
             f"/api/requests/{created['id']}/decision", json={"status": "APPROVED"}
         )
         assert resp.status_code == 200
@@ -138,11 +134,11 @@ async def test_request_survives_wait_timeout_and_can_be_decided_later(setup):
 async def test_get_request_long_poll(setup):
     app, db = setup
     req = db.create_request(RequestCreate(sender_id="claude", recipient_id="human", prompt="Ok?"))
-    async with _client(app) as client:
-        poll = asyncio.create_task(client.get(f"/api/requests/{req.id}?wait_seconds=10"))
+    async with agent_client(app) as client, human_client(app) as human:
+        poll = asyncio.create_task(human.get(f"/api/requests/{req.id}?wait_seconds=10"))
         await asyncio.sleep(0.3)
         assert not poll.done()
-        await client.post(f"/api/requests/{req.id}/decision", json={"status": "REJECTED"})
+        await human.post(f"/api/requests/{req.id}/decision", json={"status": "REJECTED"})
         result = await asyncio.wait_for(poll, timeout=2)
         assert result.json()["status"] == "REJECTED"
 
@@ -152,8 +148,8 @@ async def test_get_request_long_poll(setup):
 async def test_decision_rejects_non_human_statuses(setup, bad_status):
     app, db = setup
     req = db.create_request(RequestCreate(sender_id="claude", recipient_id="human", prompt="Ok?"))
-    async with _client(app) as client:
-        resp = await client.post(f"/api/requests/{req.id}/decision", json={"status": bad_status})
+    async with agent_client(app) as client, human_client(app) as human:
+        resp = await human.post(f"/api/requests/{req.id}/decision", json={"status": bad_status})
         assert resp.status_code == 422
     assert db.get_request(req.id).status == RequestStatus.PENDING
 
@@ -167,8 +163,8 @@ async def test_decision_on_expired_request_is_conflict(setup):
     past = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
     with db._get_connection() as conn:
         conn.execute("UPDATE requests SET expires_at = ? WHERE id = ?", (past, req.id))
-    async with _client(app) as client:
-        resp = await client.post(f"/api/requests/{req.id}/decision", json={"status": "APPROVED"})
+    async with agent_client(app) as client, human_client(app) as human:
+        resp = await human.post(f"/api/requests/{req.id}/decision", json={"status": "APPROVED"})
         assert resp.status_code == 409
     assert db.get_request(req.id).status == RequestStatus.EXPIRED
 

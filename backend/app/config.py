@@ -9,7 +9,8 @@ from pydantic import BaseModel, Field
 class AgentSpec(BaseModel):
     name: str = ""
     tmux_session: str
-    token: str = ""
+    # Secret: never serialized (e.g. by GET /api/agents).
+    token: str = Field("", exclude=True)
     allowed_targets: List[str] = Field(default_factory=list)
     default_timeout_seconds: int = 180
 

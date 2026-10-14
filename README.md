@@ -56,12 +56,36 @@ npm run build
 cd ..
 ```
 
-### 3. Avvio di Placet (All-in-One)
+### 3. Variabili d'ambiente
+
+| Variabile | Significato |
+|---|---|
+| `PLACET_ALLOWED_USERS` | Login Tailscale autorizzati alla PWA, separati da virgola (es. `paolo@github`). Se vuota, nessuno può usare la PWA |
+| `PLACET_TOKEN_CLAUDE`, `PLACET_TOKEN_GEMINI`, `PLACET_TOKEN_CODEX` | Token degli agenti, interpolati in `AGENTS.md`. Un agente senza token non può autenticarsi |
+| `PLACET_HOST` / `PLACET_PORT` | Listener TCP per gli agenti (default `127.0.0.1:8000`) |
+| `PLACET_HUMAN_SOCKET` | Socket Unix per la PWA (default `$XDG_RUNTIME_DIR/placet/human.sock`) |
+| `PLACET_CORS_ORIGINS` | Origini ammesse via CORS, solo per un dev server separato (default: nessuna) |
+| `PLACET_DB_PATH`, `PLACET_NTFY_TOPIC` | Percorso del DB SQLite e topic ntfy |
+
+Genera i token con `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+
+### 4. Avvio di Placet (All-in-One)
 ```bash
-# Avvia contemporaneamente il Backend FastAPI (porta 8000) e il Bridge Locale
+# Avvia il Backend (listener agenti + socket PWA) e il Bridge Locale
 .venv/bin/python run_all.py
 ```
-La PWA sarà immediatamente accessibile su `http://localhost:8000` (o sul tuo IP Tailscale).
+
+Il backend ha due ingressi:
+- **Agenti:** `http://127.0.0.1:8000`, autenticati solo con Bearer token. L'identità dell'agente è quella del token.
+- **PWA (tu):** il socket Unix `PLACET_HUMAN_SOCKET`, da esporre sulla tailnet con:
+  ```bash
+  tailscale serve --bg unix:$XDG_RUNTIME_DIR/placet/human.sock
+  ```
+  Tailscale Serve aggiunge l'header `Tailscale-User-Login`, accettato **solo** su questo socket e solo per gli utenti in `PLACET_ALLOWED_USERS`.
+
+La PWA è poi raggiungibile su `https://<nome-macchina>.<tailnet>.ts.net`.
+
+> **Limite noto:** gli agenti girano con il tuo stesso utente Linux, quindi possono comunque raggiungere il socket e il file SQLite. La separazione diventa effettiva eseguendo il backend con un utente dedicato o in un container.
 
 ---
 
@@ -86,12 +110,14 @@ Aggiungi Placet alla configurazione MCP del tuo client (es. `claude_desktop_conf
       "env": {
         "PLACET_BASE_URL": "http://localhost:8000",
         "PLACET_AGENT_ID": "claude",
-        "PLACET_API_TOKEN": "secret-token-claude"
+        "PLACET_API_TOKEN": "<valore di PLACET_TOKEN_CLAUDE>"
       }
     }
   }
 }
 ```
+
+`PLACET_AGENT_ID` è facoltativo: l'identità deriva dal token, e se l'ID è impostato il backend verifica che corrisponda.
 
 ---
 
@@ -107,6 +133,8 @@ Aggiungi Placet alla configurazione MCP del tuo client (es. `claude_desktop_conf
    - Esplora gli agenti attivi, i loro ruoli e le regole di routing.
 5. `placet_check_status(request_id)`
    - Interroga lo stato di una richiesta rimasta in sospeso oltre il timeout.
+
+`timeout_seconds` è solo il tempo di attesa dello strumento (5–600 s). La richiesta resta valida fino alla sua scadenza (`expires_at`, default 24 ore), quindi puoi decidere anche dopo che lo strumento ha restituito `PENDING`.
 
 ---
 

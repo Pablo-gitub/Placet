@@ -11,14 +11,13 @@ class PlacetClient:
         api_token: Optional[str] = None,
     ):
         self.base_url = (base_url or os.environ.get("PLACET_BASE_URL", "http://localhost:8000")).rstrip("/")
-        self.agent_id = agent_id or os.environ.get("PLACET_AGENT_ID", "anonymous")
+        # Identity comes from the token. PLACET_AGENT_ID is optional: when set,
+        # the backend checks it matches the token, catching misconfigured clients.
+        self.agent_id = agent_id or os.environ.get("PLACET_AGENT_ID") or None
         self.api_token = api_token or os.environ.get("PLACET_API_TOKEN", "")
 
     def _headers(self) -> Dict[str, str]:
-        headers = {
-            "Content-Type": "application/json",
-            "X-Placet-Agent": self.agent_id,
-        }
+        headers = {"Content-Type": "application/json"}
         if self.api_token:
             headers["Authorization"] = f"Bearer {self.api_token}"
         return headers
@@ -87,10 +86,9 @@ class PlacetClient:
         status: str = "completed",
     ) -> Dict[str, Any]:
         url = f"{self.base_url}/api/requests/{request_id}/reply"
-        payload = {
-            "responder_id": self.agent_id,
-            "content": response,
-        }
+        payload = {"content": response}
+        if self.agent_id:
+            payload["responder_id"] = self.agent_id
         with httpx.Client(timeout=10.0) as client:
             resp = client.post(url, json=payload, headers=self._headers())
             resp.raise_for_status()

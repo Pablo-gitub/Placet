@@ -4,6 +4,8 @@ import pytest
 from datetime import datetime, timedelta, timezone
 from httpx import AsyncClient, ASGITransport
 
+from tests.helpers import human_client
+
 from backend.app.main import create_app
 from backend.app.database import Database
 from backend.app.config import load_agents_config
@@ -66,13 +68,14 @@ async def test_cannot_decide_twice_or_on_terminal_state(edge_setup):
         assert resp.status_code == 201
         req_id = resp.json()["id"]
 
-        # First decision -> 200 OK
-        dec1 = await client.post(f"/api/requests/{req_id}/decision", json={"status": "APPROVED"})
-        assert dec1.status_code == 200
-        assert dec1.json()["status"] == "APPROVED"
+        async with human_client(app) as human:
+            # First decision -> 200 OK
+            dec1 = await human.post(f"/api/requests/{req_id}/decision", json={"status": "APPROVED"})
+            assert dec1.status_code == 200
+            assert dec1.json()["status"] == "APPROVED"
 
-        # Second decision -> 409 Conflict (cannot decide an already decided request)
-        dec2 = await client.post(f"/api/requests/{req_id}/decision", json={"status": "REJECTED"})
+            # Second decision -> 409 Conflict (cannot decide an already decided request)
+            dec2 = await human.post(f"/api/requests/{req_id}/decision", json={"status": "REJECTED"})
         assert dec2.status_code == 409
         assert "not in PENDING state" in dec2.json()["detail"]
 
@@ -95,7 +98,7 @@ async def test_cannot_reply_to_pending_or_cancelled_request(edge_setup):
         reply_resp = await client.post(f"/api/requests/{req_id}/reply", json={
             "responder_id": "gemini",
             "content": "Premature reply",
-        })
+        }, headers={"Authorization": "Bearer secret-token-gemini"})
         assert reply_resp.status_code == 409
         assert "not in APPROVED or EXECUTING state" in reply_resp.json()["detail"]
 
@@ -113,11 +116,12 @@ async def test_cannot_cancel_non_pending_request(edge_setup):
         }, headers={"Authorization": "Bearer secret-token-claude"})
         req_id = resp.json()["id"]
 
-        # Approve
-        await client.post(f"/api/requests/{req_id}/decision", json={"status": "APPROVED"})
+        async with human_client(app) as human:
+            # Approve
+            await human.post(f"/api/requests/{req_id}/decision", json={"status": "APPROVED"})
 
-        # Try to cancel
-        cancel_resp = await client.delete(f"/api/requests/{req_id}")
+            # Try to cancel
+            cancel_resp = await human.delete(f"/api/requests/{req_id}")
         assert cancel_resp.status_code == 409
 
 

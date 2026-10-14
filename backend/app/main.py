@@ -4,14 +4,22 @@ import contextlib
 import logging
 from pathlib import Path
 from typing import List, Optional, Dict, Set
-from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, status, Request
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, status, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
 
+from backend.app.auth import (
+    Authenticator,
+    Principal,
+    load_allowed_users,
+    require_agent,
+    require_human,
+)
 from backend.app.config import PlacetConfig, load_agents_config
 from backend.app.database import Database
 from backend.app.models import (
@@ -20,7 +28,6 @@ from backend.app.models import (
     RequestModel,
     RequestStatus,
     RequestDecision,
-    ResponseModel,
 )
 from backend.app.notifier import send_ntfy_notification
 
@@ -44,10 +51,15 @@ def is_settled(req: RequestModel) -> bool:
     return req.status in FINAL_STATUSES
 
 
-class ReplyPayload(RequestDecision):
-    responder_id: str
+class ReplyPayload(BaseModel):
     content: str
-    status: RequestStatus = RequestStatus.COMPLETED
+    # Accepted for backward compatibility; the responder is always the
+    # authenticated agent.
+    responder_id: Optional[str] = None
+
+
+def _parse_origins(raw: Optional[str]) -> List[str]:
+    return [o.strip() for o in (raw or "").split(",") if o.strip()]
 
 
 def create_app(
@@ -55,6 +67,8 @@ def create_app(
     config: Optional[PlacetConfig] = None,
     ntfy_topic: Optional[str] = None,
     base_url: str = "http://localhost:8000",
+    allowed_users: Optional[List[str]] = None,
+    cors_origins: Optional[List[str]] = None,
 ) -> FastAPI:
     # Waiters registered by long-polling calls, keyed by request id.
     request_waiters: Dict[int, Set[asyncio.Event]] = {}
@@ -119,14 +133,6 @@ def create_app(
 
     app = FastAPI(title="Placet API", version="1.0.0", lifespan=lifespan)
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
     if db is None:
         db = Database(os.environ.get("PLACET_DB_PATH", "placet.db"))
         db.init_db()
@@ -137,12 +143,47 @@ def create_app(
     if ntfy_topic is None:
         ntfy_topic = os.environ.get("PLACET_NTFY_TOPIC", "")
 
+    if allowed_users is None:
+        allowed_users = load_allowed_users()
+
+    if cors_origins is None:
+        cors_origins = _parse_origins(os.environ.get("PLACET_CORS_ORIGINS"))
+
+    # The PWA is served by the backend itself (same origin): CORS is only
+    # needed for a separate dev server, and only for listed origins.
+    if cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=cors_origins,
+            allow_credentials=False,
+            allow_methods=["GET", "POST", "DELETE"],
+            allow_headers=["Authorization", "Content-Type"],
+        )
+
+    authenticator = Authenticator(config, allowed_users)
+
+    def principal(request: Request) -> Principal:
+        return authenticator.identify(request)
+
+    def get_or_404(request_id: int) -> RequestModel:
+        req = db.get_request(request_id)
+        if not req:
+            raise HTTPException(status_code=404, detail="Request not found")
+        return req
+
+    def require_party(who: Principal, req: RequestModel) -> None:
+        """The human sees everything; an agent only its own requests."""
+        if who.is_human or who.id in (req.sender_id, req.recipient_id):
+            return
+        # 404 rather than 403: do not reveal other agents' requests.
+        raise HTTPException(status_code=404, detail="Request not found")
+
     @app.get("/api/health")
     def health():
         return {"status": "ok", "app": "Placet"}
 
     @app.get("/api/agents")
-    def list_agents():
+    def list_agents(who: Principal = Depends(principal)):
         return {
             "agents": {k: v.model_dump() for k, v in config.agents.items()},
             "rules": {k: v.model_dump() for k, v in config.rules.items()},
@@ -153,29 +194,23 @@ def create_app(
     async def create_request(
         req: RequestCreate,
         background_tasks: BackgroundTasks,
-        http_request: Request,
         wait_seconds: int = Query(0, ge=0, le=600),
+        who: Principal = Depends(principal),
     ):
+        require_agent(who)
+        if req.sender_id is not None and req.sender_id != who.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Token belongs to {who.id}, not to {req.sender_id}.",
+            )
+        req = req.model_copy(update={"sender_id": who.id})
+
         # Validate allowed route
         if not config.is_route_allowed(req.sender_id, req.recipient_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Route from {req.sender_id} to {req.recipient_id} not allowed by AGENTS.md rules.",
             )
-
-        # Validate agent token if configured
-        agent_spec = config.get_agent(req.sender_id)
-        if agent_spec and agent_spec.token:
-            auth_header = http_request.headers.get("Authorization")
-            expected_token = agent_spec.token
-            token_valid = False
-            if auth_header and auth_header.startswith("Bearer "):
-                token_valid = (auth_header[7:].strip() == expected_token)
-            if not token_valid:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail=f"Invalid agent token for {req.sender_id}.",
-                )
 
         # Check if approval required
         needs_approval = config.requires_approval(req.sender_id, req.recipient_id)
@@ -206,7 +241,9 @@ def create_app(
     async def list_requests(
         status: Optional[RequestStatus] = None,
         limit: int = Query(50, ge=1, le=200),
+        who: Principal = Depends(principal),
     ):
+        require_human(who)
         expire_and_notify()
         return db.list_requests(status=status, limit=limit)
 
@@ -214,7 +251,9 @@ def create_app(
     async def get_request(
         request_id: int,
         wait_seconds: int = Query(0, ge=0, le=600),
+        who: Principal = Depends(principal),
     ):
+        require_party(who, get_or_404(request_id))
         if wait_seconds > 0:
             req = await wait_until_settled(request_id, float(wait_seconds))
         else:
@@ -225,11 +264,14 @@ def create_app(
         return req
 
     @app.post("/api/requests/{request_id}/decision", response_model=RequestModel)
-    async def decide_request(request_id: int, decision: RequestDecision):
+    async def decide_request(
+        request_id: int,
+        decision: RequestDecision,
+        who: Principal = Depends(principal),
+    ):
+        require_human(who)
         expire_and_notify()
-        req = db.get_request(request_id)
-        if not req:
-            raise HTTPException(status_code=404, detail="Request not found")
+        req = get_or_404(request_id)
 
         if req.status != RequestStatus.PENDING:
             raise HTTPException(
@@ -255,11 +297,25 @@ def create_app(
         return updated
 
     @app.post("/api/requests/{request_id}/reply", response_model=RequestModel)
-    async def reply_request(request_id: int, payload: Dict[str, str]):
+    async def reply_request(
+        request_id: int,
+        payload: ReplyPayload,
+        who: Principal = Depends(principal),
+    ):
+        require_agent(who)
         expire_and_notify()
-        req = db.get_request(request_id)
-        if not req:
-            raise HTTPException(status_code=404, detail="Request not found")
+        req = get_or_404(request_id)
+        require_party(who, req)
+        if who.id != req.recipient_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Only {req.recipient_id} can reply to request {request_id}.",
+            )
+        if payload.responder_id is not None and payload.responder_id != who.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Token belongs to {who.id}, not to {payload.responder_id}.",
+            )
 
         if req.status not in (RequestStatus.APPROVED, RequestStatus.EXECUTING):
             raise HTTPException(
@@ -267,13 +323,10 @@ def create_app(
                 detail=f"Request {request_id} is in {req.status.value} state, not in APPROVED or EXECUTING state.",
             )
 
-        responder_id = payload.get("responder_id", req.recipient_id)
-        content = payload.get("content", "")
-
         completed = db.record_reply(
             request_id=request_id,
-            responder_id=responder_id,
-            content=content,
+            responder_id=who.id,
+            content=payload.content,
         )
         if completed is None:
             current = db.get_request(request_id)
@@ -285,11 +338,15 @@ def create_app(
         return completed
 
     @app.delete("/api/requests/{request_id}")
-    async def cancel_request(request_id: int):
+    async def cancel_request(request_id: int, who: Principal = Depends(principal)):
         expire_and_notify()
-        req = db.get_request(request_id)
-        if not req:
-            raise HTTPException(status_code=404, detail="Request not found")
+        req = get_or_404(request_id)
+        require_party(who, req)
+        if not who.is_human and who.id != req.sender_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Only {req.sender_id} or the human can cancel request {request_id}.",
+            )
 
         if req.status != RequestStatus.PENDING:
             raise HTTPException(
@@ -307,7 +364,8 @@ def create_app(
 
 
     @app.get("/api/events")
-    async def sse_events():
+    async def sse_events(who: Principal = Depends(principal)):
+        require_human(who)
         queue: asyncio.Queue = asyncio.Queue()
         sse_subscribers.append(queue)
 
