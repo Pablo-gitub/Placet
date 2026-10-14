@@ -35,7 +35,9 @@ class BridgeDaemon:
         Throttles injections so at most ONE request is injected into the same tmux session
         per loop iteration.
         """
-        approved_requests = self.db.list_requests(status=RequestStatus.APPROVED)
+        approved_requests = self.db.list_requests(
+            status=RequestStatus.APPROVED, oldest_first=True
+        )
         processed = 0
         injected_sessions_this_tick = set()
 

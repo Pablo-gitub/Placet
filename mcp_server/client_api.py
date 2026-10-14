@@ -40,7 +40,6 @@ class PlacetClient:
             "prompt": question,
             "context": context,
             "options": options or [],
-            "timeout_seconds": timeout,
         }
         with httpx.Client(timeout=float(timeout + 5)) as client:
             resp = client.post(
@@ -69,7 +68,6 @@ class PlacetClient:
             "prompt": prompt,
             "context": context,
             "options": [],
-            "timeout_seconds": timeout,
         }
         with httpx.Client(timeout=float(timeout + 5)) as client:
             resp = client.post(

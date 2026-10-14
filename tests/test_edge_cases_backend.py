@@ -186,28 +186,25 @@ async def test_complex_and_multiline_payloads(edge_setup):
 # Test 6: Stale request expiration mechanism
 def test_database_expire_stale_requests(edge_setup):
     app, db, config = edge_setup
-    # Create a request with 10s timeout
     req = db.create_request(RequestCreate(
         sender_id="claude",
         recipient_id="human",
         prompt="Expiring request",
-        timeout_seconds=10,
+        expires_in_seconds=10,
     ))
     assert req.status == RequestStatus.PENDING
+    assert req.expires_at is not None
 
     # Not expired yet
-    expired_count = db.expire_stale_requests()
-    assert expired_count == 0
+    assert db.expire_stale_requests() == []
 
-    # Backdate created_at in the database by 30 seconds
-    past_time = (datetime.now(timezone.utc) - timedelta(seconds=35)).isoformat()
+    # Move expires_at into the past
+    past_time = (datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat()
     with db._get_connection() as conn:
-        conn.execute("UPDATE requests SET created_at = ? WHERE id = ?", (past_time, req.id))
-        conn.commit()
+        conn.execute("UPDATE requests SET expires_at = ? WHERE id = ?", (past_time, req.id))
 
     # Now expire_stale_requests should mark it as EXPIRED
-    expired_count = db.expire_stale_requests()
-    assert expired_count == 1
+    assert db.expire_stale_requests() == [req.id]
 
     updated = db.get_request(req.id)
     assert updated.status == RequestStatus.EXPIRED

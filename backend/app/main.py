@@ -1,7 +1,9 @@
 import os
 import asyncio
+import contextlib
+import logging
 from pathlib import Path
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Set
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -13,6 +15,7 @@ from sse_starlette.sse import EventSourceResponse
 from backend.app.config import PlacetConfig, load_agents_config
 from backend.app.database import Database
 from backend.app.models import (
+    FINAL_STATUSES,
     RequestCreate,
     RequestModel,
     RequestStatus,
@@ -20,6 +23,25 @@ from backend.app.models import (
     ResponseModel,
 )
 from backend.app.notifier import send_ntfy_notification
+
+logger = logging.getLogger(__name__)
+
+# Upper bound for a single sleep while long-polling: changes made by other
+# processes (the bridge writes to SQLite directly) are not signalled, so the
+# waiter re-reads the database at least this often.
+LONG_POLL_RECHECK_SECONDS = 5.0
+EXPIRY_SWEEP_SECONDS = 30.0
+
+
+def is_settled(req: RequestModel) -> bool:
+    """
+    True when a long-polling caller has its answer: a human question is settled
+    once decided; an agent-to-agent request only once it reaches a final state
+    (the reply arrived, or it was rejected/cancelled/expired).
+    """
+    if req.recipient_id == "human":
+        return req.status != RequestStatus.PENDING
+    return req.status in FINAL_STATUSES
 
 
 class ReplyPayload(RequestDecision):
@@ -34,7 +56,68 @@ def create_app(
     ntfy_topic: Optional[str] = None,
     base_url: str = "http://localhost:8000",
 ) -> FastAPI:
-    app = FastAPI(title="Placet API", version="1.0.0")
+    # Waiters registered by long-polling calls, keyed by request id.
+    request_waiters: Dict[int, Set[asyncio.Event]] = {}
+    sse_subscribers: List[asyncio.Queue] = []
+
+    def notify_change(req_id: int):
+        # Must run on the event loop thread: all endpoints touching it are async.
+        for ev in request_waiters.get(req_id, ()):
+            ev.set()
+        for q in list(sse_subscribers):
+            try:
+                q.put_nowait(req_id)
+            except Exception:
+                pass
+
+    def expire_and_notify():
+        for req_id in db.expire_stale_requests():
+            notify_change(req_id)
+
+    async def expiry_sweeper():
+        while True:
+            await asyncio.sleep(EXPIRY_SWEEP_SECONDS)
+            try:
+                expire_and_notify()
+            except Exception as e:
+                logger.error(f"Expiry sweep failed: {e}")
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        task = asyncio.create_task(expiry_sweeper())
+        try:
+            yield
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+    async def wait_until_settled(request_id: int, wait_seconds: float) -> Optional[RequestModel]:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + wait_seconds
+        while True:
+            ev = asyncio.Event()
+            # Register before reading, so a change between the read and the
+            # wait is not lost.
+            request_waiters.setdefault(request_id, set()).add(ev)
+            try:
+                expire_and_notify()
+                current = db.get_request(request_id)
+                remaining = deadline - loop.time()
+                if current is None or is_settled(current) or remaining <= 0:
+                    return current
+                with contextlib.suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(
+                        ev.wait(), timeout=min(remaining, LONG_POLL_RECHECK_SECONDS)
+                    )
+            finally:
+                waiters = request_waiters.get(request_id)
+                if waiters is not None:
+                    waiters.discard(ev)
+                    if not waiters:
+                        request_waiters.pop(request_id, None)
+
+    app = FastAPI(title="Placet API", version="1.0.0", lifespan=lifespan)
 
     app.add_middleware(
         CORSMiddleware,
@@ -53,20 +136,6 @@ def create_app(
 
     if ntfy_topic is None:
         ntfy_topic = os.environ.get("PLACET_NTFY_TOPIC", "")
-
-    # Event trackers for long-polling requests
-    request_events: Dict[int, asyncio.Event] = {}
-    sse_subscribers: List[asyncio.Queue] = []
-
-    def notify_change(req_id: int):
-        if req_id in request_events:
-            request_events[req_id].set()
-        # Broadcast to SSE queues
-        for q in list(sse_subscribers):
-            try:
-                q.put_nowait(req_id)
-            except Exception:
-                pass
 
     @app.get("/api/health")
     def health():
@@ -112,7 +181,6 @@ def create_app(
         needs_approval = config.requires_approval(req.sender_id, req.recipient_id)
 
         created = db.create_request(req)
-        request_events[created.id] = asyncio.Event()
 
         if not needs_approval:
             # Auto-approval
@@ -120,7 +188,6 @@ def create_app(
                 request_id=created.id,
                 status=RequestStatus.APPROVED,
             )
-            notify_change(created.id)
         else:
             # Send mobile notification
             background_tasks.add_task(
@@ -129,42 +196,37 @@ def create_app(
                 ntfy_topic=ntfy_topic,
                 base_url=base_url,
             )
-            notify_change(created.id)
+        notify_change(created.id)
 
-        # Handle long-polling if requested
         if wait_seconds > 0:
-            try:
-                # Wait until decided or completed, or timeout
-                await asyncio.wait_for(
-                    request_events[created.id].wait(), timeout=float(wait_seconds)
-                )
-            except asyncio.TimeoutError:
-                pass
-            finally:
-                request_events.pop(created.id, None)
-            # Return latest state
-            return db.get_request(created.id)
-
+            return await wait_until_settled(created.id, float(wait_seconds))
         return created
 
     @app.get("/api/requests", response_model=List[RequestModel])
-    def list_requests(
+    async def list_requests(
         status: Optional[RequestStatus] = None,
         limit: int = Query(50, ge=1, le=200),
     ):
-        # Periodically expire stale pending requests
-        db.expire_stale_requests()
+        expire_and_notify()
         return db.list_requests(status=status, limit=limit)
 
     @app.get("/api/requests/{request_id}", response_model=RequestModel)
-    def get_request(request_id: int):
-        req = db.get_request(request_id)
+    async def get_request(
+        request_id: int,
+        wait_seconds: int = Query(0, ge=0, le=600),
+    ):
+        if wait_seconds > 0:
+            req = await wait_until_settled(request_id, float(wait_seconds))
+        else:
+            expire_and_notify()
+            req = db.get_request(request_id)
         if not req:
             raise HTTPException(status_code=404, detail="Request not found")
         return req
 
     @app.post("/api/requests/{request_id}/decision", response_model=RequestModel)
-    def decide_request(request_id: int, decision: RequestDecision):
+    async def decide_request(request_id: int, decision: RequestDecision):
+        expire_and_notify()
         req = db.get_request(request_id)
         if not req:
             raise HTTPException(status_code=404, detail="Request not found")
@@ -182,11 +244,19 @@ def create_app(
             selected_options=decision.selected_options,
             custom_text=decision.custom_text,
         )
+        if updated is None:
+            # State changed between the check and the update (e.g. expired or cancelled).
+            current = db.get_request(request_id)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Request {request_id} is in {current.status.value} state, not in PENDING state.",
+            )
         notify_change(request_id)
         return updated
 
     @app.post("/api/requests/{request_id}/reply", response_model=RequestModel)
-    def reply_request(request_id: int, payload: Dict[str, str]):
+    async def reply_request(request_id: int, payload: Dict[str, str]):
+        expire_and_notify()
         req = db.get_request(request_id)
         if not req:
             raise HTTPException(status_code=404, detail="Request not found")
@@ -205,11 +275,18 @@ def create_app(
             responder_id=responder_id,
             content=content,
         )
+        if completed is None:
+            current = db.get_request(request_id)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Request {request_id} is in {current.status.value} state, not in APPROVED or EXECUTING state.",
+            )
         notify_change(request_id)
         return completed
 
     @app.delete("/api/requests/{request_id}")
-    def cancel_request(request_id: int):
+    async def cancel_request(request_id: int):
+        expire_and_notify()
         req = db.get_request(request_id)
         if not req:
             raise HTTPException(status_code=404, detail="Request not found")
@@ -220,10 +297,10 @@ def create_app(
                 detail=f"Cannot cancel request in {req.status.value} state (must be PENDING).",
             )
 
-        cancelled = db.cancel_request(request_id)
-        if not cancelled:
+        if not db.cancel_request(request_id):
             raise HTTPException(
-                status_code=400, detail="Cannot cancel request"
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Cannot cancel request {request_id}: its state changed concurrently.",
             )
         notify_change(request_id)
         return {"status": "CANCELLED", "id": request_id}
