@@ -10,6 +10,8 @@ import {
   ArrowRight,
   ShieldCheck,
   RefreshCw,
+  AlertCircle,
+  Loader2,
 } from "lucide-react";
 
 export default function App() {
@@ -19,6 +21,8 @@ export default function App() {
   const [editedPrompts, setEditedPrompts] = useState({});
   const [selectedOpts, setSelectedOpts] = useState({});
   const [connected, setConnected] = useState(false);
+  const [submittingId, setSubmittingId] = useState(null);
+  const [feedback, setFeedback] = useState(null);
 
   const fetchRequests = async () => {
     try {
@@ -49,36 +53,59 @@ export default function App() {
     fetchAgents();
 
     // Setup Server-Sent Events (SSE)
-    const evtSource = new EventSource("/api/events");
-    evtSource.onopen = () => setConnected(true);
-    evtSource.onerror = () => setConnected(false);
+    let evtSource = null;
+    try {
+      evtSource = new EventSource("/api/events");
+      evtSource.onopen = () => {
+        setConnected(true);
+        // Automatically resynchronize state on reconnection
+        fetchRequests();
+        fetchAgents();
+      };
+      evtSource.onerror = () => setConnected(false);
 
-    evtSource.addEventListener("request_update", (event) => {
-      try {
-        const updated = JSON.parse(event.data);
-        setRequests((prev) => {
-          const index = prev.findIndex((r) => r.id === updated.id);
-          if (index >= 0) {
-            const next = [...prev];
-            next[index] = updated;
-            return next;
-          } else {
-            return [updated, ...prev];
-          }
-        });
-      } catch (err) {
-        console.error("Error parsing SSE event:", err);
-      }
-    });
+      evtSource.addEventListener("request_update", (event) => {
+        try {
+          const updated = JSON.parse(event.data);
+          setRequests((prev) => {
+            const index = prev.findIndex((r) => r.id === updated.id);
+            if (index >= 0) {
+              const next = [...prev];
+              next[index] = updated;
+              return next;
+            } else {
+              return [updated, ...prev];
+            }
+          });
+        } catch (err) {
+          console.error("Error parsing SSE event:", err);
+        }
+      });
+    } catch (e) {
+      console.error("SSE initialization error:", e);
+    }
 
     return () => {
-      evtSource.close();
+      if (evtSource) {
+        evtSource.close();
+      }
     };
   }, []);
 
+  const showFeedback = (text, isError = false) => {
+    setFeedback({ text, isError });
+    setTimeout(() => setFeedback(null), 4000);
+  };
+
   const handleDecision = async (requestId, status) => {
-    const editedPrompt = editedPrompts[requestId];
+    const targetReq = requests.find((r) => r.id === requestId);
+    let promptVal = editedPrompts[requestId];
+    if (promptVal !== undefined && promptVal.trim() === "" && targetReq) {
+      promptVal = targetReq.prompt;
+    }
+
     const opts = selectedOpts[requestId] ? [selectedOpts[requestId]] : [];
+    setSubmittingId(requestId);
 
     try {
       const res = await fetch(`/api/requests/${requestId}/decision`, {
@@ -86,15 +113,30 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           status,
-          edited_prompt: editedPrompt,
+          edited_prompt: promptVal,
           selected_options: opts,
         }),
       });
+
       if (res.ok) {
-        fetchRequests();
+        showFeedback(
+          status === "APPROVED"
+            ? `Richiesta #${requestId} approvata ed inviata!`
+            : `Richiesta #${requestId} rifiutata.`
+        );
+        await fetchRequests();
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        showFeedback(
+          errData.detail || `Errore durante l'operazione (${res.status})`,
+          true
+        );
       }
     } catch (err) {
       console.error("Error deciding request:", err);
+      showFeedback("Errore di connessione durante l'invio della decisione.", true);
+    } finally {
+      setSubmittingId(null);
     }
   };
 
@@ -113,24 +155,56 @@ export default function App() {
             </p>
           </div>
         </div>
-        <div className="live-indicator">
+        <div className="live-indicator" data-testid="live-indicator">
           <Radio size={12} className={connected ? "text-emerald-400 animate-pulse" : "text-amber-400"} />
           {connected ? "LIVE TAILSCALE" : "CONNECTING..."}
         </div>
       </header>
 
+      {feedback && (
+        <div
+          data-testid="feedback-banner"
+          style={{
+            padding: "0.75rem 1rem",
+            borderRadius: "10px",
+            marginBottom: "1rem",
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            fontSize: "0.85rem",
+            fontWeight: 600,
+            background: feedback.isError
+              ? "rgba(239, 68, 68, 0.2)"
+              : "rgba(16, 185, 129, 0.2)",
+            color: feedback.isError ? "#f87171" : "#34d399",
+            border: `1px solid ${
+              feedback.isError
+                ? "rgba(239, 68, 68, 0.4)"
+                : "rgba(16, 185, 129, 0.4)"
+            }`,
+          }}
+        >
+          {feedback.isError ? <AlertCircle size={16} /> : <CheckCircle size={16} />}
+          <span>{feedback.text}</span>
+        </div>
+      )}
+
       <nav className="nav-tabs">
         <button
+          data-testid="tab-inbox"
           className={`nav-tab ${activeTab === "inbox" ? "active" : ""}`}
           onClick={() => setActiveTab("inbox")}
         >
           <Clock size={16} />
           Inbox
           {pendingRequests.length > 0 && (
-            <span className="badge-count">{pendingRequests.length}</span>
+            <span className="badge-count" data-testid="pending-badge">
+              {pendingRequests.length}
+            </span>
           )}
         </button>
         <button
+          data-testid="tab-agents"
           className={`nav-tab ${activeTab === "agents" ? "active" : ""}`}
           onClick={() => setActiveTab("agents")}
         >
@@ -138,6 +212,7 @@ export default function App() {
           Agenti
         </button>
         <button
+          data-testid="tab-history"
           className={`nav-tab ${activeTab === "history" ? "active" : ""}`}
           onClick={() => setActiveTab("history")}
         >
@@ -148,16 +223,16 @@ export default function App() {
 
       <main>
         {activeTab === "inbox" && (
-          <div>
+          <div data-testid="inbox-section">
             {pendingRequests.length === 0 ? (
-              <div className="empty-state">
+              <div className="empty-state" data-testid="empty-inbox">
                 <CheckCircle size={40} style={{ margin: "0 auto 0.75rem", color: "var(--success)" }} />
                 <h3>Nessuna richiesta in attesa</h3>
                 <p>Tutti gli agenti sono allineati o in attesa di nuovi compiti.</p>
               </div>
             ) : (
               pendingRequests.map((req) => (
-                <div key={req.id} className="card">
+                <div key={req.id} className="card" data-testid={`request-card-${req.id}`}>
                   <div className="card-header">
                     <div className="agent-route">
                       <span className="agent-badge">{req.sender_id}</span>
@@ -179,6 +254,7 @@ export default function App() {
                       : "Prompt proposto per l'agente (modificabile prima dell'invio):"}
                   </label>
                   <textarea
+                    data-testid={`prompt-textarea-${req.id}`}
                     className="prompt-textarea"
                     value={
                       editedPrompts[req.id] !== undefined
@@ -215,14 +291,18 @@ export default function App() {
 
                   <div className="actions-row">
                     <button
+                      data-testid={`btn-approve-${req.id}`}
                       className="btn btn-primary"
+                      disabled={submittingId === req.id}
                       onClick={() => handleDecision(req.id, "APPROVED")}
                     >
                       <CheckCircle size={16} />
-                      Approva ed Invia
+                      {submittingId === req.id ? "Invio in corso..." : "Approva ed Invia"}
                     </button>
                     <button
+                      data-testid={`btn-reject-${req.id}`}
                       className="btn btn-danger"
+                      disabled={submittingId === req.id}
                       onClick={() => handleDecision(req.id, "REJECTED")}
                     >
                       <XCircle size={16} />
@@ -236,12 +316,12 @@ export default function App() {
         )}
 
         {activeTab === "agents" && (
-          <div>
+          <div data-testid="agents-section">
             <h2 style={{ fontSize: "1rem", marginBottom: "1rem", fontWeight: 700 }}>
               Sessioni e Agenti Registrati
             </h2>
             {Object.entries(agentsData.agents || {}).map(([id, ag]) => (
-              <div key={id} className="card">
+              <div key={id} className="card" data-testid={`agent-card-${id}`}>
                 <div className="card-header">
                   <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                     <Bot size={20} style={{ color: "var(--accent)" }} />
@@ -293,17 +373,17 @@ export default function App() {
         )}
 
         {activeTab === "history" && (
-          <div>
+          <div data-testid="history-section">
             <h2 style={{ fontSize: "1rem", marginBottom: "1rem", fontWeight: 700 }}>
               Storico Decisioni & Log
             </h2>
             {historyRequests.length === 0 ? (
-              <div className="empty-state">
+              <div className="empty-state" data-testid="empty-history">
                 <p>Nessuna richiesta completata nello storico.</p>
               </div>
             ) : (
               historyRequests.map((req) => (
-                <div key={req.id} className="card">
+                <div key={req.id} className="card" data-testid={`history-card-${req.id}`}>
                   <div className="card-header">
                     <div className="agent-route">
                       <span className="agent-badge">{req.sender_id}</span>
