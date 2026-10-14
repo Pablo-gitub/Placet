@@ -32,9 +32,12 @@ class BridgeDaemon:
         """
         Scans for APPROVED requests directed at agents, verifies terminal idle status,
         and injects the prompt envelope.
+        Throttles injections so at most ONE request is injected into the same tmux session
+        per loop iteration.
         """
         approved_requests = self.db.list_requests(status=RequestStatus.APPROVED)
         processed = 0
+        injected_sessions_this_tick = set()
 
         for req in approved_requests:
             if req.recipient_id == "human":
@@ -46,6 +49,10 @@ class BridgeDaemon:
                 continue
 
             session_name = target_agent.tmux_session
+            if session_name in injected_sessions_this_tick:
+                # Already injected a task into this session in the current pass; wait for next tick
+                continue
+
             if not self.tmux.session_exists(session_name):
                 logger.warning(
                     f"Tmux session {session_name} for agent {req.recipient_id} is not running."
@@ -63,6 +70,7 @@ class BridgeDaemon:
             sent = self.tmux.send_keys(session_name, envelope, enter=True)
 
             if sent:
+                injected_sessions_this_tick.add(session_name)
                 # Mark as EXECUTING so it's not reinjected
                 self.db.update_request_decision(
                     request_id=req.id,
@@ -72,6 +80,7 @@ class BridgeDaemon:
                     custom_text=req.custom_text,
                 )
                 processed += 1
+
 
         return processed
 

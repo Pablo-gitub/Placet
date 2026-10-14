@@ -60,9 +60,12 @@ class TmuxController:
         Captures the visible output of the pane and determines if the session
         is waiting at an interactive prompt (idle) rather than processing.
         """
-        output = self.capture_pane(session_name)
-        if not output:
+        raw_output = self.capture_pane(session_name)
+        if not raw_output:
             return False
+
+        # Strip ANSI escape codes
+        output = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", raw_output)
 
         lower_output = output.lower()
         for busy in self.BUSY_PATTERNS:
@@ -86,17 +89,29 @@ class TmuxController:
 
     def send_keys(self, session_name: str, text: str, enter: bool = True) -> bool:
         """
-        Injects text into tmux session using literal flag (-l) to avoid escaping issues,
-        then optionally sends Enter.
+        Injects text into tmux session.
+        For multiline text, uses tmux load-buffer + paste-buffer to avoid line truncation
+        or bracketed paste issues. For single-line text, uses send-keys -l (literal).
         """
         try:
-            # Send literal string
-            res1 = subprocess.run(
-                ["tmux", "send-keys", "-t", session_name, "-l", text],
-                check=True,
-            )
+            if "\n" in text:
+                subprocess.run(
+                    ["tmux", "load-buffer", "-"],
+                    input=text.encode("utf-8") if isinstance(text, str) else text,
+                    check=True,
+                )
+                subprocess.run(
+                    ["tmux", "paste-buffer", "-p", "-t", session_name],
+                    check=True,
+                )
+            else:
+                subprocess.run(
+                    ["tmux", "send-keys", "-t", session_name, "-l", text],
+                    check=True,
+                )
+
             if enter:
-                res2 = subprocess.run(
+                subprocess.run(
                     ["tmux", "send-keys", "-t", session_name, "Enter"],
                     check=True,
                 )
@@ -104,3 +119,4 @@ class TmuxController:
         except Exception as e:
             logger.error(f"Failed to send keys to tmux session {session_name}: {e}")
             return False
+

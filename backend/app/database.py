@@ -136,13 +136,14 @@ class Database:
             cursor = conn.cursor()
             if status:
                 cursor.execute(
-                    "SELECT id FROM requests WHERE status = ? ORDER BY id DESC LIMIT ?",
+                    "SELECT id FROM requests WHERE status = ? ORDER BY id ASC LIMIT ?",
                     (status.value, limit),
                 )
             else:
                 cursor.execute(
-                    "SELECT id FROM requests ORDER BY id DESC LIMIT ?", (limit,)
+                    "SELECT id FROM requests ORDER BY id ASC LIMIT ?", (limit,)
                 )
+
             rows = cursor.fetchall()
             return [self.get_request(r["id"]) for r in rows if r["id"]]
 
