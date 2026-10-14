@@ -12,6 +12,7 @@ from backend.app.models import (
     RequestStatus,
     QuestionType,
     ResponseModel,
+    is_settled,
 )
 
 # Allowed state transitions for update_request_decision (source -> targets).
@@ -59,7 +60,9 @@ class Database:
                 created_at TEXT NOT NULL,
                 expires_at TEXT,
                 decided_at TEXT,
-                completed_at TEXT
+                completed_at TEXT,
+                updated_at TEXT,
+                delivered_at TEXT
             );
             """)
             cursor.execute("""
@@ -74,8 +77,9 @@ class Database:
             """)
             cursor.execute("PRAGMA table_info(requests);")
             cols = [r["name"] for r in cursor.fetchall()]
-            if "expires_at" not in cols:
-                cursor.execute("ALTER TABLE requests ADD COLUMN expires_at TEXT;")
+            for col in ("expires_at", "updated_at", "delivered_at"):
+                if col not in cols:
+                    cursor.execute(f"ALTER TABLE requests ADD COLUMN {col} TEXT;")
 
     def create_request(self, req: RequestCreate) -> RequestModel:
         now = datetime.now(timezone.utc)
@@ -86,8 +90,8 @@ class Database:
                 """
                 INSERT INTO requests (
                     sender_id, recipient_id, question_type, prompt, context,
-                    options, status, created_at, expires_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    options, status, created_at, expires_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     req.sender_id,
@@ -99,6 +103,7 @@ class Database:
                     RequestStatus.PENDING.value,
                     now.isoformat(),
                     expires_at.isoformat(),
+                    now.isoformat(),
                 ),
             )
             req_id = cursor.lastrowid
@@ -143,6 +148,8 @@ class Database:
             expires_at=datetime.fromisoformat(row["expires_at"]) if row["expires_at"] else None,
             decided_at=datetime.fromisoformat(row["decided_at"]) if row["decided_at"] else None,
             completed_at=datetime.fromisoformat(row["completed_at"]) if row["completed_at"] else None,
+            updated_at=datetime.fromisoformat(row["updated_at"]) if row["updated_at"] else None,
+            delivered_at=datetime.fromisoformat(row["delivered_at"]) if row["delivered_at"] else None,
             response=resp_model,
         )
 
@@ -215,14 +222,15 @@ class Database:
             if status == RequestStatus.EXECUTING:
                 # Hand-off keeps the human decision fields untouched.
                 cursor.execute(
-                    f"UPDATE requests SET status = ? WHERE id = ? AND status IN ({placeholders})",
-                    [status.value, request_id, *allowed_sources],
+                    f"UPDATE requests SET status = ?, updated_at = ? WHERE id = ? AND status IN ({placeholders})",
+                    [status.value, now, request_id, *allowed_sources],
                 )
             else:
                 cursor.execute(
                     f"""
                     UPDATE requests
-                    SET status = ?, edited_prompt = ?, selected_options = ?, custom_text = ?, decided_at = ?
+                    SET status = ?, edited_prompt = ?, selected_options = ?, custom_text = ?,
+                        decided_at = ?, updated_at = ?
                     WHERE id = ? AND status IN ({placeholders})
                     """,
                     [
@@ -230,6 +238,7 @@ class Database:
                         edited_prompt,
                         json.dumps(selected_options) if selected_options is not None else None,
                         custom_text,
+                        now,
                         now,
                         request_id,
                         *allowed_sources,
@@ -247,9 +256,10 @@ class Database:
             cursor = conn.cursor()
             # Guard: only allow reply if request is APPROVED or EXECUTING
             cursor.execute(
-                "UPDATE requests SET status = ?, completed_at = ? WHERE id = ? AND status IN (?, ?)",
+                "UPDATE requests SET status = ?, completed_at = ?, updated_at = ? WHERE id = ? AND status IN (?, ?)",
                 (
                     RequestStatus.COMPLETED.value,
+                    now,
                     now,
                     request_id,
                     RequestStatus.APPROVED.value,
@@ -267,12 +277,26 @@ class Database:
             )
         return self.get_request(request_id)
 
-    def cancel_request(self, request_id: int) -> bool:
+    def cancel_request(self, request_id: int, by_sender: bool = False) -> bool:
+        """
+        Cancels a PENDING request. When the sender itself cancels, it already
+        knows the outcome, so the result is marked as delivered.
+        """
+        now = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "UPDATE requests SET status = ? WHERE id = ? AND status = ?",
-                (RequestStatus.CANCELLED.value, request_id, RequestStatus.PENDING.value),
+                """
+                UPDATE requests SET status = ?, updated_at = ?, delivered_at = ?
+                WHERE id = ? AND status = ?
+                """,
+                (
+                    RequestStatus.CANCELLED.value,
+                    now,
+                    now if by_sender else None,
+                    request_id,
+                    RequestStatus.PENDING.value,
+                ),
             )
             return cursor.rowcount > 0
 
@@ -289,10 +313,54 @@ class Database:
             # ISO-8601 UTC timestamps with the same offset compare correctly as text.
             cursor.execute(
                 f"""
-                UPDATE requests SET status = ?
+                UPDATE requests SET status = ?, updated_at = ?
                 WHERE status IN ({placeholders}) AND expires_at IS NOT NULL AND expires_at <= ?
                 RETURNING id
                 """,
-                [RequestStatus.EXPIRED.value, *open_values, now],
+                [RequestStatus.EXPIRED.value, now, *open_values, now],
             )
             return sorted(r["id"] for r in cursor.fetchall())
+
+    def mark_delivered(self, request_id: int) -> bool:
+        """Records that the outcome reached the sender; True only the first time."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE requests SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL",
+                (now, request_id),
+            )
+            return cursor.rowcount > 0
+
+    def clear_delivered(self, request_id: int) -> None:
+        """Undoes mark_delivered after a failed delivery, so it is retried."""
+        with self._get_connection() as conn:
+            conn.execute("UPDATE requests SET delivered_at = NULL WHERE id = ?", (request_id,))
+
+    def list_undelivered_results(
+        self, settled_before: datetime, settled_after: datetime, limit: int = 50
+    ) -> List[RequestModel]:
+        """
+        Settled requests whose outcome has not reached the sender yet, oldest
+        first, whose last change falls in (settled_after, settled_before].
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id FROM requests
+                WHERE delivered_at IS NULL AND status != ?
+                  AND updated_at IS NOT NULL AND updated_at <= ? AND updated_at > ?
+                ORDER BY updated_at ASC
+                LIMIT ?
+                """,
+                (
+                    RequestStatus.PENDING.value,
+                    settled_before.isoformat(),
+                    settled_after.isoformat(),
+                    limit,
+                ),
+            )
+            ids = [r["id"] for r in cursor.fetchall()]
+        requests = (self.get_request(i) for i in ids)
+        return [r for r in requests if r is not None and is_settled(r)]

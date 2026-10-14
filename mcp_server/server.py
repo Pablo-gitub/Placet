@@ -49,7 +49,9 @@ def placet_ask_human(
     Richiede una decisione, un'approvazione o una scelta all'utente umano (Paolo su iPhone).
     La richiesta viene notificata istantaneamente su iPhone. Se l'utente risponde entro il timeout,
     lo strumento restituisce la decisione, le opzioni scelte o il testo inserito/modificato.
-    Se scade il timeout, restituisce lo stato PENDING con request_id per il risveglio successivo.
+    Se scade il timeout, restituisce lo stato PENDING con request_id: in quel caso termina il turno
+    senza ripetere la domanda. Quando l'utente decide, Placet scrive l'esito in questa sessione
+    (messaggio che inizia con "[Placet]") e potrai riprendere il lavoro.
     """
     try:
         res = client.ask_human(
@@ -76,6 +78,9 @@ def placet_send_to_agent(
     (es. 'claude', 'gemini', 'codex').
     Se richiesto dalle policy o dalle regole in AGENTS.md, la richiesta viene prima mostrata all'utente
     su iPhone per revisione/approvazione del prompt prima di essere iniettata nel terminale target.
+    Lo strumento attende la risposta dell'altro agente fino al timeout. Se restituisce uno stato
+    non finale (PENDING, APPROVED, EXECUTING), termina il turno: Placet scriverà l'esito in questa
+    sessione (messaggio che inizia con "[Placet]") quando sarà disponibile.
     """
     try:
         res = client.send_to_agent(

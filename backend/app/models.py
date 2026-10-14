@@ -95,4 +95,19 @@ class RequestModel(BaseModel):
     decided_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     response: Optional[ResponseModel] = None
+    # Last status change, and when the outcome reached the sender (through
+    # long-polling or a bridge injection into its session).
+    updated_at: Optional[datetime] = None
+    delivered_at: Optional[datetime] = None
+
+
+def is_settled(req: RequestModel) -> bool:
+    """
+    True when the sender has its answer: a human question is settled once
+    decided; an agent-to-agent request only once it reaches a final state
+    (the reply arrived, or it was rejected/cancelled/expired).
+    """
+    if req.recipient_id == "human":
+        return req.status != RequestStatus.PENDING
+    return req.status in FINAL_STATUSES
 

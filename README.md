@@ -164,6 +164,8 @@ Aggiungi Placet alla configurazione MCP del tuo client (es. `claude_desktop_conf
 
 `timeout_seconds` è solo il tempo di attesa dello strumento (5–600 s). La richiesta resta valida fino alla sua scadenza (`expires_at`, default 24 ore), quindi puoi decidere anche dopo che lo strumento ha restituito `PENDING`.
 
+Se l'attesa dello strumento finisce prima dell'esito, l'agente termina il turno. Quando l'esito arriva (tua decisione, risposta di un altro agente, rifiuto o scadenza), il bridge lo scrive nella sessione tmux dell'agente mittente con un messaggio che inizia con `[Placet]`. Il bridge aspetta 10 secondi, per lasciare il tempo a un'attesa ancora in corso di riceverlo direttamente, e lo fa solo quando il terminale è libero. Ogni esito viene consegnato una volta sola, e quelli più vecchi di 6 ore vengono ignorati.
+
 ---
 
 ## 🧪 Esecuzione dei Test (TDD)

@@ -23,11 +23,11 @@ from backend.app.auth import (
 from backend.app.config import PlacetConfig, load_agents_config
 from backend.app.database import Database
 from backend.app.models import (
-    FINAL_STATUSES,
     RequestCreate,
     RequestModel,
     RequestStatus,
     RequestDecision,
+    is_settled,
 )
 from backend.app.notifier import NtfyConfig, send_ntfy_notification
 
@@ -38,17 +38,6 @@ logger = logging.getLogger(__name__)
 # waiter re-reads the database at least this often.
 LONG_POLL_RECHECK_SECONDS = 5.0
 EXPIRY_SWEEP_SECONDS = 30.0
-
-
-def is_settled(req: RequestModel) -> bool:
-    """
-    True when a long-polling caller has its answer: a human question is settled
-    once decided; an agent-to-agent request only once it reaches a final state
-    (the reply arrived, or it was rejected/cancelled/expired).
-    """
-    if req.recipient_id == "human":
-        return req.status != RequestStatus.PENDING
-    return req.status in FINAL_STATUSES
 
 
 class ReplyPayload(BaseModel):
@@ -129,6 +118,16 @@ def create_app(
                     waiters.discard(ev)
                     if not waiters:
                         request_waiters.pop(request_id, None)
+
+    def deliver_to(who: Principal, req: Optional[RequestModel]) -> Optional[RequestModel]:
+        """
+        When a settled outcome is returned to its sender, record it as
+        delivered so the bridge does not inject it into the session again.
+        """
+        if req is not None and who.id == req.sender_id and is_settled(req) and req.delivered_at is None:
+            db.mark_delivered(req.id)
+            req = db.get_request(req.id)
+        return req
 
     app = FastAPI(title="Placet API", version="1.0.0", lifespan=lifespan)
 
@@ -232,7 +231,7 @@ def create_app(
         notify_change(created.id)
 
         if wait_seconds > 0:
-            return await wait_until_settled(created.id, float(wait_seconds))
+            return deliver_to(who, await wait_until_settled(created.id, float(wait_seconds)))
         return created
 
     @app.get("/api/requests", response_model=List[RequestModel])
@@ -259,7 +258,7 @@ def create_app(
             req = db.get_request(request_id)
         if not req:
             raise HTTPException(status_code=404, detail="Request not found")
-        return req
+        return deliver_to(who, req)
 
     @app.post("/api/requests/{request_id}/decision", response_model=RequestModel)
     async def decide_request(
@@ -352,7 +351,7 @@ def create_app(
                 detail=f"Cannot cancel request in {req.status.value} state (must be PENDING).",
             )
 
-        if not db.cancel_request(request_id):
+        if not db.cancel_request(request_id, by_sender=(who.id == req.sender_id)):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Cannot cancel request {request_id}: its state changed concurrently.",
