@@ -135,7 +135,22 @@ tmux new -s agent-claude
 tmux new -s agent-gemini
 ```
 
-### 2. Configura il Server MCP di Placet
+### 2. Calibra il riconoscimento del prompt
+
+Il bridge scrive in una sessione solo se:
+- l'agente è fermo su un prompt di input **vuoto**;
+- sullo schermo non c'è un indicatore di lavoro in corso (es. "esc to interrupt");
+- lo schermo non cambia tra due letture ravvicinate.
+
+In tutti gli altri casi aspetta. Il caso più delicato è un menu o un dialogo aperto: l'Invio finale confermerebbe un'opzione.
+
+I pattern del prompt vuoto stanno in `idle_patterns` di `AGENTS.md`, e quelli forniti sono da verificare sulla tua versione delle TUI. Avvia l'agente nella sua sessione tmux e controlla come la valuta il bridge:
+```bash
+.venv/bin/python -m bridge.calibrate claude --watch
+```
+Prova quattro situazioni: agente fermo, agente al lavoro, mentre scrivi e con un menu aperto. Solo la prima deve risultare `LIBERA`.
+
+### 3. Configura il Server MCP di Placet
 Aggiungi Placet alla configurazione MCP del tuo client (es. `claude_desktop_config.json`, `.claude.json` o configurazione Antigravity):
 
 ```json

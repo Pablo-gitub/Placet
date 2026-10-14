@@ -17,6 +17,7 @@ import httpx
 
 from backend.app.config import PlacetConfig, load_agents_config
 from backend.app.database import Database
+from bridge.tmux_controller import SessionSpec
 from backend.app.models import (
     RESULT_GRACE_SECONDS,
     RESULT_MAX_AGE_SECONDS,
@@ -40,7 +41,7 @@ class BridgeStore(Protocol):
     def mark_injected(self, request_id: int) -> bool: ...
     def claim_delivery(self, request_id: int) -> bool: ...
     def release_delivery(self, request_id: int) -> None: ...
-    def session_for(self, agent_id: str) -> Optional[str]: ...
+    def session_for(self, agent_id: str) -> Optional[SessionSpec]: ...
 
 
 class LocalStore:
@@ -71,9 +72,11 @@ class LocalStore:
     def release_delivery(self, request_id: int) -> None:
         self.db.clear_delivered(request_id, actor=BRIDGE_ACTOR)
 
-    def session_for(self, agent_id: str) -> Optional[str]:
+    def session_for(self, agent_id: str) -> Optional[SessionSpec]:
         agent = self.config.get_agent(agent_id)
-        return agent.tmux_session if agent else None
+        if not agent:
+            return None
+        return SessionSpec(agent.tmux_session, agent.idle_patterns, agent.busy_patterns)
 
 
 class HttpStore:
@@ -92,7 +95,7 @@ class HttpStore:
         self.client = client or httpx.Client(timeout=10.0)
         self.client.base_url = base_url
         self.client.headers["Authorization"] = f"Bearer {token}"
-        self._sessions: Dict[str, str] = {}
+        self._sessions: Dict[str, SessionSpec] = {}
         self._sessions_at = 0.0
 
     def work(self) -> Work:
@@ -120,12 +123,17 @@ class HttpStore:
     def release_delivery(self, request_id: int) -> None:
         self._post_ok("DELETE", f"/api/bridge/requests/{request_id}/delivered")
 
-    def session_for(self, agent_id: str) -> Optional[str]:
+    def session_for(self, agent_id: str) -> Optional[SessionSpec]:
         if time.monotonic() - self._sessions_at > self.AGENTS_CACHE_SECONDS:
             resp = self.client.get("/api/agents")
             resp.raise_for_status()
             self._sessions = {
-                agent_id: spec["tmux_session"] for agent_id, spec in resp.json()["agents"].items()
+                agent_id: SessionSpec(
+                    spec["tmux_session"],
+                    spec.get("idle_patterns", []),
+                    spec.get("busy_patterns", []),
+                )
+                for agent_id, spec in resp.json()["agents"].items()
             }
             self._sessions_at = time.monotonic()
         return self._sessions.get(agent_id)

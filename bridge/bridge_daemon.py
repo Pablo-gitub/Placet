@@ -54,16 +54,17 @@ class BridgeDaemon:
 
     def _session_ready(self, agent_id: str, busy_sessions: Set[str]) -> Optional[str]:
         """Returns the agent's tmux session if it can receive text now."""
-        session_name = self.store.session_for(agent_id)
-        if not session_name:
+        spec = self.store.session_for(agent_id)
+        if not spec:
             logger.warning(f"Agent {agent_id} not defined in config.")
             return None
+        session_name = spec.name
         if session_name in busy_sessions:
             return None
         if not self.tmux.session_exists(session_name):
             logger.debug(f"Tmux session {session_name} for agent {agent_id} is not running.")
             return None
-        if not self.tmux.is_session_idle(session_name):
+        if not self.tmux.is_session_idle(session_name, spec.idle_patterns, spec.busy_patterns):
             logger.debug(f"Session {session_name} is currently busy.")
             return None
         return session_name

@@ -13,6 +13,11 @@ class AgentSpec(BaseModel):
     token: str = Field("", exclude=True)
     allowed_targets: List[str] = Field(default_factory=list)
     default_timeout_seconds: int = 180
+    # Regexes recognising the empty input prompt of the agent's TUI, checked
+    # on the last lines of the screen; empty means "plain shell prompt".
+    idle_patterns: List[str] = Field(default_factory=list)
+    # Extra substrings meaning "busy" (besides the built-in interrupt hints).
+    busy_patterns: List[str] = Field(default_factory=list)
 
 
 class RouteRule(BaseModel):
@@ -100,6 +105,8 @@ def load_agents_config(file_path: Optional[str] = None) -> PlacetConfig:
                 token=a_data.get("token", ""),
                 allowed_targets=a_data.get("allowed_targets", []),
                 default_timeout_seconds=a_data.get("default_timeout_seconds", 180),
+                idle_patterns=a_data.get("idle_patterns", []),
+                busy_patterns=a_data.get("busy_patterns", []),
             )
 
     rules: Dict[str, RouteRule] = {}

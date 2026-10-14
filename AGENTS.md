@@ -6,18 +6,24 @@ agents:
     token: "${PLACET_TOKEN_CLAUDE}"
     allowed_targets: ["gemini", "codex", "human"]
     default_timeout_seconds: 180
+    # Prompt di input vuoto, da calibrare con: python -m bridge.calibrate claude
+    idle_patterns: ['^\s*[│|]?\s*[>❯]\s*[│|]?\s*$']
   gemini:
     name: "Gemini CLI / Antigravity"
     tmux_session: "agent-gemini"
     token: "${PLACET_TOKEN_GEMINI}"
     allowed_targets: ["claude", "codex", "human"]
     default_timeout_seconds: 180
+    # Da calibrare con: python -m bridge.calibrate gemini
+    idle_patterns: ['^\s*[│|]?\s*>\s*(Type your message.*)?[│|]?\s*$']
   codex:
     name: "OpenAI Codex / ChatGPT CLI"
     tmux_session: "agent-codex"
     token: "${PLACET_TOKEN_CODEX}"
     allowed_targets: ["claude", "gemini", "human"]
     default_timeout_seconds: 180
+    # Da calibrare con: python -m bridge.calibrate codex
+    idle_patterns: ['^\s*›\s*$']
 
 rules:
   claude -> gemini:
