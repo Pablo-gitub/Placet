@@ -2,6 +2,7 @@ import os
 import asyncio
 import contextlib
 import logging
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional, Dict, Set
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, status, Request, Depends
@@ -18,6 +19,7 @@ from backend.app.auth import (
     Principal,
     load_allowed_users,
     require_agent,
+    require_bridge,
     require_human,
 )
 from backend.app.config import PlacetConfig, load_agents_config
@@ -29,6 +31,8 @@ from backend.app.models import (
     RequestStatus,
     QuestionType,
     RequestDecision,
+    RESULT_GRACE_SECONDS,
+    RESULT_MAX_AGE_SECONDS,
     decision_error,
     is_settled,
 )
@@ -60,6 +64,7 @@ def create_app(
     ntfy: Optional[NtfyConfig] = None,
     allowed_users: Optional[List[str]] = None,
     cors_origins: Optional[List[str]] = None,
+    bridge_token: Optional[str] = None,
 ) -> FastAPI:
     # Waiters registered by long-polling calls, keyed by request id.
     request_waiters: Dict[int, Set[asyncio.Event]] = {}
@@ -161,7 +166,10 @@ def create_app(
             allow_headers=["Authorization", "Content-Type"],
         )
 
-    authenticator = Authenticator(config, allowed_users)
+    if bridge_token is None:
+        bridge_token = os.environ.get("PLACET_BRIDGE_TOKEN", "")
+
+    authenticator = Authenticator(config, allowed_users, bridge_token=bridge_token)
 
     def principal(request: Request) -> Principal:
         return authenticator.identify(request)
@@ -386,6 +394,63 @@ def create_app(
         notify_change(request_id)
         return {"status": "CANCELLED", "id": request_id}
 
+
+    # --- Local bridge (tmux injection and outcome delivery) -----------------
+
+    @app.get("/api/bridge/work")
+    async def bridge_work(who: Principal = Depends(principal)):
+        """
+        What the bridge should do now: approved agent-to-agent requests to
+        inject into the recipient's session (oldest first), and settled
+        outcomes to deliver to the sender's session.
+        """
+        require_bridge(who)
+        expire_and_notify()
+        now = datetime.now(timezone.utc)
+        injections = [
+            r for r in db.list_requests(status=RequestStatus.APPROVED, oldest_first=True)
+            if r.recipient_id != "human"
+        ]
+        results = db.list_undelivered_results(
+            settled_before=now - timedelta(seconds=RESULT_GRACE_SECONDS),
+            settled_after=now - timedelta(seconds=RESULT_MAX_AGE_SECONDS),
+        )
+        return {"injections": injections, "results": results}
+
+    @app.post("/api/bridge/requests/{request_id}/injected", response_model=RequestModel)
+    async def bridge_injected(request_id: int, who: Principal = Depends(principal)):
+        require_bridge(who)
+        get_or_404(request_id)
+        updated = db.update_request_decision(
+            request_id=request_id, status=RequestStatus.EXECUTING, actor=who.actor
+        )
+        if updated is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Request {request_id} is not APPROVED.",
+            )
+        notify_change(request_id)
+        return updated
+
+    @app.post("/api/bridge/requests/{request_id}/delivered")
+    async def bridge_claim_delivery(request_id: int, who: Principal = Depends(principal)):
+        """Claims the delivery of an outcome; 409 if it was already delivered."""
+        require_bridge(who)
+        get_or_404(request_id)
+        if not db.mark_delivered(request_id, actor=who.actor, via="tmux"):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Outcome of request {request_id} was already delivered.",
+            )
+        return {"id": request_id, "delivered": True}
+
+    @app.delete("/api/bridge/requests/{request_id}/delivered")
+    async def bridge_release_delivery(request_id: int, who: Principal = Depends(principal)):
+        """Undoes a claim after a failed injection, so the bridge retries."""
+        require_bridge(who)
+        get_or_404(request_id)
+        db.clear_delivered(request_id, actor=who.actor)
+        return {"id": request_id, "delivered": False}
 
     @app.get("/api/events")
     async def sse_events(who: Principal = Depends(principal)):

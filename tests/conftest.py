@@ -12,5 +12,6 @@ def _allowed_human(monkeypatch):
 @pytest.fixture(autouse=True)
 def _no_real_notifications(monkeypatch):
     # Never publish to a real ntfy server from tests.
-    for var in ("PLACET_NTFY_URL", "PLACET_NTFY_TOPIC", "PLACET_NTFY_TOKEN", "PLACET_BASE_URL"):
+    for var in ("PLACET_NTFY_URL", "PLACET_NTFY_TOPIC", "PLACET_NTFY_TOKEN", "PLACET_BASE_URL",
+                "PLACET_BRIDGE_TOKEN"):
         monkeypatch.delenv(var, raising=False)

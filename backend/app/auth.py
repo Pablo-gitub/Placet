@@ -27,7 +27,7 @@ HUMAN_LISTENER = "human"
 
 @dataclass(frozen=True)
 class Principal:
-    kind: Literal["agent", "human"]
+    kind: Literal["agent", "human", "bridge"]
     id: str
 
     @property
@@ -37,7 +37,7 @@ class Principal:
     @property
     def actor(self) -> str:
         """How this principal appears in the audit log."""
-        return f"{self.kind}:{self.id}"
+        return "bridge" if self.kind == "bridge" else f"{self.kind}:{self.id}"
 
 
 class HumanListener:
@@ -70,9 +70,15 @@ def load_allowed_users() -> Set[str]:
 
 
 class Authenticator:
-    def __init__(self, config: PlacetConfig, allowed_users: Iterable[str]):
+    def __init__(
+        self,
+        config: PlacetConfig,
+        allowed_users: Iterable[str],
+        bridge_token: str = "",
+    ):
         self.config = config
         self.allowed_users = {u.lower() for u in allowed_users}
+        self.bridge_token = bridge_token
         for agent_id, spec in config.agents.items():
             if not spec.token:
                 logger.warning(
@@ -92,7 +98,12 @@ class Authenticator:
         if auth_header:
             scheme, _, token = auth_header.partition(" ")
             token = token.strip()
-            agent_id = self._agent_for_token(token) if scheme.lower() == "bearer" and token else None
+            is_bearer = scheme.lower() == "bearer" and bool(token)
+            if is_bearer and self.bridge_token and hmac.compare_digest(
+                self.bridge_token.encode(), token.encode()
+            ):
+                return Principal(kind="bridge", id="bridge")
+            agent_id = self._agent_for_token(token) if is_bearer else None
             if agent_id is None:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
@@ -125,8 +136,16 @@ def require_human(principal: Principal) -> None:
 
 
 def require_agent(principal: Principal) -> None:
-    if principal.is_human:
+    if principal.kind != "agent":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only an authenticated agent can perform this action.",
+        )
+
+
+def require_bridge(principal: Principal) -> None:
+    if principal.kind != "bridge":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the local bridge can perform this action.",
         )

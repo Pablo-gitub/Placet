@@ -29,6 +29,12 @@ OPEN_STATUSES = frozenset({
     RequestStatus.EXECUTING,
 })
 
+# Outcome delivery to the sender's session (RF-22): wait this long so that a
+# long-polling sender can receive it directly, and skip outcomes older than
+# the max age (a session restarted hours later should not be flooded).
+RESULT_GRACE_SECONDS = 10.0
+RESULT_MAX_AGE_SECONDS = 6 * 3600
+
 DEFAULT_EXPIRES_IN_SECONDS = 24 * 3600
 MAX_EXPIRES_IN_SECONDS = 7 * 24 * 3600
 
