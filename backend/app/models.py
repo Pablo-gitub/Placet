@@ -59,7 +59,9 @@ class RequestModel(BaseModel):
     edited_prompt: Optional[str] = None
     selected_options: List[str] = Field(default_factory=list)
     custom_text: Optional[str] = None
+    timeout_seconds: int = 180
     created_at: datetime
     decided_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     response: Optional[ResponseModel] = None
+

@@ -2,8 +2,9 @@ import os
 import asyncio
 from pathlib import Path
 from typing import List, Optional, Dict
-from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, status
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, status, Request
 from fastapi.middleware.cors import CORSMiddleware
+
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
@@ -83,6 +84,7 @@ def create_app(
     async def create_request(
         req: RequestCreate,
         background_tasks: BackgroundTasks,
+        http_request: Request,
         wait_seconds: int = Query(0, ge=0, le=600),
     ):
         # Validate allowed route
@@ -91,6 +93,20 @@ def create_app(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Route from {req.sender_id} to {req.recipient_id} not allowed by AGENTS.md rules.",
             )
+
+        # Validate agent token if configured
+        agent_spec = config.get_agent(req.sender_id)
+        if agent_spec and agent_spec.token:
+            auth_header = http_request.headers.get("Authorization")
+            expected_token = agent_spec.token
+            token_valid = False
+            if auth_header and auth_header.startswith("Bearer "):
+                token_valid = (auth_header[7:].strip() == expected_token)
+            if not token_valid:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail=f"Invalid agent token for {req.sender_id}.",
+                )
 
         # Check if approval required
         needs_approval = config.requires_approval(req.sender_id, req.recipient_id)
@@ -124,6 +140,8 @@ def create_app(
                 )
             except asyncio.TimeoutError:
                 pass
+            finally:
+                request_events.pop(created.id, None)
             # Return latest state
             return db.get_request(created.id)
 
@@ -134,6 +152,8 @@ def create_app(
         status: Optional[RequestStatus] = None,
         limit: int = Query(50, ge=1, le=200),
     ):
+        # Periodically expire stale pending requests
+        db.expire_stale_requests()
         return db.list_requests(status=status, limit=limit)
 
     @app.get("/api/requests/{request_id}", response_model=RequestModel)
@@ -148,6 +168,12 @@ def create_app(
         req = db.get_request(request_id)
         if not req:
             raise HTTPException(status_code=404, detail="Request not found")
+
+        if req.status != RequestStatus.PENDING:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Request {request_id} is in {req.status.value} state, not in PENDING state.",
+            )
 
         updated = db.update_request_decision(
             request_id=request_id,
@@ -165,6 +191,12 @@ def create_app(
         if not req:
             raise HTTPException(status_code=404, detail="Request not found")
 
+        if req.status not in (RequestStatus.APPROVED, RequestStatus.EXECUTING):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Request {request_id} is in {req.status.value} state, not in APPROVED or EXECUTING state.",
+            )
+
         responder_id = payload.get("responder_id", req.recipient_id)
         content = payload.get("content", "")
 
@@ -178,13 +210,24 @@ def create_app(
 
     @app.delete("/api/requests/{request_id}")
     def cancel_request(request_id: int):
+        req = db.get_request(request_id)
+        if not req:
+            raise HTTPException(status_code=404, detail="Request not found")
+
+        if req.status != RequestStatus.PENDING:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Cannot cancel request in {req.status.value} state (must be PENDING).",
+            )
+
         cancelled = db.cancel_request(request_id)
         if not cancelled:
             raise HTTPException(
-                status_code=400, detail="Cannot cancel request (not found or not pending)"
+                status_code=400, detail="Cannot cancel request"
             )
         notify_change(request_id)
         return {"status": "CANCELLED", "id": request_id}
+
 
     @app.get("/api/events")
     async def sse_events():

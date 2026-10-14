@@ -39,6 +39,7 @@ class Database:
                 edited_prompt TEXT,
                 selected_options TEXT,
                 custom_text TEXT,
+                timeout_seconds INTEGER DEFAULT 180,
                 created_at TEXT NOT NULL,
                 decided_at TEXT,
                 completed_at TEXT
@@ -54,7 +55,12 @@ class Database:
                 FOREIGN KEY (request_id) REFERENCES requests(id)
             );
             """)
+            cursor.execute("PRAGMA table_info(requests);")
+            cols = [r["name"] for r in cursor.fetchall()]
+            if "timeout_seconds" not in cols:
+                cursor.execute("ALTER TABLE requests ADD COLUMN timeout_seconds INTEGER DEFAULT 180;")
             conn.commit()
+
 
     def create_request(self, req: RequestCreate) -> RequestModel:
         now = datetime.now(timezone.utc).isoformat()
@@ -64,8 +70,8 @@ class Database:
                 """
                 INSERT INTO requests (
                     sender_id, recipient_id, question_type, prompt, context,
-                    options, status, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    options, status, timeout_seconds, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     req.sender_id,
@@ -75,6 +81,7 @@ class Database:
                     req.context,
                     json.dumps(req.options),
                     RequestStatus.PENDING.value,
+                    req.timeout_seconds,
                     now,
                 ),
             )
@@ -114,11 +121,13 @@ class Database:
                 edited_prompt=row["edited_prompt"],
                 selected_options=json.loads(row["selected_options"]) if row["selected_options"] else [],
                 custom_text=row["custom_text"],
+                timeout_seconds=row["timeout_seconds"] if "timeout_seconds" in row.keys() and row["timeout_seconds"] is not None else 180,
                 created_at=datetime.fromisoformat(row["created_at"]),
                 decided_at=datetime.fromisoformat(row["decided_at"]) if row["decided_at"] else None,
                 completed_at=datetime.fromisoformat(row["completed_at"]) if row["completed_at"] else None,
                 response=resp_model,
             )
+
 
     def list_requests(
         self, status: Optional[RequestStatus] = None, limit: int = 50
@@ -148,6 +157,20 @@ class Database:
         now = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
             cursor = conn.cursor()
+            cursor.execute("SELECT status FROM requests WHERE id = ?", (request_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+
+            curr_status = row["status"]
+            # Guard: Only allow decision if currently PENDING, OR if bridge is transitioning APPROVED -> EXECUTING
+            is_valid_transition = (
+                curr_status == RequestStatus.PENDING.value or
+                (curr_status == RequestStatus.APPROVED.value and status == RequestStatus.EXECUTING)
+            )
+            if not is_valid_transition:
+                return None
+
             cursor.execute(
                 """
                 UPDATE requests
@@ -172,6 +195,16 @@ class Database:
         now = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
             cursor = conn.cursor()
+            cursor.execute("SELECT status FROM requests WHERE id = ?", (request_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+
+            curr_status = row["status"]
+            # Guard: only allow reply if request is APPROVED or EXECUTING
+            if curr_status not in (RequestStatus.APPROVED.value, RequestStatus.EXECUTING.value):
+                return None
+
             cursor.execute(
                 """
                 INSERT OR REPLACE INTO responses (request_id, responder_id, content, created_at)
@@ -199,3 +232,31 @@ class Database:
             )
             conn.commit()
             return cursor.rowcount > 0
+
+    def expire_stale_requests(self) -> int:
+        now_dt = datetime.now(timezone.utc)
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, created_at, timeout_seconds FROM requests WHERE status = ?",
+                (RequestStatus.PENDING.value,),
+            )
+            rows = cursor.fetchall()
+            expired_ids = []
+            for r in rows:
+                created_at = datetime.fromisoformat(r["created_at"])
+                if created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=timezone.utc)
+                timeout_sec = r["timeout_seconds"] if ("timeout_seconds" in r.keys() and r["timeout_seconds"] is not None) else 180
+                if (now_dt - created_at).total_seconds() >= timeout_sec:
+                    expired_ids.append(r["id"])
+
+            if expired_ids:
+                placeholders = ",".join("?" for _ in expired_ids)
+                cursor.execute(
+                    f"UPDATE requests SET status = ? WHERE id IN ({placeholders})",
+                    [RequestStatus.EXPIRED.value] + expired_ids,
+                )
+                conn.commit()
+            return len(expired_ids)
+

@@ -79,7 +79,11 @@ async def test_api_create_and_decide_request(test_setup):
             "context": "Context di test",
             "options": [],
         }
-        resp = await client.post("/api/requests", json=payload)
+        resp = await client.post(
+            "/api/requests",
+            json=payload,
+            headers={"Authorization": "Bearer token-claude"},
+        )
         assert resp.status_code == 201
         data = resp.json()
         req_id = data["id"]
@@ -120,11 +124,16 @@ async def test_api_auto_routing(test_setup):
             "question_type": "prompt_review",
             "prompt": "Domanda rapida senza approvazione",
         }
-        resp = await client.post("/api/requests", json=payload)
+        resp = await client.post(
+            "/api/requests",
+            json=payload,
+            headers={"Authorization": "Bearer token-gemini"},
+        )
         assert resp.status_code == 201
         data = resp.json()
         # Should be auto-approved!
         assert data["status"] == RequestStatus.APPROVED.value
+
 
 
 @pytest.mark.asyncio
