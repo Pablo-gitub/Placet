@@ -107,6 +107,13 @@ class PlacetClient:
             resp.raise_for_status()
             return resp.json()
 
+    def ack(self, request_id: int) -> Dict[str, Any]:
+        url = f"{self.base_url}/api/requests/{request_id}/ack"
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.post(url, headers=self._headers())
+            resp.raise_for_status()
+            return resp.json()
+
     def list_agents(self) -> Dict[str, Any]:
         url = f"{self.base_url}/api/agents"
         with httpx.Client(timeout=10.0) as client:

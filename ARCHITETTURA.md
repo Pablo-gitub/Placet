@@ -166,7 +166,15 @@ sequenceDiagram
 - `edited_prompt` (TEXT): Testo eventualmente modificato da Paolo
 - `context` (TEXT): Spiegazione del contesto / motivazione
 - `options` (JSON): Opzioni a scelta multipla (se applicabile)
-- `status` (TEXT): `PENDING`, `APPROVED`, `REJECTED`, `EXECUTING`, `COMPLETED`, `CANCELLED`, `EXPIRED`
+- `status` (TEXT): `PENDING`, `APPROVED`, `REJECTED`, `DELIVERING`, `EXECUTING`, `COMPLETED`, `DELIVERY_FAILED`, `STALLED`, `CANCELLED`, `EXPIRED`
+
+Ciclo di consegna delle richieste tra agenti:
+```text
+APPROVED ─claim─► DELIVERING ─ack (hook o placet_ack)─► EXECUTING ─reply─► COMPLETED
+    ▲                  │                                     │  (reply esplicita o implicita dall'hook Stop)
+    └─ nessun ack ─────┤ (max 3 tentativi)                   └─ oltre execution_timeout ─► STALLED
+                       └──────────────────────────────► DELIVERY_FAILED
+```
 - `created_at` (DATETIME)
 - `decided_at` (DATETIME)
 - `completed_at` (DATETIME)

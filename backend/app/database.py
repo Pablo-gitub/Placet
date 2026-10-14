@@ -2,7 +2,7 @@ import sqlite3
 import json
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Tuple
 
 from pathlib import Path
 from backend.app.models import (
@@ -18,10 +18,18 @@ from backend.app.models import (
 )
 
 # Allowed state transitions for update_request_decision (source -> targets).
+# Delivery of agent-to-agent prompts has its own methods (claim_injection,
+# confirm_injection, ...).
 _DECISION_TRANSITIONS = {
     RequestStatus.PENDING: {RequestStatus.APPROVED, RequestStatus.REJECTED},
-    RequestStatus.APPROVED: {RequestStatus.EXECUTING},
 }
+
+# Statuses in which the recipient may still reply.
+_REPLYABLE = (RequestStatus.APPROVED, RequestStatus.DELIVERING, RequestStatus.EXECUTING)
+
+
+def _ts(value: Optional[str]) -> Optional[datetime]:
+    return datetime.fromisoformat(value) if value else None
 
 
 class Database:
@@ -65,7 +73,10 @@ class Database:
                 completed_at TEXT,
                 updated_at TEXT,
                 delivered_at TEXT,
-                priority TEXT
+                priority TEXT,
+                delivery_attempts INTEGER NOT NULL DEFAULT 0,
+                delivering_since TEXT,
+                executing_since TEXT
             );
             """)
             cursor.execute("""
@@ -75,7 +86,16 @@ class Database:
                 responder_id TEXT NOT NULL,
                 content TEXT NOT NULL,
                 created_at TEXT NOT NULL,
+                implicit INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY (request_id) REFERENCES requests(id)
+            );
+            """)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS agent_states (
+                agent_id TEXT PRIMARY KEY,
+                state TEXT NOT NULL,
+                turn_request_id INTEGER,
+                updated_at TEXT NOT NULL
             );
             """)
             cursor.execute("""
@@ -94,9 +114,17 @@ class Database:
             )
             cursor.execute("PRAGMA table_info(requests);")
             cols = [r["name"] for r in cursor.fetchall()]
-            for col in ("expires_at", "updated_at", "delivered_at", "priority"):
+            for col in ("expires_at", "updated_at", "delivered_at", "priority",
+                        "delivering_since", "executing_since"):
                 if col not in cols:
                     cursor.execute(f"ALTER TABLE requests ADD COLUMN {col} TEXT;")
+            if "delivery_attempts" not in cols:
+                cursor.execute(
+                    "ALTER TABLE requests ADD COLUMN delivery_attempts INTEGER NOT NULL DEFAULT 0;"
+                )
+            cursor.execute("PRAGMA table_info(responses);")
+            if "implicit" not in [r["name"] for r in cursor.fetchall()]:
+                cursor.execute("ALTER TABLE responses ADD COLUMN implicit INTEGER NOT NULL DEFAULT 0;")
 
     @staticmethod
     def _log(
@@ -192,6 +220,7 @@ class Database:
                 responder_id=resp_row["responder_id"],
                 content=resp_row["content"],
                 created_at=datetime.fromisoformat(resp_row["created_at"]),
+                implicit=bool(resp_row["implicit"]),
             )
 
         return RequestModel(
@@ -213,6 +242,9 @@ class Database:
             completed_at=datetime.fromisoformat(row["completed_at"]) if row["completed_at"] else None,
             updated_at=datetime.fromisoformat(row["updated_at"]) if row["updated_at"] else None,
             delivered_at=datetime.fromisoformat(row["delivered_at"]) if row["delivered_at"] else None,
+            delivery_attempts=row["delivery_attempts"] or 0,
+            delivering_since=_ts(row["delivering_since"]),
+            executing_since=_ts(row["executing_since"]),
             response=resp_model,
         )
 
@@ -236,7 +268,7 @@ class Database:
                 SELECT r.*,
                        s.id AS s_id, s.request_id AS s_request_id,
                        s.responder_id AS s_responder_id, s.content AS s_content,
-                       s.created_at AS s_created_at
+                       s.created_at AS s_created_at, s.implicit AS s_implicit
                 FROM requests r
                 LEFT JOIN responses s ON s.request_id = r.id
                 {where}
@@ -255,6 +287,7 @@ class Database:
                         "responder_id": row["s_responder_id"],
                         "content": row["s_content"],
                         "created_at": row["s_created_at"],
+                        "implicit": row["s_implicit"],
                     }
                 results.append(self._row_to_model(row, resp))
             return results
@@ -269,9 +302,8 @@ class Database:
         actor: str = "system",
     ) -> Optional[RequestModel]:
         """
-        Applies a decision (PENDING -> APPROVED/REJECTED) or the bridge hand-off
-        (APPROVED -> EXECUTING). Returns None if the request does not exist or
-        the transition is not allowed from its current state.
+        Applies the human decision (PENDING -> APPROVED/REJECTED). Returns
+        None if the request does not exist or is no longer PENDING.
         """
         allowed_sources = [
             src.value for src, targets in _DECISION_TRANSITIONS.items() if status in targets
@@ -283,76 +315,258 @@ class Database:
         placeholders = ",".join("?" for _ in allowed_sources)
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            if status == RequestStatus.EXECUTING:
-                # Hand-off keeps the human decision fields untouched.
-                cursor.execute(
-                    f"UPDATE requests SET status = ?, updated_at = ? WHERE id = ? AND status IN ({placeholders})",
-                    [status.value, now, request_id, *allowed_sources],
-                )
-            else:
-                cursor.execute(
-                    f"""
-                    UPDATE requests
-                    SET status = ?, edited_prompt = ?, selected_options = ?, custom_text = ?,
-                        decided_at = ?, updated_at = ?
-                    WHERE id = ? AND status IN ({placeholders})
-                    """,
-                    [
-                        status.value,
-                        edited_prompt,
-                        json.dumps(selected_options) if selected_options is not None else None,
-                        custom_text,
-                        now,
-                        now,
-                        request_id,
-                        *allowed_sources,
-                    ],
-                )
-            if cursor.rowcount == 0:
-                return None
-            if status == RequestStatus.EXECUTING:
-                self._log(cursor, request_id, actor, "injected", at=now)
-            else:
-                details: Dict[str, Any] = {"status": status.value}
-                if edited_prompt is not None:
-                    details["edited_prompt"] = edited_prompt
-                if selected_options:
-                    details["selected_options"] = selected_options
-                if custom_text:
-                    details["custom_text"] = custom_text
-                self._log(cursor, request_id, actor, "decided", details, at=now)
-        return self.get_request(request_id)
-
-    def record_reply(
-        self, request_id: int, responder_id: str, content: str, actor: Optional[str] = None
-    ) -> Optional[RequestModel]:
-        now = datetime.now(timezone.utc).isoformat()
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            # Guard: only allow reply if request is APPROVED or EXECUTING
             cursor.execute(
-                "UPDATE requests SET status = ?, completed_at = ?, updated_at = ? WHERE id = ? AND status IN (?, ?)",
-                (
-                    RequestStatus.COMPLETED.value,
+                f"""
+                UPDATE requests
+                SET status = ?, edited_prompt = ?, selected_options = ?, custom_text = ?,
+                    decided_at = ?, updated_at = ?
+                WHERE id = ? AND status IN ({placeholders})
+                """,
+                [
+                    status.value,
+                    edited_prompt,
+                    json.dumps(selected_options) if selected_options is not None else None,
+                    custom_text,
                     now,
                     now,
                     request_id,
-                    RequestStatus.APPROVED.value,
-                    RequestStatus.EXECUTING.value,
-                ),
+                    *allowed_sources,
+                ],
+            )
+            if cursor.rowcount == 0:
+                return None
+            details: Dict[str, Any] = {"status": status.value}
+            if edited_prompt is not None:
+                details["edited_prompt"] = edited_prompt
+            if selected_options:
+                details["selected_options"] = selected_options
+            if custom_text:
+                details["custom_text"] = custom_text
+            self._log(cursor, request_id, actor, "decided", details, at=now)
+        return self.get_request(request_id)
+
+    def record_reply(
+        self,
+        request_id: int,
+        responder_id: str,
+        content: str,
+        actor: Optional[str] = None,
+        implicit: bool = False,
+    ) -> Optional[RequestModel]:
+        """
+        Completes a request with the recipient's reply. A reply while still
+        DELIVERING also proves the prompt arrived. Returns None if the
+        request can no longer be replied to.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        sources = [st.value for st in _REPLYABLE]
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                UPDATE requests SET status = ?, completed_at = ?, updated_at = ?
+                WHERE id = ? AND status IN ({",".join("?" for _ in sources)})
+                """,
+                [RequestStatus.COMPLETED.value, now, now, request_id, *sources],
             )
             if cursor.rowcount == 0:
                 return None
             cursor.execute(
                 """
-                INSERT OR REPLACE INTO responses (request_id, responder_id, content, created_at)
-                VALUES (?, ?, ?, ?)
+                INSERT OR REPLACE INTO responses (request_id, responder_id, content, created_at, implicit)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (request_id, responder_id, content, now),
+                (request_id, responder_id, content, now, int(implicit)),
             )
-            self._log(cursor, request_id, actor or f"agent:{responder_id}", "replied",
-                      {"length": len(content)}, at=now)
+            details: Dict[str, Any] = {"length": len(content)}
+            if implicit:
+                details["implicit"] = True
+            self._log(cursor, request_id, actor or f"agent:{responder_id}", "replied", details, at=now)
         return self.get_request(request_id)
+
+    # --- Injection delivery (agent-to-agent prompts) -------------------------
+
+    def _transition(
+        self,
+        cursor: sqlite3.Cursor,
+        request_id: int,
+        source: RequestStatus,
+        target: RequestStatus,
+        now: str,
+        extra_sql: str = "",
+        extra_params: Sequence[Any] = (),
+    ) -> bool:
+        cursor.execute(
+            f"UPDATE requests SET status = ?, updated_at = ?{extra_sql} WHERE id = ? AND status = ?",
+            [target.value, now, *extra_params, request_id, source.value],
+        )
+        return cursor.rowcount > 0
+
+    def claim_injection(self, request_id: int, actor: str = "bridge") -> Optional[RequestModel]:
+        """APPROVED -> DELIVERING, before the prompt is sent: a crash after
+        sending can then not cause a silent second injection."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if not self._transition(
+                cursor, request_id, RequestStatus.APPROVED, RequestStatus.DELIVERING, now,
+                ", delivering_since = ?, delivery_attempts = delivery_attempts + 1", [now],
+            ):
+                return None
+            cursor.execute("SELECT delivery_attempts FROM requests WHERE id = ?", (request_id,))
+            attempt = cursor.fetchone()["delivery_attempts"]
+            self._log(cursor, request_id, actor, "injection_claimed", {"attempt": attempt}, at=now)
+        return self.get_request(request_id)
+
+    def release_injection(self, request_id: int, actor: str = "bridge") -> bool:
+        """DELIVERING -> APPROVED when sending failed: nothing reached the
+        agent, so the attempt does not count."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if not self._transition(
+                cursor, request_id, RequestStatus.DELIVERING, RequestStatus.APPROVED, now,
+                ", delivering_since = NULL, delivery_attempts = MAX(delivery_attempts - 1, 0)",
+            ):
+                return False
+            self._log(cursor, request_id, actor, "injection_released", at=now)
+            return True
+
+    def confirm_injection(self, request_id: int, actor: str, via: str) -> Optional[RequestModel]:
+        """DELIVERING -> EXECUTING: the agent (or, without acks, the bridge)
+        confirmed the prompt arrived."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if not self._transition(
+                cursor, request_id, RequestStatus.DELIVERING, RequestStatus.EXECUTING, now,
+                ", executing_since = ?", [now],
+            ):
+                return None
+            self._log(cursor, request_id, actor, "acked", {"via": via}, at=now)
+        return self.get_request(request_id)
+
+    def requeue_unacked(
+        self, ack_timeout_seconds: float, max_attempts: int
+    ) -> Tuple[List[int], List[int]]:
+        """
+        Injections without an ack in time go back to APPROVED to be retried,
+        or to DELIVERY_FAILED after max_attempts. Returns (requeued, failed).
+        """
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
+        cutoff = (now_dt - timedelta(seconds=ack_timeout_seconds)).isoformat()
+        requeued, failed = [], []
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, delivery_attempts FROM requests WHERE status = ? AND delivering_since <= ?",
+                (RequestStatus.DELIVERING.value, cutoff),
+            )
+            for row in cursor.fetchall():
+                if row["delivery_attempts"] >= max_attempts:
+                    if self._transition(cursor, row["id"], RequestStatus.DELIVERING,
+                                        RequestStatus.DELIVERY_FAILED, now):
+                        self._log(cursor, row["id"], "system", "injection_failed",
+                                  {"attempts": row["delivery_attempts"]}, at=now)
+                        failed.append(row["id"])
+                elif self._transition(cursor, row["id"], RequestStatus.DELIVERING,
+                                      RequestStatus.APPROVED, now, ", delivering_since = NULL"):
+                    self._log(cursor, row["id"], "system", "injection_requeued",
+                              {"attempts": row["delivery_attempts"]}, at=now)
+                    requeued.append(row["id"])
+        return requeued, failed
+
+    def stall_executing(
+        self, timeout_for: Callable[[str], float]
+    ) -> List[int]:
+        """EXECUTING longer than the recipient's execution timeout -> STALLED."""
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
+        stalled = []
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, recipient_id, executing_since FROM requests WHERE status = ?",
+                (RequestStatus.EXECUTING.value,),
+            )
+            for row in cursor.fetchall():
+                since = _ts(row["executing_since"])
+                if since is None or (now_dt - since).total_seconds() < timeout_for(row["recipient_id"]):
+                    continue
+                if self._transition(cursor, row["id"], RequestStatus.EXECUTING,
+                                    RequestStatus.STALLED, now):
+                    self._log(cursor, row["id"], "system", "stalled", at=now)
+                    stalled.append(row["id"])
+        return stalled
+
+    def recipients_with_delivery_in_flight(self) -> List[str]:
+        """Agents with a DELIVERING request: one injection in flight per session."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT DISTINCT recipient_id FROM requests WHERE status = ?",
+                (RequestStatus.DELIVERING.value,),
+            )
+            return [r["recipient_id"] for r in cursor.fetchall()]
+
+    def injections_ready(self) -> List[RequestModel]:
+        """
+        APPROVED agent-to-agent requests to inject, oldest first, at most one
+        per recipient and none for a recipient with a delivery in flight.
+        """
+        in_flight = set(self.recipients_with_delivery_in_flight())
+        ready = []
+        for r in self.list_requests(status=RequestStatus.APPROVED, oldest_first=True, limit=200):
+            if r.recipient_id == "human" or r.recipient_id in in_flight:
+                continue
+            ready.append(r)
+            in_flight.add(r.recipient_id)
+        return ready
+
+    # --- Agent turn state (from CLI hooks) -----------------------------------
+
+    def busy_agents(self, ttl_seconds: float) -> List[str]:
+        """Agents whose hooks declared a turn in progress within the TTL."""
+        since = (datetime.now(timezone.utc) - timedelta(seconds=ttl_seconds)).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT agent_id FROM agent_states WHERE state = 'busy' AND updated_at > ?",
+                (since,),
+            )
+            return [r["agent_id"] for r in cursor.fetchall()]
+
+
+    def set_agent_state(
+        self, agent_id: str, state: str, turn_request_id: Optional[int] = None
+    ) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO agent_states (agent_id, state, turn_request_id, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(agent_id) DO UPDATE SET
+                    state = excluded.state,
+                    turn_request_id = excluded.turn_request_id,
+                    updated_at = excluded.updated_at
+                """,
+                (agent_id, state, turn_request_id, now),
+            )
+
+    def get_agent_states(self) -> Dict[str, Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM agent_states")
+            return {
+                r["agent_id"]: {
+                    "state": r["state"],
+                    "turn_request_id": r["turn_request_id"],
+                    "updated_at": r["updated_at"],
+                }
+                for r in cursor.fetchall()
+            }
 
     def cancel_request(
         self, request_id: int, by_sender: bool = False, actor: str = "system"

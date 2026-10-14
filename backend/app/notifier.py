@@ -103,6 +103,37 @@ def build_notification(
     return f"{cfg.server_url}/{cfg.topic}", headers, body
 
 
+def build_alert(
+    request: RequestModel, cfg: NtfyConfig, problem: str
+) -> Tuple[str, Dict[str, str], str]:
+    """A delivery problem the human should look at (failed or stalled)."""
+    open_url = f"{cfg.base_url}/#request-{request.id}"
+    headers = {
+        "Title": _ascii_header(f"Placet #{request.id}: {problem}"),
+        "Priority": "high",
+        "Tags": "warning",
+        "Click": open_url,
+        "Actions": f"view, Apri, {open_url}, clear=true",
+    }
+    if cfg.access_token:
+        headers["Authorization"] = f"Bearer {cfg.access_token}"
+    body = f"{request.sender_id} -> {request.recipient_id}: {problem}."
+    return f"{cfg.server_url}/{cfg.topic}", headers, body
+
+
+async def send_ntfy_alert(request: RequestModel, cfg: NtfyConfig, problem: str) -> bool:
+    if not cfg.enabled:
+        return False
+    url, headers, body = build_alert(request, cfg, problem)
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(url, content=body.encode("utf-8"), headers=headers)
+        return resp.status_code == 200
+    except Exception as e:
+        logger.warning(f"Impossibile inviare avviso ntfy: {e}")
+        return False
+
+
 async def send_ntfy_notification(
     request: RequestModel,
     cfg: NtfyConfig,

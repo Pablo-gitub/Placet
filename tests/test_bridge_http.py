@@ -56,7 +56,7 @@ def test_injection_and_delivery_over_rest(setup):
 
     assert daemon.run_loop_step() == 1
     assert tmux.send_keys.call_args.args[0] == "agent-gemini"
-    assert db.get_request(req.id).status == RequestStatus.EXECUTING
+    assert db.get_request(req.id).status == RequestStatus.DELIVERING
 
     db.record_reply(req.id, "gemini", "Fatto")
     _age(db, req.id)
@@ -65,7 +65,7 @@ def test_injection_and_delivery_over_rest(setup):
     assert "Risposta di gemini: Fatto" in tmux.send_keys.call_args.args[1]
 
     actors = [(e.actor, e.event) for e in db.list_events(req.id)]
-    assert ("bridge", "injected") in actors
+    assert ("bridge", "injection_claimed") in actors
     assert ("bridge", "delivered") in actors
 
 
@@ -84,7 +84,7 @@ def test_already_delivered_is_skipped(setup):
     req = db.create_request(RequestCreate(sender_id="claude", recipient_id="human", prompt="x"))
     db.update_request_decision(req.id, RequestStatus.APPROVED, actor="human:p")
     _age(db, req.id)
-    _, results = daemon.store.work()
+    results = daemon.store.work().results
     db.mark_delivered(req.id, actor="agent:claude", via="api")  # long-poll won the race
     assert daemon.process_pending_results(results=results) == 0
     tmux.send_keys.assert_not_called()

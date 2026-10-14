@@ -37,6 +37,8 @@ class SessionSpec:
     name: str
     idle_patterns: List[str] = field(default_factory=list)
     busy_patterns: List[str] = field(default_factory=list)
+    # hook | mcp | none: how the agent acknowledges an injected prompt.
+    ack_mode: str = "mcp"
 
 
 class TmuxController:
@@ -137,6 +139,25 @@ class TmuxController:
         busy_patterns: Optional[Sequence[str]] = None,
     ) -> bool:
         return self.check_idle(session_name, idle_patterns, busy_patterns).idle
+
+    def seconds_since_input(self, session_name: str) -> Optional[float]:
+        """
+        Seconds since a client attached to the session last sent input
+        (a key press), or None if no client is attached.
+        """
+        try:
+            res = subprocess.run(
+                ["tmux", "list-clients", "-t", session_name, "-F", "#{client_activity}"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        except Exception:
+            return None
+        stamps = [int(v) for v in res.stdout.split() if v.strip().isdigit()]
+        if not stamps:
+            return None
+        return max(0.0, time.time() - max(stamps))
 
     def send_keys(self, session_name: str, text: str, enter: bool = True) -> bool:
         """

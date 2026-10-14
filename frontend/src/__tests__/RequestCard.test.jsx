@@ -219,3 +219,28 @@ describe("priority badge", () => {
     expect(screen.queryByTestId("priority-12")).toBeNull();
   });
 });
+
+describe("delivery states in history", () => {
+  it("labels new statuses and marks implicit replies", async () => {
+    global.EventSource = class {
+      addEventListener() {}
+      close() {}
+    };
+    const stalled = { ...base, id: 50, recipient_id: "gemini", question_type: "prompt_review", prompt: "x", options: [], status: "STALLED" };
+    const implicit = {
+      ...base, id: 51, recipient_id: "gemini", question_type: "prompt_review", prompt: "y", options: [], status: "COMPLETED",
+      response: { responder_id: "gemini", content: "Fa 4.", implicit: true },
+    };
+    global.fetch = vi.fn((url) =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(url === "/api/agents" ? { agents: {}, rules: {} } : [stalled, implicit]),
+      })
+    );
+    window.location.hash = "";
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("tab-history"));
+    expect(await screen.findByTestId("history-card-50")).toHaveTextContent("Bloccata");
+    expect(screen.getByTestId("implicit-51")).toHaveTextContent("implicita");
+  });
+});

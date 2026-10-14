@@ -178,7 +178,8 @@ def test_expiration_covers_approved_and_executing(setup):
         ))
         db.update_request_decision(req.id, RequestStatus.APPROVED)
         if target_status == RequestStatus.EXECUTING:
-            db.update_request_decision(req.id, RequestStatus.EXECUTING)
+            db.claim_injection(req.id)
+            db.confirm_injection(req.id, actor="agent:gemini", via="mcp")
         ids.append(req.id)
     past = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
     with db._get_connection() as conn:
@@ -190,7 +191,8 @@ def test_executing_handoff_keeps_human_decision(setup):
     _, db = setup
     req = db.create_request(RequestCreate(sender_id="claude", recipient_id="gemini", prompt="x"))
     db.update_request_decision(req.id, RequestStatus.APPROVED, edited_prompt="y")
-    executing = db.update_request_decision(req.id, RequestStatus.EXECUTING)
+    db.claim_injection(req.id)
+    executing = db.confirm_injection(req.id, actor="agent:gemini", via="hook")
     assert executing.status == RequestStatus.EXECUTING
     assert executing.edited_prompt == "y"
 

@@ -152,11 +152,44 @@ La notifica annuncia la richiesta e apre la PWA. Non ha bottoni Approva/Rifiuta:
 ## 🤖 Configurazione degli Agenti
 
 ### 1. Avvia le sessioni tmux
-Crea le sessioni tmux con i nomi convenzionati definiti in `AGENTS.md`:
+Crea le sessioni tmux con i nomi definiti in `AGENTS.md`. `PLACET_HOOK_AGENT` dice agli hook (vedi sotto) a quale agente appartiene la sessione:
 ```bash
-tmux new -s agent-claude
-tmux new -s agent-gemini
+tmux new -s agent-claude -e PLACET_HOOK_AGENT=claude claude
+tmux new -s agent-gemini gemini
 ```
+
+### 1b. Hook di Claude Code: stato, conferma di ricezione, risposta implicita
+
+Invece di dedurre tutto dallo schermo, Claude Code comunica a Placet i propri eventi:
+- **`UserPromptSubmit`**: l'agente inizia un turno. Se il prompt è una richiesta Placet, la ricezione viene confermata subito, senza dipendere dal modello.
+- **`Stop`**: il turno è finito. Se il turno era una richiesta Placet e il modello non ha chiamato `placet_reply`, il suo ultimo messaggio viene registrato come risposta **implicita**, marcata così nella PWA e nel messaggio al mittente.
+
+Aggiungi a `~/.claude/settings.json`:
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {"hooks": [{"type": "command", "command": "python3 /opt/placet/hooks/claude_code.py", "timeout": 5}]}
+    ],
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "python3 /opt/placet/hooks/claude_code.py", "timeout": 5}]}
+    ]
+  }
+}
+```
+Lo script agisce solo nelle sessioni avviate con `PLACET_HOOK_AGENT`, quindi le tue sessioni Claude Code normali non vengono toccate. Non stampa mai nulla e termina sempre senza errori. Il token lo legge da `~/.config/placet/agent-tokens.env`.
+
+**Conferma di ricezione (`ack_mode` in `AGENTS.md`):**
+- **`mcp`** (default): il messaggio iniettato chiede al modello di chiamare `placet_ack` prima di iniziare. Con gli hook attivi la conferma arriva comunque dall'hook, e la chiamata del modello diventa innocua.
+- **`hook`**: niente istruzione nel messaggio; la conferma arriva solo dall'hook. Da usare una volta verificato che gli hook funzionano.
+- **`none`**: un invio riuscito vale come ricevuto (comportamento precedente).
+
+Senza conferma entro 90 secondi il bridge ritenta, fino a 3 tentativi. Poi la richiesta diventa `DELIVERY_FAILED` e ricevi una notifica. Se l'agente conferma ma non risponde entro `execution_timeout_seconds` (default 30 minuti), la richiesta diventa `STALLED` e anche questa ti viene notificata. In entrambi i casi il mittente riceve l'esito nella sua sessione.
+
+Il bridge non scrive in una sessione se:
+- l'agente ha dichiarato un turno in corso;
+- è stato premuto un tasto negli ultimi 15 secondi (stai scrivendo tu);
+- lo schermo non mostra il prompt vuoto. Questo controllo vale anche quando l'hook dice "libero", perché potrebbe esserci un menu aperto.
 
 ### 2. Calibra il riconoscimento del prompt
 
@@ -204,11 +237,13 @@ Aggiungi Placet alla configurazione MCP del tuo client (es. `claude_desktop_conf
    - Senza `options` è una domanda di conferma (approva/rifiuta) con nota facoltativa. Con `options` è una scelta singola, oppure multipla con `multiple=True`. L'opzione "Altro" a testo libero è sempre disponibile e non va passata tra le opzioni.
 2. `placet_send_to_agent(target_agent, prompt, context, timeout_seconds)`
    - Invia un compito a un'altra sessione tmux registrata (es. `gemini`).
-3. `placet_reply(request_id, response)`
+3. `placet_ack(request_id)`
+   - Conferma la ricezione di una richiesta iniettata nel terminale (con `ack_mode: mcp`).
+4. `placet_reply(request_id, response)`
    - Restituisce la risposta generata al completamento del task.
-4. `placet_list_agents()`
+5. `placet_list_agents()`
    - Esplora gli agenti attivi, i loro ruoli e le regole di routing.
-5. `placet_check_status(request_id)`
+6. `placet_check_status(request_id)`
    - Interroga lo stato di una richiesta rimasta in sospeso oltre il timeout.
 
 `timeout_seconds` è solo il tempo di attesa dello strumento (5–600 s). La richiesta resta valida fino alla sua scadenza (`expires_at`, default 24 ore), quindi puoi decidere anche dopo che lo strumento ha restituito `PENDING`.

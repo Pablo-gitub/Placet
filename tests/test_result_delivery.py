@@ -81,7 +81,8 @@ def test_human_decision_is_injected_into_sender_session(db, tmux):
 def test_agent_reply_is_injected_into_sender_session(db, tmux):
     req = db.create_request(RequestCreate(sender_id="claude", recipient_id="gemini", prompt="x"))
     db.update_request_decision(req.id, RequestStatus.APPROVED)
-    db.update_request_decision(req.id, RequestStatus.EXECUTING)
+    db.claim_injection(req.id)
+    db.confirm_injection(req.id, actor="agent:gemini", via="mcp")
     db.record_reply(req.id, "gemini", "Complessità O(n log n)")
     _age(db, req.id, 30)
 

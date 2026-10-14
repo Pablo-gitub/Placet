@@ -90,7 +90,7 @@ def test_bridge_daemon_process_approved_request():
 
     # Verify request status in DB transitioned to EXECUTING
     updated_req = db.get_request(req.id)
-    assert updated_req.status == RequestStatus.EXECUTING
+    assert updated_req.status == RequestStatus.DELIVERING
 
     if os.path.exists(db_path):
         os.remove(db_path)

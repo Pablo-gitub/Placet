@@ -7,7 +7,13 @@ const EVENT_LABELS = {
   injected: "Inviata al terminale",
   replied: "Risposta ricevuta",
   delivered: "Esito consegnato al mittente",
-  delivery_failed: "Consegna fallita",
+  delivery_failed: "Consegna dell'esito fallita",
+  injection_claimed: "Invio al terminale",
+  injection_released: "Invio non riuscito",
+  injection_requeued: "Nessuna conferma, nuovo tentativo",
+  injection_failed: "Consegna fallita",
+  acked: "Ricezione confermata",
+  stalled: "Bloccata: nessuna risposta",
   cancelled: "Annullata",
   expired: "Scaduta",
 };
@@ -17,7 +23,8 @@ function actorLabel(actor) {
   if (actor === "system:auto-routing") return "auto-routing";
   if (actor === "bridge") return "bridge";
   const [kind, id] = actor.split(/:(.*)/s);
-  return kind === "human" ? `tu (${id})` : id || actor;
+  if (kind === "human") return `tu (${id})`;
+  return (id || actor).replace(/:hook$/, " (hook)");
 }
 
 function detailText(event) {
@@ -28,6 +35,9 @@ function detailText(event) {
   if (d.custom_text) parts.push(`“${d.custom_text}”`);
   if (d.edited_prompt) parts.push("prompt modificato");
   if (d.via) parts.push(d.via === "api" ? "in attesa diretta" : `via ${d.via}`);
+  if (d.attempt) parts.push(`tentativo ${d.attempt}`);
+  if (d.attempts) parts.push(`${d.attempts} tentativi`);
+  if (d.implicit) parts.push("risposta implicita");
   return parts.join(" · ");
 }
 

@@ -420,3 +420,23 @@ fieldset.options-list {
   color: #f87171;
   border: 1px solid rgba(239, 68, 68, 0.4);
 }
+
+.status-delivering {
+  background: rgba(56, 189, 248, 0.1);
+  color: var(--accent);
+  border: 1px dashed rgba(56, 189, 248, 0.4);
+}
+
+.status-delivery_failed, .status-stalled {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.5);
+}
+
+.implicit-badge {
+  background: rgba(148, 163, 184, 0.15);
+  color: var(--text-muted);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  font-size: 0.65rem;
+  vertical-align: middle;
+}

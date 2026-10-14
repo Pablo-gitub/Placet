@@ -67,8 +67,12 @@ def test_complete_end_to_end_flow():
     assert "Implementa Fibonacci con memoization in Python" in envelope_arg
     assert f"placet_reply(request_id={req.id}" in envelope_arg
 
-    # Verify request transitioned to EXECUTING
-    executing_req = db.get_request(req.id)
+    # Injected and waiting for the agent's acknowledgement
+    assert db.get_request(req.id).status == RequestStatus.DELIVERING
+    assert f"placet_ack(request_id={req.id})" in envelope_arg
+
+    # Agent B acknowledges (placet_ack or its CLI hook)
+    executing_req = db.confirm_injection(req.id, actor="agent:gemini", via="mcp")
     assert executing_req.status == RequestStatus.EXECUTING
 
     # 5. Agent B (Gemini) completes task and calls placet_reply

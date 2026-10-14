@@ -4,11 +4,21 @@ from typing import List, Optional, Set
 
 from backend.app.config import PlacetConfig
 from backend.app.database import Database
-from backend.app.models import RequestModel
-from bridge.stores import BridgeStore, LocalStore
-from bridge.tmux_controller import TmuxController
+from backend.app.models import RequestModel, RequestStatus
+from bridge.stores import BridgeStore, LocalStore, Work
+from bridge.tmux_controller import SessionSpec, TmuxController
 
 logger = logging.getLogger(__name__)
+
+# Do not inject into a session where someone pressed a key this recently:
+# the text would mix with what the user is typing.
+RECENT_INPUT_SECONDS = 15.0
+
+_OUTCOME_NOTES = {
+    RequestStatus.DELIVERY_FAILED: "Il prompt non è stato confermato dall'agente destinatario dopo più tentativi.",
+    RequestStatus.STALLED: "L'agente destinatario ha ricevuto il prompt ma non ha risposto entro il tempo massimo.",
+    RequestStatus.EXPIRED: "La richiesta è scaduta.",
+}
 
 
 class BridgeDaemon:
@@ -24,12 +34,17 @@ class BridgeDaemon:
         self.store = store or LocalStore(db, config)
         self.tmux = tmux or TmuxController()
 
-    def format_injection_envelope(self, req: RequestModel) -> str:
+    def format_injection_envelope(self, req: RequestModel, ack_mode: str = "mcp") -> str:
         prompt_to_send = req.edited_prompt if req.edited_prompt is not None else req.prompt
         context_part = f"\n[Contesto]: {req.context}" if req.context else ""
+        ack_part = (
+            f"Prima di iniziare chiama placet_ack(request_id={req.id}) per confermare la ricezione. "
+            if ack_mode == "mcp" else ""
+        )
         return (
             f"[Placet Request #{req.id} da {req.sender_id}]: {prompt_to_send}{context_part}\n"
-            f"Quando hai terminato, rispondi usando lo strumento MCP placet_reply(request_id={req.id}, response=\"...\")."
+            f"{ack_part}Quando hai terminato, rispondi usando lo strumento MCP "
+            f"placet_reply(request_id={req.id}, response=\"...\")."
         )
 
     def format_result_envelope(self, req: RequestModel) -> str:
@@ -44,96 +59,124 @@ class BridgeDaemon:
                 lines.append(f"Testo modificato dall'utente: {req.edited_prompt}")
         else:
             lines = [f"[Placet] Esito della richiesta #{req.id} a {req.recipient_id}: {req.status.value}."]
+            if req.status in _OUTCOME_NOTES:
+                lines.append(_OUTCOME_NOTES[req.status])
             if req.response is not None:
-                lines.append(f"Risposta di {req.response.responder_id}: {req.response.content}")
+                origin = (
+                    " (risposta implicita: ultimo messaggio dell'agente, non inviato con placet_reply)"
+                    if req.response.implicit else ""
+                )
+                lines.append(f"Risposta di {req.response.responder_id}{origin}: {req.response.content}")
         lines.append(
             "Riprendi il lavoro che avevi sospeso in attesa di questo esito "
             f"(dettagli con placet_check_status(request_id={req.id}))."
         )
         return "\n".join(lines)
 
-    def _session_ready(self, agent_id: str, busy_sessions: Set[str]) -> Optional[str]:
-        """Returns the agent's tmux session if it can receive text now."""
+    def _session_ready(
+        self, agent_id: str, busy_sessions: Set[str], busy_agents: Set[str]
+    ) -> Optional[SessionSpec]:
+        """Returns the agent's session if text can be written into it now."""
         spec = self.store.session_for(agent_id)
         if not spec:
             logger.warning(f"Agent {agent_id} not defined in config.")
             return None
-        session_name = spec.name
-        if session_name in busy_sessions:
+        if spec.name in busy_sessions:
             return None
-        if not self.tmux.session_exists(session_name):
-            logger.debug(f"Tmux session {session_name} for agent {agent_id} is not running.")
+        if agent_id in busy_agents:
+            logger.debug(f"Agent {agent_id} declared a turn in progress.")
             return None
-        if not self.tmux.is_session_idle(session_name, spec.idle_patterns, spec.busy_patterns):
-            logger.debug(f"Session {session_name} is currently busy.")
+        if not self.tmux.session_exists(spec.name):
+            logger.debug(f"Tmux session {spec.name} for agent {agent_id} is not running.")
             return None
-        return session_name
+        # Even an agent that declared itself idle may show a menu or dialog:
+        # the screen check stays as a safety net.
+        if not self.tmux.is_session_idle(spec.name, spec.idle_patterns, spec.busy_patterns):
+            logger.debug(f"Session {spec.name} is currently busy.")
+            return None
+        recent = self.tmux.seconds_since_input(spec.name)
+        if isinstance(recent, (int, float)) and recent < RECENT_INPUT_SECONDS:
+            logger.debug(f"Session {spec.name}: user input {recent:.0f}s ago, waiting.")
+            return None
+        return spec
 
     def process_pending_results(
         self,
         busy_sessions: Optional[Set[str]] = None,
         results: Optional[List[RequestModel]] = None,
+        busy_agents: Optional[Set[str]] = None,
     ) -> int:
         """
         RF-22: injects settled outcomes into the sender's session when the
         sender did not receive them through long-polling (its wait expired).
         """
         busy_sessions = busy_sessions if busy_sessions is not None else set()
-        if results is None:
-            _, results = self.store.work()
+        if results is None or busy_agents is None:
+            work = self.store.work()
+            results = work.results if results is None else results
+            busy_agents = set(work.busy_agents) if busy_agents is None else busy_agents
         delivered = 0
         for req in results:
-            session_name = self._session_ready(req.sender_id, busy_sessions)
-            if session_name is None:
+            spec = self._session_ready(req.sender_id, busy_sessions, busy_agents)
+            if spec is None:
                 continue
             # Claim first: if a long-poll delivered it meanwhile, skip.
             if not self.store.claim_delivery(req.id):
                 continue
-            logger.info(f"Delivering outcome of request #{req.id} to session {session_name}...")
-            if self.tmux.send_keys(session_name, self.format_result_envelope(req), enter=True):
-                busy_sessions.add(session_name)
+            logger.info(f"Delivering outcome of request #{req.id} to session {spec.name}...")
+            if self.tmux.send_keys(spec.name, self.format_result_envelope(req), enter=True):
+                busy_sessions.add(spec.name)
                 delivered += 1
             else:
                 self.store.release_delivery(req.id)
-                logger.error(f"Could not deliver outcome of request #{req.id} to {session_name}.")
+                logger.error(f"Could not deliver outcome of request #{req.id} to {spec.name}.")
         return delivered
 
     def process_pending_injections(
         self,
         busy_sessions: Optional[Set[str]] = None,
         injections: Optional[List[RequestModel]] = None,
+        busy_agents: Optional[Set[str]] = None,
     ) -> int:
         """
-        Injects APPROVED agent-to-agent requests into the recipient's session
-        when it is idle, at most one per session per tick.
+        Injects APPROVED agent-to-agent requests into the recipient's session.
+        The request is claimed (DELIVERING) before sending, so a crash cannot
+        lead to a silent second injection; it becomes EXECUTING when the agent
+        acknowledges it, or right away for agents with ack_mode none.
         """
         busy_sessions = busy_sessions if busy_sessions is not None else set()
-        if injections is None:
-            injections, _ = self.store.work()
+        if injections is None or busy_agents is None:
+            work = self.store.work()
+            injections = work.injections if injections is None else injections
+            busy_agents = set(work.busy_agents) if busy_agents is None else busy_agents
         processed = 0
         for req in injections:
-            session_name = self._session_ready(req.recipient_id, busy_sessions)
-            if session_name is None:
+            spec = self._session_ready(req.recipient_id, busy_sessions, busy_agents)
+            if spec is None:
                 continue
-            logger.info(f"Injecting request #{req.id} into session {session_name}...")
-            if not self.tmux.send_keys(session_name, self.format_injection_envelope(req), enter=True):
-                logger.error(f"Could not inject request #{req.id} into {session_name}.")
+            if not self.store.claim_injection(req.id):
+                logger.info(f"Request #{req.id} is no longer APPROVED, skipping.")
                 continue
-            busy_sessions.add(session_name)
-            # Mark as EXECUTING so it is not injected again.
-            if self.store.mark_injected(req.id):
-                processed += 1
-            else:
-                logger.warning(f"Request #{req.id} changed state while being injected.")
+            logger.info(f"Injecting request #{req.id} into session {spec.name}...")
+            envelope = self.format_injection_envelope(req, spec.ack_mode)
+            if not self.tmux.send_keys(spec.name, envelope, enter=True):
+                self.store.release_injection(req.id)
+                logger.error(f"Could not inject request #{req.id} into {spec.name}.")
+                continue
+            busy_sessions.add(spec.name)
+            if spec.ack_mode == "none":
+                self.store.confirm_injection(req.id)
+            processed += 1
         return processed
 
     def run_loop_step(self) -> int:
         # At most one injection per session per tick, outcomes first: they
         # unblock work that is already waiting.
-        injections, results = self.store.work()
+        work: Work = self.store.work()
         busy_sessions: Set[str] = set()
-        delivered = self.process_pending_results(busy_sessions, results)
-        return delivered + self.process_pending_injections(busy_sessions, injections)
+        busy_agents = set(work.busy_agents)
+        delivered = self.process_pending_results(busy_sessions, work.results, busy_agents)
+        return delivered + self.process_pending_injections(busy_sessions, work.injections, busy_agents)
 
     def run_forever(self, interval_seconds: float = 2.0):
         logger.info("Starting Placet Bridge Daemon...")

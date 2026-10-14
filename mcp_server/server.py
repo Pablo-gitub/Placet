@@ -109,6 +109,20 @@ def placet_send_to_agent(
 
 
 @mcp.tool()
+def placet_ack(request_id: int) -> str:
+    """
+    Conferma di aver ricevuto una richiesta Placet arrivata nel terminale
+    (messaggio "[Placet Request #N da ...]"). Chiamalo subito, prima di iniziare il lavoro:
+    senza conferma Placet considera il prompt non consegnato e lo reinvia.
+    """
+    try:
+        res = client.ack(request_id=request_id)
+        return json.dumps(res, indent=2, ensure_ascii=False)
+    except Exception as e:
+        return _format_error(e)
+
+
+@mcp.tool()
 def placet_reply(
     request_id: int,
     response: str,

@@ -12,6 +12,18 @@ import RequestCard from "./RequestCard";
 import Timeline from "./Timeline";
 import { requestIdFromHash } from "./decisions";
 
+const STATUS_LABELS = {
+  APPROVED: "Approvata",
+  REJECTED: "Rifiutata",
+  DELIVERING: "In consegna",
+  EXECUTING: "In esecuzione",
+  COMPLETED: "Completata",
+  DELIVERY_FAILED: "Consegna fallita",
+  STALLED: "Bloccata",
+  CANCELLED: "Annullata",
+  EXPIRED: "Scaduta",
+};
+
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("inbox");
@@ -346,7 +358,7 @@ export default function App() {
                     <span
                       className={`status-badge status-${req.status.toLowerCase()}`}
                     >
-                      {req.status}
+                      {STATUS_LABELS[req.status] || req.status}
                     </span>
                   </div>
                   <p style={{ fontSize: "0.9rem", marginBottom: "0.6rem" }}>
@@ -378,6 +390,15 @@ export default function App() {
                       }}
                     >
                       <strong>Risposta ({req.response.responder_id}):</strong>{" "}
+                      {req.response.implicit && (
+                        <span
+                          className="status-badge implicit-badge"
+                          data-testid={`implicit-${req.id}`}
+                          title="Ultimo messaggio dell'agente, non inviato con placet_reply"
+                        >
+                          implicita
+                        </span>
+                      )}{" "}
                       {req.response.content}
                     </div>
                   )}

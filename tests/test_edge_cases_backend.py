@@ -100,7 +100,7 @@ async def test_cannot_reply_to_pending_or_cancelled_request(edge_setup):
             "content": "Premature reply",
         }, headers={"Authorization": "Bearer secret-token-gemini"})
         assert reply_resp.status_code == 409
-        assert "not in APPROVED or EXECUTING state" in reply_resp.json()["detail"]
+        assert "not in APPROVED, DELIVERING or EXECUTING state" in reply_resp.json()["detail"]
 
 
 # Test 3: Cannot cancel an already APPROVED, EXECUTING, or COMPLETED request

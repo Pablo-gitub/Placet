@@ -42,7 +42,8 @@ async def test_full_agent_to_agent_timeline(setup):
     async with human_client(app) as human:
         await human.post(f"/api/requests/{req['id']}/decision",
                          json={"status": "APPROVED", "edited_prompt": "Analizza bene"})
-    db.update_request_decision(req["id"], RequestStatus.EXECUTING, actor="bridge")
+    db.claim_injection(req["id"], actor="bridge")
+    db.confirm_injection(req["id"], actor="agent:gemini", via="hook")
     async with agent_client(app, "tok-gemini") as gemini:
         await gemini.post(f"/api/requests/{req['id']}/reply", json={"content": "Fatto"})
     async with agent_client(app, "tok-claude") as claude:
@@ -52,7 +53,8 @@ async def test_full_agent_to_agent_timeline(setup):
         ("agent:claude", "created", {"question_type": "prompt_review",
                                      "expires_at": db.get_request(req["id"]).expires_at.isoformat()}),
         (f"human:{HUMAN_LOGIN}", "decided", {"status": "APPROVED", "edited_prompt": "Analizza bene"}),
-        ("bridge", "injected", {}),
+        ("bridge", "injection_claimed", {"attempt": 1}),
+        ("agent:gemini", "acked", {"via": "hook"}),
         ("agent:gemini", "replied", {"length": 5}),
         ("agent:claude", "delivered", {"via": "api"}),
     ]

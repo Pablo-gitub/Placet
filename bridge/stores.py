@@ -10,38 +10,57 @@ Where the bridge reads its work and records progress.
 import logging
 import os
 import time
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Protocol, Tuple
+from typing import Dict, List, Optional, Protocol
 
 import httpx
 
 from backend.app.config import PlacetConfig, load_agents_config
 from backend.app.database import Database
-from bridge.tmux_controller import SessionSpec
 from backend.app.models import (
+    AGENT_BUSY_TTL_SECONDS,
     RESULT_GRACE_SECONDS,
     RESULT_MAX_AGE_SECONDS,
     RequestModel,
-    RequestStatus,
 )
+from bridge.tmux_controller import SessionSpec
 
 logger = logging.getLogger(__name__)
 
 BRIDGE_ACTOR = "bridge"
 
 
-Work = Tuple[List[RequestModel], List[RequestModel]]
+@dataclass
+class Work:
+    # APPROVED agent-to-agent requests, at most one per recipient.
+    injections: List[RequestModel] = field(default_factory=list)
+    # Settled outcomes to deliver to the sender's session.
+    results: List[RequestModel] = field(default_factory=list)
+    # Agents whose hooks declared a turn in progress.
+    busy_agents: List[str] = field(default_factory=list)
 
 
 class BridgeStore(Protocol):
-    def work(self) -> Work:
-        """(approved requests to inject, settled outcomes to deliver)"""
-        ...
-
-    def mark_injected(self, request_id: int) -> bool: ...
+    def work(self) -> Work: ...
+    # Injections: claim before sending, release if sending failed, confirm
+    # only for agents without acknowledgements (ack_mode none).
+    def claim_injection(self, request_id: int) -> bool: ...
+    def release_injection(self, request_id: int) -> None: ...
+    def confirm_injection(self, request_id: int) -> bool: ...
+    # Outcome delivery to the sender.
     def claim_delivery(self, request_id: int) -> bool: ...
     def release_delivery(self, request_id: int) -> None: ...
     def session_for(self, agent_id: str) -> Optional[SessionSpec]: ...
+
+
+def _session_spec(spec) -> SessionSpec:
+    return SessionSpec(
+        name=spec.tmux_session,
+        idle_patterns=list(spec.idle_patterns),
+        busy_patterns=list(spec.busy_patterns),
+        ack_mode=spec.ack_mode,
+    )
 
 
 class LocalStore:
@@ -51,20 +70,23 @@ class LocalStore:
 
     def work(self) -> Work:
         now = datetime.now(timezone.utc)
-        injections = [
-            r for r in self.db.list_requests(status=RequestStatus.APPROVED, oldest_first=True)
-            if r.recipient_id != "human"
-        ]
-        results = self.db.list_undelivered_results(
-            settled_before=now - timedelta(seconds=RESULT_GRACE_SECONDS),
-            settled_after=now - timedelta(seconds=RESULT_MAX_AGE_SECONDS),
+        return Work(
+            injections=self.db.injections_ready(),
+            results=self.db.list_undelivered_results(
+                settled_before=now - timedelta(seconds=RESULT_GRACE_SECONDS),
+                settled_after=now - timedelta(seconds=RESULT_MAX_AGE_SECONDS),
+            ),
+            busy_agents=self.db.busy_agents(AGENT_BUSY_TTL_SECONDS),
         )
-        return injections, results
 
-    def mark_injected(self, request_id: int) -> bool:
-        return self.db.update_request_decision(
-            request_id, RequestStatus.EXECUTING, actor=BRIDGE_ACTOR
-        ) is not None
+    def claim_injection(self, request_id: int) -> bool:
+        return self.db.claim_injection(request_id, actor=BRIDGE_ACTOR) is not None
+
+    def release_injection(self, request_id: int) -> None:
+        self.db.release_injection(request_id, actor=BRIDGE_ACTOR)
+
+    def confirm_injection(self, request_id: int) -> bool:
+        return self.db.confirm_injection(request_id, actor=BRIDGE_ACTOR, via="bridge") is not None
 
     def claim_delivery(self, request_id: int) -> bool:
         return self.db.mark_delivered(request_id, actor=BRIDGE_ACTOR, via="tmux")
@@ -74,9 +96,7 @@ class LocalStore:
 
     def session_for(self, agent_id: str) -> Optional[SessionSpec]:
         agent = self.config.get_agent(agent_id)
-        if not agent:
-            return None
-        return SessionSpec(agent.tmux_session, agent.idle_patterns, agent.busy_patterns)
+        return _session_spec(agent) if agent else None
 
 
 class HttpStore:
@@ -102,26 +122,33 @@ class HttpStore:
         resp = self.client.get("/api/bridge/work")
         resp.raise_for_status()
         data = resp.json()
-        return (
-            [RequestModel(**r) for r in data["injections"]],
-            [RequestModel(**r) for r in data["results"]],
+        return Work(
+            injections=[RequestModel(**r) for r in data["injections"]],
+            results=[RequestModel(**r) for r in data["results"]],
+            busy_agents=list(data.get("busy_agents", [])),
         )
 
-    def _post_ok(self, method: str, path: str) -> bool:
+    def _call_ok(self, method: str, path: str) -> bool:
         resp = self.client.request(method, path)
         if resp.status_code == 409:
             return False
         resp.raise_for_status()
         return True
 
-    def mark_injected(self, request_id: int) -> bool:
-        return self._post_ok("POST", f"/api/bridge/requests/{request_id}/injected")
+    def claim_injection(self, request_id: int) -> bool:
+        return self._call_ok("POST", f"/api/bridge/requests/{request_id}/claim")
+
+    def release_injection(self, request_id: int) -> None:
+        self._call_ok("DELETE", f"/api/bridge/requests/{request_id}/claim")
+
+    def confirm_injection(self, request_id: int) -> bool:
+        return self._call_ok("POST", f"/api/bridge/requests/{request_id}/injected")
 
     def claim_delivery(self, request_id: int) -> bool:
-        return self._post_ok("POST", f"/api/bridge/requests/{request_id}/delivered")
+        return self._call_ok("POST", f"/api/bridge/requests/{request_id}/delivered")
 
     def release_delivery(self, request_id: int) -> None:
-        self._post_ok("DELETE", f"/api/bridge/requests/{request_id}/delivered")
+        self._call_ok("DELETE", f"/api/bridge/requests/{request_id}/delivered")
 
     def session_for(self, agent_id: str) -> Optional[SessionSpec]:
         if time.monotonic() - self._sessions_at > self.AGENTS_CACHE_SECONDS:
@@ -129,9 +156,10 @@ class HttpStore:
             resp.raise_for_status()
             self._sessions = {
                 agent_id: SessionSpec(
-                    spec["tmux_session"],
-                    spec.get("idle_patterns", []),
-                    spec.get("busy_patterns", []),
+                    name=spec["tmux_session"],
+                    idle_patterns=spec.get("idle_patterns", []),
+                    busy_patterns=spec.get("busy_patterns", []),
+                    ack_mode=spec.get("ack_mode", "mcp"),
                 )
                 for agent_id, spec in resp.json()["agents"].items()
             }

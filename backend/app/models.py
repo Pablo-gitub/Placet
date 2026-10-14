@@ -8,7 +8,10 @@ class RequestStatus(str, Enum):
     PENDING = "PENDING"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
-    EXECUTING = "EXECUTING"
+    DELIVERING = "DELIVERING"            # injected, waiting for the agent's ack
+    EXECUTING = "EXECUTING"              # the agent confirmed it received the prompt
+    DELIVERY_FAILED = "DELIVERY_FAILED"  # no ack after the maximum attempts
+    STALLED = "STALLED"                  # executing for too long without a reply
     COMPLETED = "COMPLETED"
     CANCELLED = "CANCELLED"
     EXPIRED = "EXPIRED"
@@ -20,12 +23,15 @@ FINAL_STATUSES = frozenset({
     RequestStatus.COMPLETED,
     RequestStatus.CANCELLED,
     RequestStatus.EXPIRED,
+    RequestStatus.DELIVERY_FAILED,
+    RequestStatus.STALLED,
 })
 
 # States still waiting for something to happen; they are subject to expiration.
 OPEN_STATUSES = frozenset({
     RequestStatus.PENDING,
     RequestStatus.APPROVED,
+    RequestStatus.DELIVERING,
     RequestStatus.EXECUTING,
 })
 
@@ -34,6 +40,14 @@ OPEN_STATUSES = frozenset({
 # the max age (a session restarted hours later should not be flooded).
 RESULT_GRACE_SECONDS = 10.0
 RESULT_MAX_AGE_SECONDS = 6 * 3600
+
+# Injection acknowledgement: without an ack within this time the injection
+# is retried, up to the maximum attempts, then the request fails.
+ACK_TIMEOUT_SECONDS = 90.0
+MAX_DELIVERY_ATTEMPTS = 3
+# An agent that declared itself busy is trusted for at most this long (a
+# crashed CLI never sends "idle").
+AGENT_BUSY_TTL_SECONDS = 30 * 60
 
 DEFAULT_EXPIRES_IN_SECONDS = 24 * 3600
 MAX_EXPIRES_IN_SECONDS = 7 * 24 * 3600
@@ -63,6 +77,9 @@ class ResponseModel(BaseModel):
     responder_id: str
     content: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    # True when captured from the agent's last message at the end of its turn,
+    # because it did not call placet_reply.
+    implicit: bool = False
 
 
 
@@ -142,6 +159,9 @@ class RequestModel(BaseModel):
     # long-polling or a bridge injection into its session).
     updated_at: Optional[datetime] = None
     delivered_at: Optional[datetime] = None
+    delivery_attempts: int = 0
+    delivering_since: Optional[datetime] = None
+    executing_since: Optional[datetime] = None
 
 
 class RequestEvent(BaseModel):

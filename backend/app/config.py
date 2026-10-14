@@ -1,7 +1,7 @@
 import os
 import re
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 import logging
 
 import yaml
@@ -22,6 +22,13 @@ class AgentSpec(BaseModel):
     idle_patterns: List[str] = Field(default_factory=list)
     # Extra substrings meaning "busy" (besides the built-in interrupt hints).
     busy_patterns: List[str] = Field(default_factory=list)
+    # How the agent confirms it received an injected prompt:
+    #   hook - a CLI hook (Claude Code UserPromptSubmit) calls the API;
+    #   mcp  - the model calls placet_ack as instructed by the envelope;
+    #   none - no confirmation, a successful tmux send counts as received.
+    ack_mode: Literal["hook", "mcp", "none"] = "mcp"
+    # EXECUTING longer than this without a reply becomes STALLED.
+    execution_timeout_seconds: int = 1800
 
 
 class RouteRule(BaseModel):
@@ -115,6 +122,8 @@ def load_agents_config(file_path: Optional[str] = None) -> PlacetConfig:
                 default_timeout_seconds=a_data.get("default_timeout_seconds", 180),
                 idle_patterns=a_data.get("idle_patterns", []),
                 busy_patterns=a_data.get("busy_patterns", []),
+                ack_mode=a_data.get("ack_mode", "mcp"),
+                execution_timeout_seconds=a_data.get("execution_timeout_seconds", 1800),
             )
 
     rules: Dict[str, RouteRule] = {}

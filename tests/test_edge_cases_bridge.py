@@ -82,8 +82,8 @@ def test_bridge_daemon_throttles_multiple_requests_for_same_session():
     processed = daemon.process_pending_injections()
     assert processed == 1
 
-    # First request should be EXECUTING
-    assert db.get_request(req1.id).status == RequestStatus.EXECUTING
+    # First request is being delivered
+    assert db.get_request(req1.id).status == RequestStatus.DELIVERING
     # Second request should still be APPROVED (queued for next pass)
     assert db.get_request(req2.id).status == RequestStatus.APPROVED
 
