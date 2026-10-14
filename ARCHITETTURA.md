@@ -61,7 +61,7 @@ Placet risolve due problemi strutturali dei flussi di lavoro con agenti AI:
     - `PLACET_API_TOKEN`: token di autenticazione per impedire spoofing dell'identità.
 - **Strumenti esposti:**
   1. `placet_ask_human(question, options, allow_custom_text, context)`: richiede approvazione/decisione all'utente.
-  2. `placet_send_to_agent(target_agent, prompt, context, require_human_approval)`: invia un prompt a un'altra sessione registrata.
+  2. `placet_send_to_agent(target_agent, prompt, context, timeout_seconds)`: invia un prompt a un'altra sessione registrata. Se serve la tua approvazione lo decidono le regole in `AGENTS.md`, non l'agente.
   3. `placet_reply(request_id, response, status)`: restituisce la risposta alla richiesta completata.
   4. `placet_list_agents()`: ottiene la topologia, lo stato (idle/busy) e le descrizioni degli altri agenti.
   5. `placet_check_status(request_id)`: verifica lo stato di una richiesta rimasta in sospeso oltre il timeout.
@@ -223,5 +223,7 @@ rules:
 1. **Isolamento di Rete:** Il backend non è esposto sul web pubblico. È accessibile esclusivamente sulla tailnet privata tramite Tailscale.
 2. **Autenticazione Agente-to-Placet:** Ogni agente si autentica con un Bearer token univoco (`PLACET_API_TOKEN`). L'identità è quella associata al token in `AGENTS.md`, mai un campo del corpo della richiesta. Un agente vede e annulla solo le proprie richieste e risponde solo a quelle indirizzate a lui. I token non vengono mai esposti da `/api/agents`.
 3. **Autenticazione Umano (PWA):** Il backend ascolta su due ingressi. Il listener TCP `127.0.0.1` è per gli agenti. Il socket Unix è esposto sulla tailnet con `tailscale serve unix:<socket>`, e solo lì è accettato l'header `Tailscale-User-Login`, ristretto agli utenti in `PLACET_ALLOWED_USERS`. Decisioni, lista delle richieste e flusso SSE sono riservati all'umano.
-   - *Limite noto:* finché backend e agenti girano con lo stesso utente Linux, gli agenti possono raggiungere socket e DB. L'isolamento completo richiede un utente dedicato o un container.
+   - *Isolamento:* in produzione il backend gira come utente di sistema `placet` (`deploy/placet-backend.service`). Il codice sta in `/opt/placet` (root), la configurazione in `/etc/placet`, il DB in `/var/lib/placet` e il socket in `/run/placet` (0700). Nessuno di questi è accessibile in scrittura all'utente degli agenti. Docker non darebbe lo stesso risultato, perché chi è nel gruppo `docker` ha di fatto i privilegi di root sui container.
+   - *Bridge:* gira come utente proprietario delle sessioni tmux e parla col backend solo via REST (`/api/bridge/*`) con un token dedicato. Quel token permette solo di leggere il lavoro da fare e di segnare iniezioni e consegne: non permette di decidere, creare o leggere richieste.
+   - *Limite:* gli agenti condividono lo stesso utente Linux e possono leggere i token l'uno dell'altro. I token servono a distinguere gli agenti nell'audit, non a separarli tra loro.
 4. **Principio del Minimo Privilegio (RS-04):** Gli agenti non possiedono chiavi per pubblicare sui social o applicare modifiche critiche in autonomia: possono solo proporre e attendere la validazione di Placet.

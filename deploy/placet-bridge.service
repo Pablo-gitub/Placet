@@ -1,0 +1,19 @@
+# Placet bridge, run as YOUR user (it drives your tmux sessions).
+# It talks to the backend over REST with the bridge token and has no access
+# to the database. Install with deploy/install.sh, or by hand:
+#   cp deploy/placet-bridge.service ~/.config/systemd/user/
+#   systemctl --user enable --now placet-bridge
+[Unit]
+Description=Placet bridge (tmux injection for AI agents)
+After=default.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/placet
+EnvironmentFile=%h/.config/placet/bridge.env
+ExecStart=/opt/placet/.venv/bin/python run_bridge.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

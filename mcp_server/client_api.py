@@ -10,7 +10,13 @@ class PlacetClient:
         agent_id: Optional[str] = None,
         api_token: Optional[str] = None,
     ):
-        self.base_url = (base_url or os.environ.get("PLACET_BASE_URL", "http://localhost:8000")).rstrip("/")
+        # PLACET_API_URL (same name as the bridge); PLACET_BASE_URL is the old name.
+        self.base_url = (
+            base_url
+            or os.environ.get("PLACET_API_URL")
+            or os.environ.get("PLACET_BASE_URL")
+            or "http://127.0.0.1:8000"
+        ).rstrip("/")
         # Identity comes from the token. PLACET_AGENT_ID is optional: when set,
         # the backend checks it matches the token, catching misconfigured clients.
         self.agent_id = agent_id or os.environ.get("PLACET_AGENT_ID") or None
@@ -57,7 +63,6 @@ class PlacetClient:
         target_agent: str,
         prompt: str,
         context: Optional[str] = None,
-        require_human_approval: bool = True,
         timeout_seconds: int = 180,
     ) -> Dict[str, Any]:
         timeout = max(5, min(int(timeout_seconds), 600))

@@ -2,8 +2,12 @@ import os
 import re
 from pathlib import Path
 from typing import Dict, List, Optional
+import logging
+
 import yaml
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 class AgentSpec(BaseModel):
@@ -71,11 +75,15 @@ def _interpolate_env_vars(text: str) -> str:
 
 def load_agents_config(file_path: Optional[str] = None) -> PlacetConfig:
     if file_path is None:
-        # Default to AGENTS.md in root of workspace
-        file_path = str(Path(__file__).resolve().parent.parent.parent / "AGENTS.md")
+        # PLACET_AGENTS_FILE in production (e.g. /etc/placet/AGENTS.md, not
+        # writable by agents); AGENTS.md in the workspace root otherwise.
+        file_path = os.environ.get("PLACET_AGENTS_FILE") or str(
+            Path(__file__).resolve().parent.parent.parent / "AGENTS.md"
+        )
 
     path = Path(file_path)
     if not path.exists():
+        logger.warning(f"Agents file {path} not found: no agent can authenticate.")
         return PlacetConfig()
 
     content = path.read_text(encoding="utf-8")

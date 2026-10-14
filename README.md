@@ -66,6 +66,9 @@ cd ..
 | `PLACET_HUMAN_SOCKET` | Socket Unix per la PWA (default `$XDG_RUNTIME_DIR/placet/human.sock`) |
 | `PLACET_CORS_ORIGINS` | Origini ammesse via CORS, solo per un dev server separato (default: nessuna) |
 | `PLACET_DB_PATH` | Percorso del DB SQLite |
+| `PLACET_AGENTS_FILE` | Percorso di `AGENTS.md` (in produzione `/etc/placet/AGENTS.md`) |
+| `PLACET_BRIDGE_TOKEN` | Token del bridge, ammesso solo sugli endpoint `/api/bridge/*` |
+| `PLACET_API_URL` | Per bridge e server MCP: indirizzo del backend (default `http://127.0.0.1:8000`) |
 | `PLACET_BASE_URL` | Indirizzo della PWA visto dall'iPhone (es. `https://muletto.tail1234.ts.net`), usato nei link delle notifiche |
 | `PLACET_NTFY_URL`, `PLACET_NTFY_TOPIC`, `PLACET_NTFY_TOKEN` | Server ntfy, topic e token di accesso. Senza URL, topic e `PLACET_BASE_URL` le notifiche sono disattivate |
 
@@ -87,7 +90,27 @@ Il backend ha due ingressi:
 
 La PWA è poi raggiungibile su `https://<nome-macchina>.<tailnet>.ts.net`.
 
-> **Limite noto:** gli agenti girano con il tuo stesso utente Linux, quindi possono comunque raggiungere il socket e il file SQLite. La separazione diventa effettiva eseguendo il backend con un utente dedicato o in un container.
+`run_all.py` è la modalità di sviluppo: backend e bridge nello stesso processo, con il tuo utente. Gli agenti, che girano anch'essi come te, potrebbero leggere il DB e approvarsi le richieste. Per l'uso reale installa i servizi come descritto sotto.
+
+### 4b. Installazione sul muletto (produzione)
+
+```bash
+sudo deploy/install.sh --login tuo-login@github
+```
+
+Lo script, che si può rilanciare anche per aggiornare:
+- **Codice:** compila la PWA e copia il codice in `/opt/placet`, di proprietà di root. Gli agenti non possono modificare il codice che approva le richieste.
+- **Backend:** crea l'utente di sistema `placet` e installa `placet-backend.service`. Il DB sta in `/var/lib/placet` e il socket della PWA in `/run/placet`, entrambi accessibili solo a `placet`.
+- **Configurazione:** crea `/etc/placet/AGENTS.md` (da qui in poi modifichi questo, non la copia nel repository) e `/etc/placet/placet.env` con token generati a caso.
+- **Bridge:** installa `placet-bridge.service` come servizio del tuo utente. Il bridge parla col backend solo via REST, con il token in `~/.config/placet/bridge.env`, e non ha accesso al DB.
+- **Token degli agenti:** li trovi in `~/.config/placet/agent-tokens.env`, da copiare nelle configurazioni MCP.
+
+Poi, una sola volta:
+```bash
+sudo tailscale serve --bg unix:/run/placet/human.sock
+```
+
+**Cosa protegge e cosa no.** Un agente non può approvare richieste, perché l'approvazione arriva solo dal socket riservato a tailscaled. Non può nemmeno modificare codice, regole di routing o DB. Gli agenti però girano tutti come te, quindi possono leggere i token l'uno dell'altro: i token servono a distinguerli nell'audit log, non a proteggerli tra loro. Non aggiungere `paolo` a sudo senza password: annullerebbe l'isolamento.
 
 ### 5. Sviluppo del frontend
 
@@ -157,10 +180,11 @@ Aggiungi Placet alla configurazione MCP del tuo client (es. `claude_desktop_conf
 {
   "mcpServers": {
     "placet": {
-      "command": "/home/paolo/Projects/placet/.venv/bin/python",
+      "command": "/opt/placet/.venv/bin/python",
       "args": ["-m", "mcp_server.server"],
       "env": {
-        "PLACET_BASE_URL": "http://localhost:8000",
+        "PYTHONPATH": "/opt/placet",
+        "PLACET_API_URL": "http://127.0.0.1:8000",
         "PLACET_AGENT_ID": "claude",
         "PLACET_API_TOKEN": "<valore di PLACET_TOKEN_CLAUDE>"
       }
@@ -178,7 +202,7 @@ Aggiungi Placet alla configurazione MCP del tuo client (es. `claude_desktop_conf
 1. `placet_ask_human(question, options, multiple, context, timeout_seconds)`
    - Richiede una decisione/scelta all'utente umano su iPhone.
    - Senza `options` è una domanda di conferma (approva/rifiuta) con nota facoltativa. Con `options` è una scelta singola, oppure multipla con `multiple=True`. L'opzione "Altro" a testo libero è sempre disponibile e non va passata tra le opzioni.
-2. `placet_send_to_agent(target_agent, prompt, context, require_human_approval, timeout_seconds)`
+2. `placet_send_to_agent(target_agent, prompt, context, timeout_seconds)`
    - Invia un compito a un'altra sessione tmux registrata (es. `gemini`).
 3. `placet_reply(request_id, response)`
    - Restituisce la risposta generata al completamento del task.

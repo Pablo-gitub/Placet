@@ -50,6 +50,8 @@ export default function App() {
   };
 
   useEffect(() => {
+    // Data fetching: the state updates happen after the response arrives.
+    // oxlint-disable-next-line react/set-state-in-effect
     fetchRequests();
     fetchAgents();
 
@@ -104,17 +106,20 @@ export default function App() {
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
+  // Once the linked request is loaded, open its tab (adjusting state during
+  // render, as React recommends over an effect) and remember to scroll to it.
+  const [scrollToId, setScrollToId] = useState(null);
   const jumpStatus = requests.find((r) => r.id === jumpId)?.status;
+  if (jumpId !== null && jumpStatus !== undefined) {
+    setActiveTab(jumpStatus === "PENDING" ? "inbox" : "history");
+    setScrollToId(jumpId);
+    setJumpId(null);
+  }
 
   useEffect(() => {
-    if (jumpId === null || jumpStatus === undefined) return;
-    setActiveTab(jumpStatus === "PENDING" ? "inbox" : "history");
-    setJumpId(null);
-    // Wait for the tab to render before scrolling.
-    requestAnimationFrame(() => {
-      document.getElementById(`request-${jumpId}`)?.scrollIntoView?.({ block: "center" });
-    });
-  }, [jumpId, jumpStatus]);
+    if (scrollToId === null) return;
+    document.getElementById(`request-${scrollToId}`)?.scrollIntoView?.({ block: "center" });
+  }, [scrollToId]);
 
   const showFeedback = (text, isError = false) => {
     setFeedback({ text, isError });
@@ -171,7 +176,7 @@ export default function App() {
         </div>
         <div className="live-indicator" data-testid="live-indicator">
           <Radio size={12} className={connected ? "text-emerald-400 animate-pulse" : "text-amber-400"} />
-          {connected ? "LIVE TAILSCALE" : "CONNECTING..."}
+          {connected ? "LIVE" : "RICONNESSIONE…"}
         </div>
       </header>
 

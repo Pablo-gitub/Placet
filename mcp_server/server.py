@@ -77,7 +77,6 @@ def placet_send_to_agent(
     target_agent: str,
     prompt: str,
     context: Optional[str] = None,
-    require_human_approval: bool = True,
     timeout_seconds: int = 180,
 ) -> str:
     """
@@ -94,7 +93,6 @@ def placet_send_to_agent(
             target_agent=target_agent,
             prompt=prompt,
             context=context,
-            require_human_approval=require_human_approval,
             timeout_seconds=timeout_seconds,
         )
         return json.dumps(res, indent=2, ensure_ascii=False)

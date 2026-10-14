@@ -1,0 +1,46 @@
+# Placet backend, run as the dedicated "placet" system user.
+# Code in /opt/placet (root-owned), config in /etc/placet, database in
+# /var/lib/placet and the PWA socket in /run/placet: none of them writable by
+# the user the agents run as. Installed by deploy/install.sh.
+[Unit]
+Description=Placet backend (human approvals for AI agents)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=placet
+Group=placet
+WorkingDirectory=/opt/placet
+EnvironmentFile=/etc/placet/placet.env
+Environment=PLACET_AGENTS_FILE=/etc/placet/AGENTS.md
+Environment=PLACET_DB_PATH=/var/lib/placet/placet.db
+Environment=PLACET_HUMAN_SOCKET=/run/placet/human.sock
+Environment=PLACET_HOST=127.0.0.1
+ExecStart=/opt/placet/.venv/bin/python run_server.py
+Restart=on-failure
+RestartSec=3
+
+StateDirectory=placet
+StateDirectoryMode=0700
+RuntimeDirectory=placet
+RuntimeDirectoryMode=0700
+UMask=0077
+
+# Hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
