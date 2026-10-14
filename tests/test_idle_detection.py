@@ -24,6 +24,22 @@ CLAUDE_IDLE = """\
   ? for shortcuts
 """
 
+# Captured from the real Claude Code 2.1 idle prompt: a dimmed suggestion.
+CLAUDE_IDLE_SUGGESTION = """\
+    ▎ https://code.claude.com/docs/en/permission-mode
+      +2 more · /status
+   ──────────────────────────────────────────────────
+   ❯ Try "refactor client_api.py"
+   ──────────────────────────────────────────────────
+     ⏵⏵ auto mode on (shift+tab to cycle) · ← for a…
+"""
+
+# Captured from the real Claude Code login screen.
+CLAUDE_LOGIN = """\
+   &state=GYAKz287QnHB3kR4HGmwdYpEBgaxRl03uQCwM1HLzZM
+    Paste code here if prompted >
+"""
+
 CLAUDE_WORKING = """\
 > Analizza il modulo
 ● Reading backend/app/main.py…
@@ -74,6 +90,8 @@ def _controller(*screens):
 
 @pytest.mark.parametrize("screen, patterns, idle", [
     (CLAUDE_IDLE, CLAUDE, True),
+    (CLAUDE_IDLE_SUGGESTION, CLAUDE, True),
+    (CLAUDE_LOGIN, CLAUDE, False),
     (CLAUDE_WORKING, CLAUDE, False),
     (CLAUDE_TYPING, CLAUDE, False),
     (CLAUDE_THEME_MENU, CLAUDE, False),

@@ -6,8 +6,8 @@ agents:
     token: "${PLACET_TOKEN_CLAUDE}"
     allowed_targets: ["gemini", "codex", "human"]
     default_timeout_seconds: 180
-    # Prompt di input vuoto, da calibrare con: python -m bridge.calibrate claude
-    idle_patterns: ['^\s*[│|]?\s*[>❯]\s*[│|]?\s*$']
+    # Prompt vuoto, anche con il suggerimento grigio 'Try "..."' (calibrato su Claude Code 2.1)
+    idle_patterns: ['^\s*[│|]?\s*[>❯]\s*(Try ".*")?\s*[│|]?\s*$']
   gemini:
     name: "Gemini CLI / Antigravity"
     tmux_session: "agent-gemini"
