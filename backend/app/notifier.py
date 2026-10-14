@@ -1,41 +1,118 @@
-import json
+"""
+Push notifications through ntfy.
+
+The notification only announces the request and links to the PWA: decisions
+are taken there, seeing the full text (no approve/reject buttons). Prompt and
+context are included only when the ntfy server is private (self-hosted);
+on a public server they would leave the tailnet.
+"""
 import logging
-from typing import Optional
+import os
+from dataclasses import dataclass
+from typing import Dict, Optional, Tuple
+from urllib.parse import urlparse
+
 import httpx
-from backend.app.models import RequestModel, RequestStatus
+
+from backend.app.models import RequestModel
 
 logger = logging.getLogger(__name__)
+
+PUBLIC_NTFY_HOSTS = frozenset({"ntfy.sh"})
+BODY_PREVIEW_CHARS = 300
+
+
+@dataclass(frozen=True)
+class NtfyConfig:
+    server_url: str = ""
+    topic: str = ""
+    # PWA address as seen from the iPhone (e.g. https://host.tailnet.ts.net).
+    base_url: str = ""
+    access_token: str = ""
+
+    @classmethod
+    def from_env(cls) -> "NtfyConfig":
+        cfg = cls(
+            server_url=os.environ.get("PLACET_NTFY_URL", "").rstrip("/"),
+            topic=os.environ.get("PLACET_NTFY_TOPIC", ""),
+            base_url=os.environ.get("PLACET_BASE_URL", "").rstrip("/"),
+            access_token=os.environ.get("PLACET_NTFY_TOKEN", ""),
+        )
+        if not cfg.enabled:
+            logger.warning(
+                "ntfy notifications disabled: set PLACET_NTFY_URL, PLACET_NTFY_TOPIC "
+                "and PLACET_BASE_URL to enable them."
+            )
+        elif not cfg.is_private:
+            logger.warning(
+                f"ntfy server {cfg.server_url} is public: notifications will not "
+                "include prompt or context."
+            )
+        return cfg
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.server_url and self.topic and self.base_url)
+
+    @property
+    def is_private(self) -> bool:
+        host = (urlparse(self.server_url).hostname or "").lower()
+        return host not in PUBLIC_NTFY_HOSTS
+
+
+def _ascii_header(value: str) -> str:
+    # HTTP header values must be latin-1; keep them plain ASCII.
+    return value.encode("ascii", "replace").decode("ascii")
+
+
+def build_notification(
+    request: RequestModel, cfg: NtfyConfig
+) -> Tuple[str, Dict[str, str], str]:
+    """Returns (url, headers, body) for the ntfy publish call."""
+    open_url = f"{cfg.base_url}/#request-{request.id}"
+    title = f"Placet #{request.id}: {request.sender_id} -> {request.recipient_id}"
+
+    if cfg.is_private:
+        body = request.prompt
+        if len(body) > BODY_PREVIEW_CHARS:
+            body = body[:BODY_PREVIEW_CHARS] + "..."
+        if request.context:
+            body = f"{request.context}\n\n{body}"
+    else:
+        body = f"Nuova richiesta da {request.sender_id}. Apri Placet per leggerla."
+
+    headers = {
+        "Title": _ascii_header(title),
+        "Priority": "high" if request.recipient_id == "human" else "default",
+        "Tags": "robot",
+        "Click": open_url,
+        "Actions": f"view, Apri, {open_url}, clear=true",
+    }
+    if cfg.access_token:
+        headers["Authorization"] = f"Bearer {cfg.access_token}"
+
+    return f"{cfg.server_url}/{cfg.topic}", headers, body
 
 
 async def send_ntfy_notification(
     request: RequestModel,
-    ntfy_topic: Optional[str] = None,
-    base_url: str = "http://localhost:8000",
+    cfg: NtfyConfig,
+    client: Optional[httpx.AsyncClient] = None,
 ) -> bool:
-    if not ntfy_topic:
+    if not cfg.enabled:
         return False
 
-    title = f"Placet: {request.sender_id} -> {request.recipient_id}"
-    body = request.prompt[:200]
-    if request.context:
-        body = f"{request.context}\n\n{body}"
-
-    headers = {
-        "Title": title,
-        "Priority": "high" if request.recipient_id == "human" else "default",
-        "Tags": "robot,white_check_mark",
-        "Actions": (
-            f"view, Apri PWA, {base_url}/#request-{request.id}; "
-            f"http, Approva, {base_url}/api/requests/{request.id}/decision, body={json.dumps({'status': 'APPROVED'})}; "
-            f"http, Rifiuta, {base_url}/api/requests/{request.id}/decision, body={json.dumps({'status': 'REJECTED'})}"
-        ),
-    }
-
-    url = f"https://ntfy.sh/{ntfy_topic}"
+    url, headers, body = build_notification(request, cfg)
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        if client is not None:
             resp = await client.post(url, content=body.encode("utf-8"), headers=headers)
-            return resp.status_code == 200
+        else:
+            async with httpx.AsyncClient(timeout=5.0) as own_client:
+                resp = await own_client.post(url, content=body.encode("utf-8"), headers=headers)
+        if resp.status_code != 200:
+            logger.warning(f"ntfy rejected notification for request #{request.id}: HTTP {resp.status_code}")
+            return False
+        return True
     except Exception as e:
         logger.warning(f"Impossibile inviare notifica ntfy: {e}")
         return False

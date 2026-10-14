@@ -63,7 +63,7 @@ Placet è un **punto unico di supervisione umana e bus di cooperazione per agent
 | ID | Requisito | Stato |
 |---|---|---|
 | RF-10 | Interfaccia utente come **PWA installata sulla Home dell'iPhone**, servita su connessione sicura Tailscale | [Deciso] |
-| RF-11 | Notifiche push immediate su iPhone tramite integrazione con **ntfy** (con deep link alla PWA e pulsanti rapidi di azione) | [Deciso] |
+| RF-11 | Notifiche push immediate su iPhone tramite **ntfy self-hosted** in tailnet, con deep link alla PWA. Nessun pulsante Approva/Rifiuta nella notifica: si decide solo dalla PWA vedendo il testo completo (decisione del 14/10/2026) | [Deciso] |
 | RF-12 | Possibilità nella PWA di **modificare il testo del prompt** direttamente nell'interfaccia prima di approvarlo | [Deciso] |
 | RF-13 | **Storico e Audit Log** completo di tutte le interazioni, decisioni, modifiche e risposte scambiate | [Deciso] |
 
@@ -95,7 +95,7 @@ Placet è un **punto unico di supervisione umana e bus di cooperazione per agent
 | **Backend & API** | Python 3.11+ · FastAPI · SQLite · SSE (Server-Sent Events) |
 | **Server MCP** | Python SDK ufficiale (`mcp`) via stdio |
 | **Bridge Locale** | Demone Python + comandi `tmux` (`send-keys`, `capture-pane`) |
-| **Notifiche Push iPhone** | Canale privato `ntfy` con action buttons |
+| **Notifiche Push iPhone** | `ntfy` self-hosted in tailnet, solo azione "Apri" |
 | **Frontend PWA** | React + Vite + Tailwind CSS |
 | **Rete & Certificati** | Tailscale Serve (HTTPS e certificati automatici) |
 | **Registry Agenti** | File `AGENTS.md` (YAML frontmatter + Markdown descrittivo) sincronizzato con DB |

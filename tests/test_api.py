@@ -44,7 +44,7 @@ rules:
     db.init_db()
     config = load_agents_config(md_path)
     
-    app = create_app(db=db, config=config, ntfy_topic="test-topic")
+    app = create_app(db=db, config=config)
     
     yield app, db, config
     

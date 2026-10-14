@@ -41,7 +41,7 @@ rules:
 """)
     db = Database(os.path.join(tmpdir, "placet.db"))
     db.init_db()
-    app = create_app(db=db, config=load_agents_config(md_path), ntfy_topic="")
+    app = create_app(db=db, config=load_agents_config(md_path))
     yield app, db
 
 

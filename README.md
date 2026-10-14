@@ -65,7 +65,9 @@ cd ..
 | `PLACET_HOST` / `PLACET_PORT` | Listener TCP per gli agenti (default `127.0.0.1:8000`) |
 | `PLACET_HUMAN_SOCKET` | Socket Unix per la PWA (default `$XDG_RUNTIME_DIR/placet/human.sock`) |
 | `PLACET_CORS_ORIGINS` | Origini ammesse via CORS, solo per un dev server separato (default: nessuna) |
-| `PLACET_DB_PATH`, `PLACET_NTFY_TOPIC` | Percorso del DB SQLite e topic ntfy |
+| `PLACET_DB_PATH` | Percorso del DB SQLite |
+| `PLACET_BASE_URL` | Indirizzo della PWA visto dall'iPhone (es. `https://muletto.tail1234.ts.net`), usato nei link delle notifiche |
+| `PLACET_NTFY_URL`, `PLACET_NTFY_TOPIC`, `PLACET_NTFY_TOKEN` | Server ntfy, topic e token di accesso. Senza URL, topic e `PLACET_BASE_URL` le notifiche sono disattivate |
 
 Genera i token con `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
 
@@ -86,6 +88,32 @@ Il backend ha due ingressi:
 La PWA è poi raggiungibile su `https://<nome-macchina>.<tailnet>.ts.net`.
 
 > **Limite noto:** gli agenti girano con il tuo stesso utente Linux, quindi possono comunque raggiungere il socket e il file SQLite. La separazione diventa effettiva eseguendo il backend con un utente dedicato o in un container.
+
+### 5. Notifiche push con ntfy self-hosted
+
+La notifica annuncia la richiesta e apre la PWA. Non ha bottoni Approva/Rifiuta: si decide solo dalla PWA, vedendo il testo completo. Prompt e contesto finiscono nella notifica solo se il server ntfy è privato; con `ntfy.sh` pubblico la notifica dice solo chi ha scritto.
+
+1. Avvia ntfy sul muletto, raggiungibile solo in locale:
+   ```bash
+   docker run -d --name ntfy --restart unless-stopped \
+     -p 127.0.0.1:2586:80 -v ntfy-cache:/var/cache/ntfy -v ntfy-etc:/etc/ntfy \
+     -e NTFY_BASE_URL=https://muletto.tail1234.ts.net:8443 \
+     -e NTFY_UPSTREAM_BASE_URL=https://ntfy.sh \
+     -e NTFY_AUTH_FILE=/etc/ntfy/user.db -e NTFY_AUTH_DEFAULT_ACCESS=deny-all \
+     binwiederhier/ntfy serve
+   ```
+   `NTFY_UPSTREAM_BASE_URL` serve per le notifiche istantanee su iOS: Apple consegna la push tramite ntfy.sh, che riceve solo un ID messaggio senza contenuto. L'app sull'iPhone scarica poi il messaggio dal tuo server via Tailscale.
+2. Crea un utente e un token per Placet:
+   ```bash
+   docker exec -it ntfy ntfy user add --role=admin paolo
+   docker exec -it ntfy ntfy token add paolo
+   ```
+3. Esponi ntfy sulla tailnet su una porta HTTPS separata da quella della PWA:
+   ```bash
+   tailscale serve --bg --https=8443 http://127.0.0.1:2586
+   ```
+4. Nell'app ntfy per iOS aggiungi il server `https://muletto.tail1234.ts.net:8443` con il tuo utente e iscriviti al topic.
+5. Imposta `PLACET_NTFY_URL=https://muletto.tail1234.ts.net:8443`, `PLACET_NTFY_TOPIC`, `PLACET_NTFY_TOKEN` e `PLACET_BASE_URL`.
 
 ---
 

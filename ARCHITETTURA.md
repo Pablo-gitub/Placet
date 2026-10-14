@@ -14,7 +14,7 @@ Placet risolve due problemi strutturali dei flussi di lavoro con agenti AI:
 ```text
  ┌────────────────────────────────────────────────────────┐
  │                   iPhone (Paolo)                       │
- │  • Notifiche push immediate (ntfy con bottoni/deep link)│
+ │  • Notifiche push immediate (ntfy con deep link)       │
  │  • PWA (Tailscale HTTPS): review, edit prompt, audit   │
  └───────────────────────────▲────────────────────────────┘
                              │
@@ -48,7 +48,7 @@ Placet risolve due problemi strutturali dei flussi di lavoro con agenti AI:
 - **Responsabilità:**
   - Esporre le REST API per creazione, lettura, aggiornamento e annullamento delle richieste.
   - Gestire stream SSE (Server-Sent Events) o WebSocket per aggiornare la PWA in tempo reale.
-  - Inviare notifiche push su smartphone tramite webhook `ntfy` (`https://ntfy.sh/<topic_privato>` o istanza self-hosted).
+  - Inviare notifiche push su smartphone tramite webhook `ntfy` self-hosted in tailnet. La notifica contiene solo il link alla PWA; prompt e contesto sono inclusi solo se il server ntfy non è pubblico.
   - Gestire la sincronizzazione bidirezionale con `AGENTS.md`.
   - Fornire endpoint di long-polling per le chiamate MCP sincrone.
 

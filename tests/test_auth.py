@@ -43,7 +43,7 @@ def setup():
         f.write(AGENTS_MD)
     db = Database(os.path.join(tmpdir, "placet.db"))
     db.init_db()
-    app = create_app(db=db, config=load_agents_config(md_path), ntfy_topic="")
+    app = create_app(db=db, config=load_agents_config(md_path))
     return app, db
 
 
@@ -80,7 +80,7 @@ async def test_human_listener_rejects_unknown_or_missing_login(setup):
 async def test_no_allowed_users_means_no_human_access(setup, monkeypatch):
     monkeypatch.setenv("PLACET_ALLOWED_USERS", "")
     _, db = setup
-    app = create_app(db=db, config=load_agents_config(None), ntfy_topic="")
+    app = create_app(db=db, config=load_agents_config(None))
     async with human_client(app) as human:
         assert (await human.get("/api/requests")).status_code == 403
 
@@ -188,7 +188,7 @@ async def test_no_cors_headers_by_default(setup):
 async def test_cors_only_for_configured_origins(setup):
     _, db = setup
     app = create_app(
-        db=db, config=load_agents_config(None), ntfy_topic="",
+        db=db, config=load_agents_config(None),
         cors_origins=["http://localhost:5173"],
     )
     async with human_client(app) as human:

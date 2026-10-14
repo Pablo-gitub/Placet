@@ -29,7 +29,7 @@ from backend.app.models import (
     RequestStatus,
     RequestDecision,
 )
-from backend.app.notifier import send_ntfy_notification
+from backend.app.notifier import NtfyConfig, send_ntfy_notification
 
 logger = logging.getLogger(__name__)
 
@@ -65,8 +65,7 @@ def _parse_origins(raw: Optional[str]) -> List[str]:
 def create_app(
     db: Optional[Database] = None,
     config: Optional[PlacetConfig] = None,
-    ntfy_topic: Optional[str] = None,
-    base_url: str = "http://localhost:8000",
+    ntfy: Optional[NtfyConfig] = None,
     allowed_users: Optional[List[str]] = None,
     cors_origins: Optional[List[str]] = None,
 ) -> FastAPI:
@@ -140,8 +139,8 @@ def create_app(
     if config is None:
         config = load_agents_config()
 
-    if ntfy_topic is None:
-        ntfy_topic = os.environ.get("PLACET_NTFY_TOPIC", "")
+    if ntfy is None:
+        ntfy = NtfyConfig.from_env()
 
     if allowed_users is None:
         allowed_users = load_allowed_users()
@@ -228,8 +227,7 @@ def create_app(
             background_tasks.add_task(
                 send_ntfy_notification,
                 request=created,
-                ntfy_topic=ntfy_topic,
-                base_url=base_url,
+                cfg=ntfy,
             )
         notify_change(created.id)
 
