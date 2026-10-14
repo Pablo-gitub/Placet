@@ -40,7 +40,13 @@ step() { printf '\n==> %s\n' "$*"; }
 token() { python3 -c 'import secrets; print(secrets.token_urlsafe(32))'; }
 
 step "Building the PWA (as $OWNER)"
-as_owner bash -c "cd '$REPO_DIR/frontend' && npm ci --no-audit --no-fund && npm run build"
+# sudo resets PATH: load nvm if node comes from there.
+as_owner bash -c "
+  export NVM_DIR=\"\$HOME/.nvm\"
+  [ -s \"\$NVM_DIR/nvm.sh\" ] && . \"\$NVM_DIR/nvm.sh\"
+  command -v npm >/dev/null || { echo 'npm not found for $OWNER' >&2; exit 1; }
+  cd '$REPO_DIR/frontend' && npm ci --no-audit --no-fund && npm run build
+"
 
 step "System user $SERVICE_USER"
 if ! id "$SERVICE_USER" &>/dev/null; then

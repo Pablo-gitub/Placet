@@ -95,8 +95,9 @@ La PWA è poi raggiungibile su `https://<nome-macchina>.<tailnet>.ts.net`.
 ### 4b. Installazione sul muletto (produzione)
 
 ```bash
-sudo deploy/install.sh --login tuo-login@github
+sudo deploy/install.sh
 ```
+Il login Tailscale ammesso alla PWA viene rilevato da `tailscale status`. Se il rilevamento fallisce, passalo esplicitamente con `--login <login>`, usando il login Tailscale reale.
 
 Lo script, che si può rilanciare anche per aggiornare:
 - **Codice:** compila la PWA e copia il codice in `/opt/placet`, di proprietà di root. Gli agenti non possono modificare il codice che approva le richieste.
