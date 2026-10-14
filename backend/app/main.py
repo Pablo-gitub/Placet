@@ -24,6 +24,7 @@ from backend.app.config import PlacetConfig, load_agents_config
 from backend.app.database import Database
 from backend.app.models import (
     RequestCreate,
+    RequestEvent,
     RequestModel,
     RequestStatus,
     QuestionType,
@@ -127,7 +128,7 @@ def create_app(
         delivered so the bridge does not inject it into the session again.
         """
         if req is not None and who.id == req.sender_id and is_settled(req) and req.delivered_at is None:
-            db.mark_delivered(req.id)
+            db.mark_delivered(req.id, actor=who.actor, via="api")
             req = db.get_request(req.id)
         return req
 
@@ -225,13 +226,14 @@ def create_app(
         # Check if approval required
         needs_approval = config.requires_approval(req.sender_id, req.recipient_id)
 
-        created = db.create_request(req)
+        created = db.create_request(req, actor=who.actor)
 
         if not needs_approval:
             # Auto-approval
             created = db.update_request_decision(
                 request_id=created.id,
                 status=RequestStatus.APPROVED,
+                actor="system:auto-routing",
             )
         else:
             # Send mobile notification
@@ -272,6 +274,11 @@ def create_app(
             raise HTTPException(status_code=404, detail="Request not found")
         return deliver_to(who, req)
 
+    @app.get("/api/requests/{request_id}/events", response_model=List[RequestEvent])
+    async def request_events(request_id: int, who: Principal = Depends(principal)):
+        require_party(who, get_or_404(request_id))
+        return db.list_events(request_id)
+
     @app.post("/api/requests/{request_id}/decision", response_model=RequestModel)
     async def decide_request(
         request_id: int,
@@ -298,6 +305,7 @@ def create_app(
             edited_prompt=decision.edited_prompt,
             selected_options=decision.selected_options,
             custom_text=decision.custom_text,
+            actor=who.actor,
         )
         if updated is None:
             # State changed between the check and the update (e.g. expired or cancelled).
@@ -340,6 +348,7 @@ def create_app(
             request_id=request_id,
             responder_id=who.id,
             content=payload.content,
+            actor=who.actor,
         )
         if completed is None:
             current = db.get_request(request_id)
@@ -367,7 +376,9 @@ def create_app(
                 detail=f"Cannot cancel request in {req.status.value} state (must be PENDING).",
             )
 
-        if not db.cancel_request(request_id, by_sender=(who.id == req.sender_id)):
+        if not db.cancel_request(
+            request_id, by_sender=(who.id == req.sender_id), actor=who.actor
+        ):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Cannot cancel request {request_id}: its state changed concurrently.",

@@ -9,6 +9,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import RequestCard from "./RequestCard";
+import Timeline from "./Timeline";
 import { requestIdFromHash } from "./decisions";
 
 
@@ -384,6 +385,7 @@ export default function App() {
                   >
                     Creato: {new Date(req.created_at).toLocaleString()}
                   </div>
+                  <Timeline requestId={req.id} />
                 </div>
               ))
             )}

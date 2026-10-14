@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -125,6 +125,18 @@ class RequestModel(BaseModel):
     # long-polling or a bridge injection into its session).
     updated_at: Optional[datetime] = None
     delivered_at: Optional[datetime] = None
+
+
+class RequestEvent(BaseModel):
+    """One entry of the audit log (RF-13)."""
+    id: int
+    request_id: int
+    at: datetime
+    # "agent:<id>", "human:<tailscale login>", "bridge" or "system".
+    actor: str
+    # created, decided, injected, replied, cancelled, expired, delivered, delivery_failed
+    event: str
+    details: Dict[str, Any] = Field(default_factory=dict)
 
 
 def decision_error(req: "RequestModel", decision: RequestDecision) -> Optional[str]:

@@ -90,14 +90,14 @@ class BridgeDaemon:
             if session_name is None:
                 continue
             # Claim first: if a long-poll delivered it meanwhile, skip.
-            if not self.db.mark_delivered(req.id):
+            if not self.db.mark_delivered(req.id, actor="bridge", via="tmux"):
                 continue
             logger.info(f"Delivering outcome of request #{req.id} to session {session_name}...")
             if self.tmux.send_keys(session_name, self.format_result_envelope(req), enter=True):
                 busy_sessions.add(session_name)
                 delivered += 1
             else:
-                self.db.clear_delivered(req.id)
+                self.db.clear_delivered(req.id, actor="bridge")
                 logger.error(f"Could not deliver outcome of request #{req.id} to {session_name}.")
         return delivered
 
@@ -153,6 +153,7 @@ class BridgeDaemon:
                     edited_prompt=req.edited_prompt,
                     selected_options=req.selected_options,
                     custom_text=req.custom_text,
+                    actor="bridge",
                 )
                 processed += 1
 

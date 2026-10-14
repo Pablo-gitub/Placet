@@ -34,6 +34,11 @@ class Principal:
     def is_human(self) -> bool:
         return self.kind == "human"
 
+    @property
+    def actor(self) -> str:
+        """How this principal appears in the audit log."""
+        return f"{self.kind}:{self.id}"
+
 
 class HumanListener:
     """

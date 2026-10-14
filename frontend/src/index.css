@@ -344,3 +344,61 @@ fieldset.options-list {
   color: var(--text-muted);
   border: 1px solid rgba(148, 163, 184, 0.3);
 }
+
+.timeline {
+  margin-top: 0.6rem;
+  border-top: 1px solid var(--border-color);
+  padding-top: 0.5rem;
+}
+
+.timeline-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: none;
+  border: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 0.25rem 0;
+}
+
+.timeline-list {
+  list-style: none;
+  margin-top: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+}
+
+.timeline-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.5rem;
+  padding-left: 0.6rem;
+  border-left: 2px solid var(--border-color);
+}
+
+.timeline-list time {
+  color: var(--text-muted);
+  width: 100%;
+}
+
+.timeline-event {
+  font-weight: 600;
+}
+
+.timeline-actor {
+  color: var(--accent);
+}
+
+.timeline-detail {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.timeline-error {
+  color: var(--danger);
+}

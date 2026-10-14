@@ -2,12 +2,13 @@ import sqlite3
 import json
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 from pathlib import Path
 from backend.app.models import (
     OPEN_STATUSES,
     RequestCreate,
+    RequestEvent,
     RequestModel,
     RequestStatus,
     QuestionType,
@@ -75,13 +76,66 @@ class Database:
                 FOREIGN KEY (request_id) REFERENCES requests(id)
             );
             """)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS request_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_id INTEGER NOT NULL,
+                at TEXT NOT NULL,
+                actor TEXT NOT NULL,
+                event TEXT NOT NULL,
+                details TEXT,
+                FOREIGN KEY (request_id) REFERENCES requests(id)
+            );
+            """)
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_request_events_request ON request_events(request_id);"
+            )
             cursor.execute("PRAGMA table_info(requests);")
             cols = [r["name"] for r in cursor.fetchall()]
             for col in ("expires_at", "updated_at", "delivered_at"):
                 if col not in cols:
                     cursor.execute(f"ALTER TABLE requests ADD COLUMN {col} TEXT;")
 
-    def create_request(self, req: RequestCreate) -> RequestModel:
+    @staticmethod
+    def _log(
+        cursor: sqlite3.Cursor,
+        request_id: int,
+        actor: str,
+        event: str,
+        details: Optional[Dict[str, Any]] = None,
+        at: Optional[str] = None,
+    ) -> None:
+        """Appends to the audit log, in the same transaction as the change."""
+        cursor.execute(
+            "INSERT INTO request_events (request_id, at, actor, event, details) VALUES (?, ?, ?, ?, ?)",
+            (
+                request_id,
+                at or datetime.now(timezone.utc).isoformat(),
+                actor,
+                event,
+                json.dumps(details, ensure_ascii=False) if details else None,
+            ),
+        )
+
+    def list_events(self, request_id: int) -> List[RequestEvent]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM request_events WHERE request_id = ? ORDER BY id ASC", (request_id,)
+            )
+            return [
+                RequestEvent(
+                    id=r["id"],
+                    request_id=r["request_id"],
+                    at=datetime.fromisoformat(r["at"]),
+                    actor=r["actor"],
+                    event=r["event"],
+                    details=json.loads(r["details"]) if r["details"] else {},
+                )
+                for r in cursor.fetchall()
+            ]
+
+    def create_request(self, req: RequestCreate, actor: Optional[str] = None) -> RequestModel:
         now = datetime.now(timezone.utc)
         expires_at = now + timedelta(seconds=req.expires_in_seconds)
         with self._get_connection() as conn:
@@ -107,6 +161,11 @@ class Database:
                 ),
             )
             req_id = cursor.lastrowid
+            self._log(
+                cursor, req_id, actor or f"agent:{req.sender_id}", "created",
+                {"question_type": req.question_type.value, "expires_at": expires_at.isoformat()},
+                at=now.isoformat(),
+            )
         return self.get_request(req_id)
 
     def get_request(self, request_id: int) -> Optional[RequestModel]:
@@ -203,6 +262,7 @@ class Database:
         edited_prompt: Optional[str] = None,
         selected_options: Optional[List[str]] = None,
         custom_text: Optional[str] = None,
+        actor: str = "system",
     ) -> Optional[RequestModel]:
         """
         Applies a decision (PENDING -> APPROVED/REJECTED) or the bridge hand-off
@@ -246,10 +306,21 @@ class Database:
                 )
             if cursor.rowcount == 0:
                 return None
+            if status == RequestStatus.EXECUTING:
+                self._log(cursor, request_id, actor, "injected", at=now)
+            else:
+                details: Dict[str, Any] = {"status": status.value}
+                if edited_prompt is not None:
+                    details["edited_prompt"] = edited_prompt
+                if selected_options:
+                    details["selected_options"] = selected_options
+                if custom_text:
+                    details["custom_text"] = custom_text
+                self._log(cursor, request_id, actor, "decided", details, at=now)
         return self.get_request(request_id)
 
     def record_reply(
-        self, request_id: int, responder_id: str, content: str
+        self, request_id: int, responder_id: str, content: str, actor: Optional[str] = None
     ) -> Optional[RequestModel]:
         now = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
@@ -275,9 +346,13 @@ class Database:
                 """,
                 (request_id, responder_id, content, now),
             )
+            self._log(cursor, request_id, actor or f"agent:{responder_id}", "replied",
+                      {"length": len(content)}, at=now)
         return self.get_request(request_id)
 
-    def cancel_request(self, request_id: int, by_sender: bool = False) -> bool:
+    def cancel_request(
+        self, request_id: int, by_sender: bool = False, actor: str = "system"
+    ) -> bool:
         """
         Cancels a PENDING request. When the sender itself cancels, it already
         knows the outcome, so the result is marked as delivered.
@@ -298,7 +373,10 @@ class Database:
                     RequestStatus.PENDING.value,
                 ),
             )
-            return cursor.rowcount > 0
+            if cursor.rowcount == 0:
+                return False
+            self._log(cursor, request_id, actor, "cancelled", at=now)
+            return True
 
     def expire_stale_requests(self) -> List[int]:
         """
@@ -319,9 +397,12 @@ class Database:
                 """,
                 [RequestStatus.EXPIRED.value, now, *open_values, now],
             )
-            return sorted(r["id"] for r in cursor.fetchall())
+            expired = sorted(r["id"] for r in cursor.fetchall())
+            for req_id in expired:
+                self._log(cursor, req_id, "system", "expired", at=now)
+            return expired
 
-    def mark_delivered(self, request_id: int) -> bool:
+    def mark_delivered(self, request_id: int, actor: str = "system", via: str = "") -> bool:
         """Records that the outcome reached the sender; True only the first time."""
         now = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
@@ -330,12 +411,21 @@ class Database:
                 "UPDATE requests SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL",
                 (now, request_id),
             )
-            return cursor.rowcount > 0
+            if cursor.rowcount == 0:
+                return False
+            self._log(cursor, request_id, actor, "delivered", {"via": via} if via else None, at=now)
+            return True
 
-    def clear_delivered(self, request_id: int) -> None:
+    def clear_delivered(self, request_id: int, actor: str = "system") -> None:
         """Undoes mark_delivered after a failed delivery, so it is retried."""
         with self._get_connection() as conn:
-            conn.execute("UPDATE requests SET delivered_at = NULL WHERE id = ?", (request_id,))
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE requests SET delivered_at = NULL WHERE id = ? AND delivered_at IS NOT NULL",
+                (request_id,),
+            )
+            if cursor.rowcount:
+                self._log(cursor, request_id, actor, "delivery_failed")
 
     def list_undelivered_results(
         self, settled_before: datetime, settled_after: datetime, limit: int = 50

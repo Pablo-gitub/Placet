@@ -174,3 +174,38 @@ describe("deep link after answering", () => {
     expect(screen.getByTestId("request-card-31")).toBeInTheDocument();
   });
 });
+
+describe("history timeline", () => {
+  it("loads and shows the audit events of a request on demand", async () => {
+    global.EventSource = class {
+      addEventListener() {}
+      close() {}
+    };
+    const done = { ...base, id: 40, question_type: "confirmation", prompt: "Ok?", options: [], status: "APPROVED" };
+    const events = [
+      { id: 1, request_id: 40, at: "2026-10-14T10:00:00+00:00", actor: "agent:claude", event: "created", details: {} },
+      { id: 2, request_id: 40, at: "2026-10-14T10:01:00+00:00", actor: "human:paolo@test", event: "decided", details: { status: "APPROVED", custom_text: "va bene" } },
+      { id: 3, request_id: 40, at: "2026-10-14T10:05:00+00:00", actor: "bridge", event: "delivered", details: { via: "tmux" } },
+    ];
+    global.fetch = vi.fn((url) =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve(
+            url === "/api/agents" ? { agents: {}, rules: {} } : url.endsWith("/events") ? events : [done]
+          ),
+      })
+    );
+    window.location.hash = "";
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("tab-history"));
+    fireEvent.click(await screen.findByTestId("timeline-toggle-40"));
+
+    const list = await screen.findByTestId("timeline-40");
+    await waitFor(() => expect(list).toHaveTextContent("Esito consegnato al mittente"));
+    expect(list).toHaveTextContent("tu (paolo@test)");
+    expect(list).toHaveTextContent("APPROVED · “va bene”");
+    expect(list).toHaveTextContent("via tmux");
+    expect(global.fetch).toHaveBeenCalledWith("/api/requests/40/events");
+  });
+});
