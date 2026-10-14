@@ -8,6 +8,7 @@ from typing import List, Optional, Sequence
 logger = logging.getLogger(__name__)
 
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07")
+SGR = re.compile(r"\x1b\[([0-9;]*)m")
 
 # Plain shells: the last line is a prompt ending in $, %, #, > or ❯.
 SHELL_PROMPT_PATTERNS = [r"[\$%❯>#]\s*$"]
@@ -81,7 +82,9 @@ class TmuxController:
         """Visible screen of the session's active pane."""
         try:
             res = subprocess.run(
-                ["tmux", "capture-pane", "-p", "-t", session_name],
+                # -e keeps the formatting: dimmed placeholder text must be
+                # told apart from text the user typed.
+                ["tmux", "capture-pane", "-p", "-e", "-t", session_name],
                 capture_output=True,
                 text=True,
                 check=True,
@@ -93,7 +96,38 @@ class TmuxController:
 
     @staticmethod
     def strip_ansi(text: str) -> str:
-        return ANSI_ESCAPE.sub("", text)
+        """
+        Plain text of a captured screen, without the text shown dimmed (SGR 2).
+        Agent TUIs render placeholders and suggested next prompts dimmed in
+        an empty input box (e.g. Claude Code's "❯ controlla se ha risposto"):
+        they are not input, and must not make the prompt look non-empty.
+        """
+        out = []
+        dim = False
+        pos = 0
+        for match in SGR.finditer(text):
+            if not dim:
+                out.append(text[pos:match.start()])
+            else:
+                # Keep line structure even inside dimmed text.
+                out.append("\n" * text.count("\n", pos, match.start()))
+            params = match.group(1).split(";") if match.group(1) else ["0"]
+            i = 0
+            while i < len(params):
+                param = params[i]
+                if param in ("38", "48", "58"):
+                    # Extended colour: 38;5;N or 38;2;R;G;B - not attributes.
+                    mode = params[i + 1] if i + 1 < len(params) else ""
+                    i += 3 if mode == "5" else 5 if mode == "2" else 2
+                    continue
+                if param in ("", "0", "22"):
+                    dim = False
+                elif param == "2":
+                    dim = True
+                i += 1
+            pos = match.end()
+        out.append(text[pos:] if not dim else "\n" * text.count("\n", pos))
+        return ANSI_ESCAPE.sub("", "".join(out))
 
     def check_idle(
         self,
