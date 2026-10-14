@@ -31,6 +31,7 @@ class PlacetClient:
         context: Optional[str] = None,
         timeout_seconds: int = 180,
     ) -> Dict[str, Any]:
+        timeout = max(5, min(int(timeout_seconds), 600))
         url = f"{self.base_url}/api/requests"
         payload = {
             "sender_id": self.agent_id,
@@ -39,14 +40,14 @@ class PlacetClient:
             "prompt": question,
             "context": context,
             "options": options or [],
-            "timeout_seconds": timeout_seconds,
+            "timeout_seconds": timeout,
         }
-        with httpx.Client(timeout=float(timeout_seconds + 5)) as client:
+        with httpx.Client(timeout=float(timeout + 5)) as client:
             resp = client.post(
                 url,
                 json=payload,
                 headers=self._headers(),
-                params={"wait_seconds": timeout_seconds},
+                params={"wait_seconds": timeout},
             )
             resp.raise_for_status()
             return resp.json()
@@ -59,6 +60,7 @@ class PlacetClient:
         require_human_approval: bool = True,
         timeout_seconds: int = 180,
     ) -> Dict[str, Any]:
+        timeout = max(5, min(int(timeout_seconds), 600))
         url = f"{self.base_url}/api/requests"
         payload = {
             "sender_id": self.agent_id,
@@ -67,17 +69,18 @@ class PlacetClient:
             "prompt": prompt,
             "context": context,
             "options": [],
-            "timeout_seconds": timeout_seconds,
+            "timeout_seconds": timeout,
         }
-        with httpx.Client(timeout=float(timeout_seconds + 5)) as client:
+        with httpx.Client(timeout=float(timeout + 5)) as client:
             resp = client.post(
                 url,
                 json=payload,
                 headers=self._headers(),
-                params={"wait_seconds": timeout_seconds},
+                params={"wait_seconds": timeout},
             )
             resp.raise_for_status()
             return resp.json()
+
 
     def reply(
         self,

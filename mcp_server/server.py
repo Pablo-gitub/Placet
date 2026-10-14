@@ -1,6 +1,7 @@
 import json
 import logging
 from typing import List, Optional
+import httpx
 from mcp.server.mcpserver import MCPServer
 from mcp_server.client_api import PlacetClient
 
@@ -12,6 +13,29 @@ mcp = MCPServer(
 )
 
 client = PlacetClient()
+
+
+def _format_error(e: Exception) -> str:
+    if isinstance(e, httpx.HTTPStatusError):
+        detail = str(e)
+        try:
+            body = e.response.json()
+            if isinstance(body, dict) and "detail" in body:
+                detail = body["detail"]
+        except Exception:
+            pass
+        return json.dumps({
+            "status": "ERROR",
+            "code": e.response.status_code,
+            "error": str(e),
+            "detail": detail,
+        }, ensure_ascii=False)
+
+    return json.dumps({
+        "status": "ERROR",
+        "error": str(e),
+        "detail": "Placet backend unreachable or encountered a network error.",
+    }, ensure_ascii=False)
 
 
 @mcp.tool()
@@ -36,7 +60,7 @@ def placet_ask_human(
         )
         return json.dumps(res, indent=2, ensure_ascii=False)
     except Exception as e:
-        return f"Error contacting Placet backend: {e}"
+        return _format_error(e)
 
 
 @mcp.tool()
@@ -63,7 +87,7 @@ def placet_send_to_agent(
         )
         return json.dumps(res, indent=2, ensure_ascii=False)
     except Exception as e:
-        return f"Error sending task to agent {target_agent}: {e}"
+        return _format_error(e)
 
 
 @mcp.tool()
@@ -79,7 +103,7 @@ def placet_reply(
         res = client.reply(request_id=request_id, response=response)
         return json.dumps(res, indent=2, ensure_ascii=False)
     except Exception as e:
-        return f"Error submitting reply for request {request_id}: {e}"
+        return _format_error(e)
 
 
 @mcp.tool()
@@ -92,7 +116,7 @@ def placet_list_agents() -> str:
         res = client.list_agents()
         return json.dumps(res, indent=2, ensure_ascii=False)
     except Exception as e:
-        return f"Error listing agents: {e}"
+        return _format_error(e)
 
 
 @mcp.tool()
@@ -106,7 +130,7 @@ def placet_check_status(
         res = client.check_status(request_id=request_id)
         return json.dumps(res, indent=2, ensure_ascii=False)
     except Exception as e:
-        return f"Error checking request status {request_id}: {e}"
+        return _format_error(e)
 
 
 if __name__ == "__main__":
