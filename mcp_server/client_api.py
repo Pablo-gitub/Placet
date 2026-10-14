@@ -68,12 +68,14 @@ class PlacetClient:
         context: Optional[str] = None,
         timeout_seconds: int = 180,
         priority: Optional[str] = None,
+        target_session: Optional[str] = None,
     ) -> Dict[str, Any]:
         timeout = max(5, min(int(timeout_seconds), 600))
         url = f"{self.base_url}/api/requests"
         payload = {
             "sender_id": self.agent_id,
             "recipient_id": target_agent,
+            "recipient_session_id": target_session,
             "question_type": "prompt_review",
             "prompt": prompt,
             "context": context,
@@ -115,11 +117,18 @@ class PlacetClient:
             return resp.json()
 
     def list_agents(self) -> Dict[str, Any]:
-        url = f"{self.base_url}/api/agents"
         with httpx.Client(timeout=10.0) as client:
-            resp = client.get(url, headers=self._headers())
+            resp = client.get(f"{self.base_url}/api/agents", headers=self._headers())
             resp.raise_for_status()
-            return resp.json()
+            data = resp.json()
+            sessions = client.get(f"{self.base_url}/api/sessions", headers=self._headers())
+            if sessions.status_code == 200 and isinstance(sessions.json(), list):
+                data["sessions"] = [
+                    {k: s.get(k) for k in ("id", "agent_id", "cwd", "title", "entrypoint",
+                                           "state", "reachable", "last_seen_at")}
+                    for s in sessions.json()
+                ]
+            return data
 
     def check_status(self, request_id: int) -> Dict[str, Any]:
         url = f"{self.base_url}/api/requests/{request_id}"

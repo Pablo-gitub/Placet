@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import RequestCard from "./RequestCard";
 import Timeline from "./Timeline";
+import Sessions from "./Sessions";
 import { requestIdFromHash } from "./decisions";
 
 const STATUS_LABELS = {
@@ -29,6 +30,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("inbox");
   const [requests, setRequests] = useState([]);
   const [agentsData, setAgentsData] = useState({ agents: {}, rules: {} });
+  const [sessions, setSessions] = useState([]);
   const [focusId, setFocusId] = useState(() => requestIdFromHash(window.location.hash));
   // Request to jump to once it is loaded; cleared after the jump, so that
   // answering it does not drag the view to the history tab.
@@ -49,6 +51,15 @@ export default function App() {
     }
   };
 
+  const fetchSessions = async () => {
+    try {
+      const res = await fetch("/api/sessions");
+      if (res.ok) setSessions(await res.json());
+    } catch (e) {
+      console.error("Error fetching sessions:", e);
+    }
+  };
+
   const fetchAgents = async () => {
     try {
       const res = await fetch("/api/agents");
@@ -66,6 +77,7 @@ export default function App() {
     // oxlint-disable-next-line react/set-state-in-effect
     fetchRequests();
     fetchAgents();
+    fetchSessions();
 
     // Setup Server-Sent Events (SSE)
     let evtSource = null;
@@ -76,8 +88,21 @@ export default function App() {
         // Automatically resynchronize state on reconnection
         fetchRequests();
         fetchAgents();
+        fetchSessions();
       };
       evtSource.onerror = () => setConnected(false);
+
+      evtSource.addEventListener("session_update", (event) => {
+        try {
+          const updated = JSON.parse(event.data);
+          setSessions((prev) => {
+            const others = prev.filter((x) => x.id !== updated.id);
+            return updated.ended_at ? others : [updated, ...others];
+          });
+        } catch (err) {
+          console.error("Error parsing SSE event:", err);
+        }
+      });
 
       evtSource.addEventListener("request_update", (event) => {
         try {
@@ -240,7 +265,7 @@ export default function App() {
           onClick={() => setActiveTab("agents")}
         >
           <Bot size={16} />
-          Agenti
+          Sessioni
         </button>
         <button
           data-testid="tab-history"
@@ -269,6 +294,7 @@ export default function App() {
                   submitting={submittingId === req.id}
                   highlighted={req.id === focusId}
                   onDecide={handleDecision}
+                  sessions={sessions}
                 />
               ))
             )}
@@ -277,8 +303,9 @@ export default function App() {
 
         {activeTab === "agents" && (
           <div data-testid="agents-section">
-            <h2 style={{ fontSize: "1rem", marginBottom: "1rem", fontWeight: 700 }}>
-              Sessioni e Agenti Registrati
+            <Sessions sessions={sessions} agents={agentsData.agents} />
+            <h2 style={{ fontSize: "1rem", margin: "1.5rem 0 1rem", fontWeight: 700 }}>
+              Agenti registrati
             </h2>
             {Object.entries(agentsData.agents || {}).map(([id, ag]) => (
               <div key={id} className="card" data-testid={`agent-card-${id}`}>

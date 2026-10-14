@@ -159,6 +159,46 @@ tmux new -s agent-claude -e PLACET_HOOK_AGENT=claude claude
 tmux new -s agent-gemini gemini
 ```
 
+### 1a. Sessioni dell'app desktop e della CLI (canale hook, consigliato)
+
+Le sessioni Claude Code, sia dell'app desktop (tab Code) sia della CLI, si collegano a Placet con gli hook, senza tmux:
+- **Registrazione:** ogni sessione si registra all'avvio, e nella PWA (tab **Sessioni**) vedi progetto, titolo e stato (al lavoro, in attesa, non raggiungibile).
+- **Esiti alla sessione giusta:** gli esiti delle richieste tornano alla sessione che le ha fatte.
+- **Risveglio:** un ascoltatore in background (`hooks/placet_waiter.py`, hook `asyncRewake`) resta in attesa sulla casella di posta della sessione e la risveglia quando arriva un esito o un prompt da un altro agente. Mentre la sessione è al lavoro, i messaggi restano in coda.
+- **Visibilità:** l'app desktop non mostra il testo del risveglio, quindi Placet chiede all'agente di riportare per prima cosa chi gli scrive e cosa chiede.
+
+Per attivarlo in tutte le sessioni, aggiungi a `~/.claude/settings.json`:
+```json
+{
+  "hooks": {
+    "SessionStart": [{"hooks": [
+      {"type": "command", "command": "python3 /opt/placet/hooks/claude_code.py --agent claude", "timeout": 5},
+      {"type": "command", "command": "python3 /opt/placet/hooks/placet_waiter.py --agent claude", "async": true, "asyncRewake": true}
+    ]}],
+    "UserPromptSubmit": [{"hooks": [
+      {"type": "command", "command": "python3 /opt/placet/hooks/claude_code.py --agent claude", "timeout": 5}
+    ]}],
+    "PostToolUse": [{"matcher": "mcp__placet__.*", "hooks": [
+      {"type": "command", "command": "python3 /opt/placet/hooks/claude_code.py --agent claude", "timeout": 5}
+    ]}],
+    "Stop": [{"hooks": [
+      {"type": "command", "command": "python3 /opt/placet/hooks/claude_code.py --agent claude", "timeout": 5},
+      {"type": "command", "command": "python3 /opt/placet/hooks/placet_waiter.py --agent claude", "async": true, "asyncRewake": true}
+    ]}],
+    "SessionEnd": [{"hooks": [
+      {"type": "command", "command": "python3 /opt/placet/hooks/claude_code.py --agent claude", "timeout": 5}
+    ]}]
+  }
+}
+```
+Servono anche gli strumenti MCP di Placet in tutte le sessioni:
+```bash
+claude mcp add placet --scope user -e PYTHONPATH=/opt/placet -e PLACET_API_URL=http://127.0.0.1:8000 -e PLACET_AGENT_ID=claude -e PLACET_API_TOKEN=<PLACET_TOKEN_CLAUDE> -- /opt/placet/.venv/bin/python -m mcp_server.server
+```
+Per tenere fuori da Placet le sessioni di un progetto, crea un file vuoto `.placet-off` nella sua cartella.
+
+Il canale tmux (sotto) resta disponibile, per le CLI senza hook e per le sessioni tmux senza ascoltatore attivo.
+
 ### 1b. Hook di Claude Code: stato, conferma di ricezione, risposta implicita
 
 Invece di dedurre tutto dallo schermo, Claude Code comunica a Placet i propri eventi:

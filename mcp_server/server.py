@@ -85,12 +85,15 @@ def placet_send_to_agent(
     context: Optional[str] = None,
     timeout_seconds: int = 180,
     priority: Optional[PriorityLevel] = None,
+    target_session: Optional[str] = None,
 ) -> str:
     """
     Invia un prompt o un compito a un'altra sessione aperta e attiva di un agente registrato
     (es. 'claude', 'gemini', 'codex').
     Se richiesto dalle policy o dalle regole in AGENTS.md, la richiesta viene prima mostrata all'utente
     su iPhone per revisione/approvazione del prompt prima di essere iniettata nel terminale target.
+    `target_session` (facoltativo): id di una sessione precisa dell'agente destinatario, da
+    placet_list_agents; senza, Placet usa la prima sessione libera di quell'agente.
     Lo strumento attende la risposta dell'altro agente fino al timeout. Se restituisce uno stato
     non finale (PENDING, APPROVED, EXECUTING), termina il turno: Placet scriverà l'esito in questa
     sessione (messaggio che inizia con "[Placet]") quando sarà disponibile.
@@ -102,6 +105,7 @@ def placet_send_to_agent(
             context=context,
             timeout_seconds=timeout_seconds,
             priority=priority,
+            target_session=target_session,
         )
         return json.dumps(res, indent=2, ensure_ascii=False)
     except Exception as e:
@@ -141,8 +145,8 @@ def placet_reply(
 @mcp.tool()
 def placet_list_agents() -> str:
     """
-    Restituisce l'elenco degli agenti registrati in Placet, i loro ruoli/specializzazioni,
-    le sessioni tmux corrispondenti e le regole di approvazione attive.
+    Restituisce gli agenti registrati in Placet (ruoli, regole di approvazione) e le loro
+    sessioni aperte: progetto (cwd), titolo, stato (busy/idle) e se Placet può raggiungerle.
     """
     try:
         res = client.list_agents()

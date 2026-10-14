@@ -5,13 +5,16 @@ export const OTHER = "__altro__";
  * Kept separate from the component so the rules mirror the backend
  * validation (RF-02, RF-03) in one readable place.
  */
-export function buildDecision(req, status, { editedPrompt, selected, otherText }) {
+export function buildDecision(req, status, { editedPrompt, selected, otherText, targetSession }) {
   const text = otherText.trim();
   const body = { status, selected_options: [] };
 
   if (req.question_type === "prompt_review") {
     if (status === "APPROVED" && editedPrompt !== undefined && editedPrompt.trim() !== "" && editedPrompt !== req.prompt) {
       body.edited_prompt = editedPrompt;
+    }
+    if (status === "APPROVED" && targetSession) {
+      body.recipient_session_id = targetSession;
     }
     return body;
   }

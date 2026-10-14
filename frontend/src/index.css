@@ -440,3 +440,71 @@ fieldset.options-list {
   font-size: 0.65rem;
   vertical-align: middle;
 }
+
+.session-group {
+  margin-bottom: 1.25rem;
+}
+
+.session-group-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  margin-bottom: 0.6rem;
+}
+
+.session-empty {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.session-card {
+  padding: 0.8rem 1rem;
+}
+
+.session-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.session-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.state-busy { color: #fbbf24; }
+.state-idle { color: var(--success); }
+.state-offline { color: var(--text-muted); }
+
+.session-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-top: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.session-select {
+  width: 100%;
+  margin-bottom: 1rem;
+  padding: 0.6rem;
+  border-radius: 8px;
+  background: var(--bg-primary);
+  color: var(--text-main);
+  border: 1px solid var(--border-color);
+  font: inherit;
+  font-size: 0.85rem;
+}

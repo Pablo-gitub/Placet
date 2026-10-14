@@ -1,15 +1,18 @@
 import React, { useState } from "react";
 import { ArrowRight, CheckCircle, XCircle } from "lucide-react";
 import { OTHER, buildDecision, canApprove } from "./decisions";
+import { sessionName, sessionStatus } from "./sessionInfo";
 
-export default function RequestCard({ req, submitting, highlighted, onDecide }) {
+export default function RequestCard({ req, submitting, highlighted, onDecide, sessions = [] }) {
   const [editedPrompt, setEditedPrompt] = useState(undefined);
   const [selected, setSelected] = useState([]);
   const [otherText, setOtherText] = useState("");
+  const [targetSession, setTargetSession] = useState(req.recipient_session_id || "");
+  const targetSessions = sessions.filter((s) => s.agent_id === req.recipient_id && !s.ended_at);
 
   const isChoice = req.question_type === "single_choice" || req.question_type === "multi_choice";
   const multi = req.question_type === "multi_choice";
-  const state = { editedPrompt, selected, otherText };
+  const state = { editedPrompt, selected, otherText, targetSession };
 
   const toggle = (value) => {
     if (!multi) {
@@ -65,6 +68,27 @@ export default function RequestCard({ req, submitting, highlighted, onDecide }) 
             value={editedPrompt !== undefined ? editedPrompt : req.prompt}
             onChange={(e) => setEditedPrompt(e.target.value)}
           />
+          {targetSessions.length > 0 && (
+            <>
+              <label className="prompt-editor-label" htmlFor={`target-${req.id}`}>
+                Sessione di {req.recipient_id} che lo riceve:
+              </label>
+              <select
+                id={`target-${req.id}`}
+                data-testid={`target-session-${req.id}`}
+                className="session-select"
+                value={targetSession}
+                onChange={(e) => setTargetSession(e.target.value)}
+              >
+                <option value="">Automatica (la prima libera)</option>
+                {targetSessions.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {sessionName(s)} · {sessionStatus(s).label}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
         </>
       ) : (
         <p className="question-text" data-testid={`question-${req.id}`}>
