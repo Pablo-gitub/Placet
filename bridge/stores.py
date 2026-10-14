@@ -70,13 +70,18 @@ class LocalStore:
 
     def work(self) -> Work:
         now = datetime.now(timezone.utc)
-        return Work(
-            injections=self.db.injections_ready(),
-            results=self.db.list_undelivered_results(
+        injections, results, busy = self.db.tmux_work_filter(
+            self.db.injections_ready(),
+            self.db.list_undelivered_results(
                 settled_before=now - timedelta(seconds=RESULT_GRACE_SECONDS),
                 settled_after=now - timedelta(seconds=RESULT_MAX_AGE_SECONDS),
             ),
-            busy_agents=self.db.busy_agents(AGENT_BUSY_TTL_SECONDS),
+            lambda agent_id: getattr(self.config.get_agent(agent_id), "tmux_session", None),
+        )
+        return Work(
+            injections=injections,
+            results=results,
+            busy_agents=sorted(set(self.db.busy_agents(AGENT_BUSY_TTL_SECONDS)) | set(busy)),
         )
 
     def claim_injection(self, request_id: int) -> bool:

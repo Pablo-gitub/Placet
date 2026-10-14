@@ -8,7 +8,7 @@ from typing import List, Literal, Optional, Dict, Set
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, status, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
@@ -32,6 +32,8 @@ from backend.app.models import (
     Priority,
     QuestionType,
     RequestDecision,
+    SessionModel,
+    INBOX_WAIT_SECONDS,
     RESULT_GRACE_SECONDS,
     RESULT_MAX_AGE_SECONDS,
     ACK_TIMEOUT_SECONDS,
@@ -40,6 +42,7 @@ from backend.app.models import (
     decision_error,
     is_settled,
 )
+from backend.app import envelopes
 from backend.app.notifier import NtfyConfig, send_ntfy_alert, send_ntfy_notification
 
 logger = logging.getLogger(__name__)
@@ -49,6 +52,21 @@ logger = logging.getLogger(__name__)
 # waiter re-reads the database at least this often.
 LONG_POLL_RECHECK_SECONDS = 5.0
 EXPIRY_SWEEP_SECONDS = 30.0
+
+
+class SessionEventPayload(BaseModel):
+    """What an agent CLI / desktop app hook reports about one of its sessions."""
+    event: Literal["start", "prompt", "stop", "tool", "end"]
+    provider: Optional[str] = None
+    entrypoint: Optional[str] = None
+    cwd: Optional[str] = None
+    title: Optional[str] = None
+    tmux_session: Optional[str] = None
+    # prompt: the Placet request the prompt carries ("[Placet Request #N").
+    # tool:   the request created by a Placet MCP call in this session.
+    request_id: Optional[int] = None
+    # stop: the agent's last message, used as implicit reply if needed.
+    last_message: Optional[str] = None
 
 
 class AgentStatePayload(BaseModel):
@@ -80,15 +98,28 @@ def create_app(
     request_waiters: Dict[int, Set[asyncio.Event]] = {}
     sse_subscribers: List[asyncio.Queue] = []
 
+    # Session inboxes waiting for something to change.
+    inbox_waiters: Set[asyncio.Event] = set()
+
+    def _broadcast(item):
+        for q in list(sse_subscribers):
+            try:
+                q.put_nowait(item)
+            except Exception:
+                pass
+
     def notify_change(req_id: int):
         # Must run on the event loop thread: all endpoints touching it are async.
         for ev in request_waiters.get(req_id, ()):
             ev.set()
-        for q in list(sse_subscribers):
-            try:
-                q.put_nowait(req_id)
-            except Exception:
-                pass
+        for ev in list(inbox_waiters):
+            ev.set()
+        _broadcast(("request", req_id))
+
+    def notify_session(session_id: str):
+        for ev in list(inbox_waiters):
+            ev.set()
+        _broadcast(("session", session_id))
 
     background_alerts: Set[asyncio.Task] = set()
 
@@ -217,6 +248,14 @@ def create_app(
             raise HTTPException(status_code=404, detail="Request not found")
         return req
 
+    def check_target_session(session_id: str, agent_id: str) -> None:
+        session = db.get_session(session_id)
+        if session is None or session.agent_id != agent_id or session.ended_at is not None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"Session {session_id} is not an open session of {agent_id}.",
+            )
+
     def require_party(who: Principal, req: RequestModel) -> None:
         """The human sees everything; an agent only its own requests."""
         if who.is_human or who.id in (req.sender_id, req.recipient_id):
@@ -267,6 +306,9 @@ def create_app(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Requests to an agent must be of type prompt_review.",
             )
+
+        if req.recipient_session_id is not None:
+            check_target_session(req.recipient_session_id, req.recipient_id)
 
         if req.priority is None:
             req = req.model_copy(update={
@@ -348,6 +390,8 @@ def create_app(
         problem = decision_error(req, decision)
         if problem:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=problem)
+        if decision.recipient_session_id is not None:
+            check_target_session(decision.recipient_session_id, req.recipient_id)
 
         updated = db.update_request_decision(
             request_id=request_id,
@@ -357,6 +401,9 @@ def create_app(
             custom_text=decision.custom_text,
             actor=who.actor,
         )
+        if updated is not None and decision.recipient_session_id is not None:
+            db.set_recipient_session(request_id, decision.recipient_session_id)
+            updated = db.get_request(request_id)
         if updated is None:
             # State changed between the check and the update (e.g. expired or cancelled).
             current = db.get_request(request_id)
@@ -493,19 +540,137 @@ def create_app(
 
         previous = db.get_agent_states().get(who.id, {})
         db.set_agent_state(who.id, "idle", None)
-        turn_request_id = previous.get("turn_request_id")
-        if turn_request_id is None or not payload.last_message:
-            return result
+        replied = implicit_reply(who, previous.get("turn_request_id"), payload.last_message)
+        if replied is not None:
+            result["implicit_reply_for"] = replied
+        return result
+
+    def implicit_reply(who: Principal, turn_request_id: Optional[int], last_message: Optional[str]):
+        """
+        At the end of a turn started by a Placet request that got no
+        placet_reply, the agent's last message becomes an implicit reply.
+        """
+        if turn_request_id is None or not last_message:
+            return None
         req = db.get_request(turn_request_id)
         if req is None or req.recipient_id != who.id or req.status != RequestStatus.EXECUTING:
-            return result  # already replied (or no longer waiting)
+            return None  # already replied (or no longer waiting)
         completed = db.record_reply(
-            turn_request_id, who.id, payload.last_message, actor=f"{who.actor}:hook", implicit=True
+            turn_request_id, who.id, last_message, actor=f"{who.actor}:hook", implicit=True
         )
-        if completed is not None:
-            notify_change(turn_request_id)
-            result["implicit_reply_for"] = turn_request_id
+        if completed is None:
+            return None
+        notify_change(turn_request_id)
+        return turn_request_id
+
+    # --- Agent sessions (hooks of CLIs and desktop apps) ----------------------
+
+    def own_session(who: Principal, session_id: str) -> SessionModel:
+        require_agent(who)
+        session = db.get_session(session_id)
+        if session is None or session.agent_id != who.id:
+            raise HTTPException(status_code=404, detail="Session not found")
+        return session
+
+    @app.post("/api/sessions/{session_id}/events")
+    async def session_event(
+        session_id: str, payload: SessionEventPayload, who: Principal = Depends(principal)
+    ):
+        """
+        Lifecycle of an agent session, reported by its hooks: start, a prompt
+        (turn starts; a Placet prompt is thereby acknowledged), stop (turn
+        ends; possible implicit reply), a Placet tool call (links the request
+        to this session), end.
+        """
+        require_agent(who)
+        if not db.upsert_session(
+            session_id, who.id, provider=payload.provider, entrypoint=payload.entrypoint,
+            cwd=payload.cwd, title=payload.title, tmux_session=payload.tmux_session,
+        ):
+            raise HTTPException(status_code=404, detail="Session not found")
+        session = db.get_session(session_id)
+        result: Dict[str, object] = {"session": session_id, "event": payload.event}
+
+        if payload.event == "start":
+            db.set_session_state(session_id, "idle")
+        elif payload.event == "prompt":
+            turn_request_id = None
+            if payload.request_id is not None:
+                try:
+                    ack_request(who, payload.request_id, via="hook")
+                    turn_request_id = payload.request_id
+                except HTTPException as e:
+                    result["ack_error"] = e.detail
+            db.set_session_state(session_id, "busy", turn_request_id)
+            result["turn_request_id"] = turn_request_id
+        elif payload.event == "stop":
+            db.set_session_state(session_id, "idle")
+            replied = implicit_reply(who, session.turn_request_id, payload.last_message)
+            if replied is not None:
+                result["implicit_reply_for"] = replied
+        elif payload.event == "tool" and payload.request_id is not None:
+            result["linked"] = db.link_sender_session(payload.request_id, session_id, who.id)
+        elif payload.event == "end":
+            db.end_session(session_id)
+
+        notify_session(session_id)
         return result
+
+    @app.get("/api/sessions/{session_id}/inbox")
+    async def session_inbox(
+        session_id: str,
+        wait_seconds: int = Query(0, ge=0, le=INBOX_WAIT_SECONDS),
+        who: Principal = Depends(principal),
+    ):
+        """
+        Long-polled by the session's background waiter. Returns the next
+        message to wake the session with, or 204 when there is none in time.
+        Nothing is handed out while the session is in the middle of a turn.
+        """
+        own_session(who, session_id)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + wait_seconds
+        first = True
+        while True:
+            ev = asyncio.Event()
+            inbox_waiters.add(ev)
+            try:
+                expire_and_notify()
+                db.touch_waiter(session_id)
+                if first:
+                    notify_session(session_id)  # now reachable
+                    first = False
+                session = db.get_session(session_id)
+                if session is None or session.ended_at is not None:
+                    return Response(status_code=status.HTTP_410_GONE)
+                taken = db.take_inbox_message(session)
+                if taken is not None:
+                    kind, req = taken
+                    notify_change(req.id)
+                    ack_mode = getattr(config.get_agent(who.id), "ack_mode", "mcp")
+                    text = (
+                        envelopes.outcome(req, channel="hook") if kind == "outcome"
+                        else envelopes.injection(req, ack_mode=ack_mode, channel="hook")
+                    )
+                    return {"kind": kind, "request_id": req.id, "text": text}
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    return Response(status_code=status.HTTP_204_NO_CONTENT)
+                with contextlib.suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(ev.wait(), timeout=min(remaining, LONG_POLL_RECHECK_SECONDS))
+            finally:
+                inbox_waiters.discard(ev)
+
+    @app.get("/api/sessions", response_model=List[SessionModel])
+    async def list_sessions(
+        agent_id: Optional[str] = None,
+        include_ended: bool = False,
+        who: Principal = Depends(principal),
+    ):
+        """Sessions of all agents: for the PWA and for agents choosing a target."""
+        if who.kind == "bridge":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not for the bridge.")
+        return db.list_sessions(agent_id=agent_id, include_ended=include_ended)
 
     # --- Local bridge (tmux injection and outcome delivery) -----------------
 
@@ -524,10 +689,15 @@ def create_app(
             settled_before=now - timedelta(seconds=RESULT_GRACE_SECONDS),
             settled_after=now - timedelta(seconds=RESULT_MAX_AGE_SECONDS),
         )
+        injections, results, busy = db.tmux_work_filter(
+            db.injections_ready(),
+            results,
+            lambda agent_id: getattr(config.get_agent(agent_id), "tmux_session", None),
+        )
         return {
-            "injections": db.injections_ready(),
+            "injections": injections,
             "results": results,
-            "busy_agents": db.busy_agents(AGENT_BUSY_TTL_SECONDS),
+            "busy_agents": sorted(set(db.busy_agents(AGENT_BUSY_TTL_SECONDS)) | set(busy)),
         }
 
     @app.post("/api/bridge/requests/{request_id}/claim", response_model=RequestModel)
@@ -597,8 +767,13 @@ def create_app(
         async def event_generator():
             try:
                 while True:
-                    req_id = await queue.get()
-                    req = db.get_request(req_id)
+                    kind, key = await queue.get()
+                    if kind == "session":
+                        session = db.get_session(key)
+                        if session:
+                            yield {"event": "session_update", "data": session.model_dump_json()}
+                        continue
+                    req = db.get_request(key)
                     if req:
                         yield {
                             "event": "request_update",

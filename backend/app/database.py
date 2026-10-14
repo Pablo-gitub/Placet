@@ -14,6 +14,8 @@ from backend.app.models import (
     Priority,
     QuestionType,
     ResponseModel,
+    SessionModel,
+    WAITER_TTL_SECONDS,
     is_settled,
 )
 
@@ -76,7 +78,9 @@ class Database:
                 priority TEXT,
                 delivery_attempts INTEGER NOT NULL DEFAULT 0,
                 delivering_since TEXT,
-                executing_since TEXT
+                executing_since TEXT,
+                sender_session_id TEXT,
+                recipient_session_id TEXT
             );
             """)
             cursor.execute("""
@@ -88,6 +92,23 @@ class Database:
                 created_at TEXT NOT NULL,
                 implicit INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY (request_id) REFERENCES requests(id)
+            );
+            """)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY,
+                agent_id TEXT NOT NULL,
+                provider TEXT,
+                entrypoint TEXT,
+                cwd TEXT,
+                title TEXT,
+                tmux_session TEXT,
+                state TEXT NOT NULL DEFAULT 'idle',
+                turn_request_id INTEGER,
+                started_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL,
+                waiter_seen_at TEXT,
+                ended_at TEXT
             );
             """)
             cursor.execute("""
@@ -115,7 +136,8 @@ class Database:
             cursor.execute("PRAGMA table_info(requests);")
             cols = [r["name"] for r in cursor.fetchall()]
             for col in ("expires_at", "updated_at", "delivered_at", "priority",
-                        "delivering_since", "executing_since"):
+                        "delivering_since", "executing_since",
+                        "sender_session_id", "recipient_session_id"):
                 if col not in cols:
                     cursor.execute(f"ALTER TABLE requests ADD COLUMN {col} TEXT;")
             if "delivery_attempts" not in cols:
@@ -174,8 +196,9 @@ class Database:
                 """
                 INSERT INTO requests (
                     sender_id, recipient_id, question_type, prompt, context,
-                    options, status, created_at, expires_at, updated_at, priority
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    options, status, created_at, expires_at, updated_at, priority,
+                    recipient_session_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     req.sender_id,
@@ -189,6 +212,7 @@ class Database:
                     expires_at.isoformat(),
                     now.isoformat(),
                     (req.priority or Priority.NORMAL).value,
+                    req.recipient_session_id,
                 ),
             )
             req_id = cursor.lastrowid
@@ -245,6 +269,8 @@ class Database:
             delivery_attempts=row["delivery_attempts"] or 0,
             delivering_since=_ts(row["delivering_since"]),
             executing_since=_ts(row["executing_since"]),
+            sender_session_id=row["sender_session_id"],
+            recipient_session_id=row["recipient_session_id"],
             response=resp_model,
         )
 
@@ -672,3 +698,251 @@ class Database:
             ids = [r["id"] for r in cursor.fetchall()]
         requests = (self.get_request(i) for i in ids)
         return [r for r in requests if r is not None and is_settled(r)]
+
+    # --- Agent sessions (registered by CLI / desktop app hooks) --------------
+
+    @staticmethod
+    def _row_to_session(row: sqlite3.Row, waiter_ttl_seconds: float) -> SessionModel:
+        waiter = _ts(row["waiter_seen_at"])
+        reachable = (
+            row["ended_at"] is None
+            and waiter is not None
+            and (datetime.now(timezone.utc) - waiter).total_seconds() < waiter_ttl_seconds
+        )
+        return SessionModel(
+            id=row["id"],
+            agent_id=row["agent_id"],
+            provider=row["provider"],
+            entrypoint=row["entrypoint"],
+            cwd=row["cwd"],
+            title=row["title"],
+            tmux_session=row["tmux_session"],
+            state=row["state"],
+            turn_request_id=row["turn_request_id"],
+            started_at=datetime.fromisoformat(row["started_at"]),
+            last_seen_at=datetime.fromisoformat(row["last_seen_at"]),
+            waiter_seen_at=waiter,
+            ended_at=_ts(row["ended_at"]),
+            reachable=reachable,
+        )
+
+    def upsert_session(
+        self,
+        session_id: str,
+        agent_id: str,
+        provider: Optional[str] = None,
+        entrypoint: Optional[str] = None,
+        cwd: Optional[str] = None,
+        title: Optional[str] = None,
+        tmux_session: Optional[str] = None,
+    ) -> bool:
+        """
+        Registers a session or refreshes it. Returns False if the id is
+        already registered to another agent (a token cannot take over
+        another agent's session).
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT agent_id FROM sessions WHERE id = ?", (session_id,))
+            row = cursor.fetchone()
+            if row is not None and row["agent_id"] != agent_id:
+                return False
+            if row is None:
+                cursor.execute(
+                    """
+                    INSERT INTO sessions (id, agent_id, provider, entrypoint, cwd, title,
+                                          tmux_session, state, started_at, last_seen_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?)
+                    """,
+                    (session_id, agent_id, provider, entrypoint, cwd, title, tmux_session, now, now),
+                )
+            else:
+                cursor.execute(
+                    """
+                    UPDATE sessions SET
+                        provider = COALESCE(?, provider), entrypoint = COALESCE(?, entrypoint),
+                        cwd = COALESCE(?, cwd), title = COALESCE(?, title),
+                        tmux_session = COALESCE(?, tmux_session),
+                        last_seen_at = ?, ended_at = NULL
+                    WHERE id = ?
+                    """,
+                    (provider, entrypoint, cwd, title, tmux_session, now, session_id),
+                )
+            return True
+
+    def get_session(
+        self, session_id: str, waiter_ttl_seconds: float = WAITER_TTL_SECONDS
+    ) -> Optional[SessionModel]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
+            row = cursor.fetchone()
+            return self._row_to_session(row, waiter_ttl_seconds) if row else None
+
+    def list_sessions(
+        self,
+        agent_id: Optional[str] = None,
+        include_ended: bool = False,
+        waiter_ttl_seconds: float = WAITER_TTL_SECONDS,
+    ) -> List[SessionModel]:
+        where, params = [], []
+        if agent_id is not None:
+            where.append("agent_id = ?")
+            params.append(agent_id)
+        if not include_ended:
+            where.append("ended_at IS NULL")
+        sql = "SELECT * FROM sessions"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY last_seen_at DESC"
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(sql, params)
+            return [self._row_to_session(r, waiter_ttl_seconds) for r in cursor.fetchall()]
+
+    def set_session_state(
+        self, session_id: str, state: str, turn_request_id: Optional[int] = None
+    ) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            conn.execute(
+                "UPDATE sessions SET state = ?, turn_request_id = ?, last_seen_at = ? WHERE id = ?",
+                (state, turn_request_id, now, session_id),
+            )
+
+    def touch_waiter(self, session_id: str) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            conn.execute(
+                "UPDATE sessions SET waiter_seen_at = ?, last_seen_at = ? WHERE id = ?",
+                (now, now, session_id),
+            )
+
+    def end_session(self, session_id: str) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            conn.execute(
+                "UPDATE sessions SET ended_at = ?, state = 'idle', waiter_seen_at = NULL WHERE id = ?",
+                (now, session_id),
+            )
+
+    def link_sender_session(self, request_id: int, session_id: str, agent_id: str) -> bool:
+        """Remembers which session made a request, so the outcome goes back there."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE requests SET sender_session_id = ?
+                WHERE id = ? AND sender_id = ? AND sender_session_id IS NULL
+                """,
+                (session_id, request_id, agent_id),
+            )
+            return cursor.rowcount > 0
+
+    def set_recipient_session(self, request_id: int, session_id: Optional[str]) -> None:
+        with self._get_connection() as conn:
+            conn.execute(
+                "UPDATE requests SET recipient_session_id = ? WHERE id = ?",
+                (session_id, request_id),
+            )
+
+    # --- Session inbox (hook delivery channel) -------------------------------
+
+    def take_inbox_message(self, session: SessionModel) -> Optional[Tuple[str, RequestModel]]:
+        """
+        Atomically takes the next message for an idle session: first an
+        outcome of a request it made, then a prompt addressed to it (or to its
+        agent, if not addressed to a specific session). Returns
+        ("outcome" | "injection", request) or None.
+        """
+        if session.state != "idle" or session.ended_at is not None:
+            return None
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id FROM requests
+                WHERE sender_session_id = ? AND delivered_at IS NULL AND status != ?
+                ORDER BY updated_at ASC
+                """,
+                (session.id, RequestStatus.PENDING.value),
+            )
+            outcome_ids = [r["id"] for r in cursor.fetchall()]
+        for req_id in outcome_ids:
+            req = self.get_request(req_id)
+            if req is not None and is_settled(req) and self.mark_delivered(
+                req_id, actor=f"agent:{session.agent_id}", via="hook"
+            ):
+                return "outcome", self.get_request(req_id)
+
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id FROM requests
+                WHERE status = ? AND recipient_id = ?
+                  AND (recipient_session_id = ? OR recipient_session_id IS NULL)
+                ORDER BY (recipient_session_id IS NULL) ASC, id ASC
+                """,
+                (RequestStatus.APPROVED.value, session.agent_id, session.id),
+            )
+            candidates = [r["id"] for r in cursor.fetchall()]
+            for req_id in candidates:
+                # Claim and bind to this session in one statement: with several
+                # sessions of the same agent, the first idle one wins.
+                if not self._transition(
+                    cursor, req_id, RequestStatus.APPROVED, RequestStatus.DELIVERING, now,
+                    ", delivering_since = ?, delivery_attempts = delivery_attempts + 1,"
+                    " recipient_session_id = ?",
+                    [now, session.id],
+                ):
+                    continue
+                cursor.execute("SELECT delivery_attempts FROM requests WHERE id = ?", (req_id,))
+                attempt = cursor.fetchone()["delivery_attempts"]
+                self._log(cursor, req_id, f"agent:{session.agent_id}", "injection_claimed",
+                          {"attempt": attempt, "via": "hook", "session": session.id}, at=now)
+                break
+            else:
+                return None
+        return "injection", self.get_request(req_id)
+
+    # --- Channel selection ----------------------------------------------------
+
+    def tmux_work_filter(
+        self,
+        injections: List[RequestModel],
+        results: List[RequestModel],
+        tmux_session_of: Callable[[str], Optional[str]],
+    ) -> Tuple[List[RequestModel], List[RequestModel], List[str]]:
+        """
+        Keeps only what the tmux bridge should deliver; the rest goes through
+        session inboxes (hook channel). A message bound to a session goes to
+        that session only: through its inbox while its waiter is listening,
+        through tmux only if it is the agent's configured tmux session.
+        Also returns agents whose tmux session is busy per its hooks.
+        """
+        sessions = {s.id: s for s in self.list_sessions(include_ended=True)}
+
+        def via_tmux(session_id: Optional[str], agent_id: str) -> bool:
+            if session_id is None:
+                return True
+            session = sessions.get(session_id)
+            if session is None or session.reachable:
+                return False
+            return session.tmux_session is not None and session.tmux_session == tmux_session_of(agent_id)
+
+        reachable_agents = {s.agent_id for s in sessions.values() if s.reachable}
+        tmux_injections = [
+            r for r in injections
+            if (r.recipient_session_id is None and r.recipient_id not in reachable_agents)
+            or (r.recipient_session_id is not None and via_tmux(r.recipient_session_id, r.recipient_id))
+        ]
+        tmux_results = [r for r in results if via_tmux(r.sender_session_id, r.sender_id)]
+        busy = [
+            s.agent_id for s in sessions.values()
+            if s.ended_at is None and s.state == "busy"
+            and s.tmux_session is not None and s.tmux_session == tmux_session_of(s.agent_id)
+        ]
+        return tmux_injections, tmux_results, busy

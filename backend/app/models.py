@@ -49,6 +49,11 @@ MAX_DELIVERY_ATTEMPTS = 3
 # crashed CLI never sends "idle").
 AGENT_BUSY_TTL_SECONDS = 30 * 60
 
+# A session's background waiter long-polls its inbox for at most this long;
+# without a poll for longer than the TTL the session is not reachable.
+INBOX_WAIT_SECONDS = 240
+WAITER_TTL_SECONDS = INBOX_WAIT_SECONDS + 60
+
 DEFAULT_EXPIRES_IN_SECONDS = 24 * 3600
 MAX_EXPIRES_IN_SECONDS = 7 * 24 * 3600
 
@@ -94,6 +99,9 @@ class RequestCreate(BaseModel):
     options: List[str] = Field(default_factory=list)
     # Defaults to high for questions to the human, normal for agent-to-agent.
     priority: Optional[Priority] = None
+    # Deliver to this session of the recipient agent (default: any of its
+    # reachable sessions, or its tmux session).
+    recipient_session_id: Optional[str] = None
     # Lifetime of the request, independent of how long the caller waits for it.
     expires_in_seconds: int = Field(
         DEFAULT_EXPIRES_IN_SECONDS, ge=10, le=MAX_EXPIRES_IN_SECONDS
@@ -123,6 +131,8 @@ class RequestDecision(BaseModel):
     edited_prompt: Optional[str] = None
     selected_options: List[str] = Field(default_factory=list)
     custom_text: Optional[str] = None
+    # For prompt review: deliver to this session of the recipient agent.
+    recipient_session_id: Optional[str] = None
 
     @field_validator("status")
     @classmethod
@@ -162,6 +172,29 @@ class RequestModel(BaseModel):
     delivery_attempts: int = 0
     delivering_since: Optional[datetime] = None
     executing_since: Optional[datetime] = None
+    # The agent session that made the request (outcome goes back there), and
+    # the one chosen to receive it, if any.
+    sender_session_id: Optional[str] = None
+    recipient_session_id: Optional[str] = None
+
+
+class SessionModel(BaseModel):
+    """An agent session (e.g. one Claude Code conversation), from its hooks."""
+    id: str
+    agent_id: str
+    provider: Optional[str] = None
+    entrypoint: Optional[str] = None      # claude-desktop, cli, ...
+    cwd: Optional[str] = None
+    title: Optional[str] = None
+    tmux_session: Optional[str] = None
+    state: str = "idle"                   # busy while a turn is running
+    turn_request_id: Optional[int] = None
+    started_at: datetime
+    last_seen_at: datetime
+    waiter_seen_at: Optional[datetime] = None
+    ended_at: Optional[datetime] = None
+    # Computed: a background waiter is listening, so Placet can wake it.
+    reachable: bool = False
 
 
 class RequestEvent(BaseModel):
@@ -184,6 +217,8 @@ def decision_error(req: "RequestModel", decision: RequestDecision) -> Optional[s
     selected = decision.selected_options
     if decision.edited_prompt is not None and req.question_type != QuestionType.PROMPT_REVIEW:
         return "edited_prompt is only allowed when reviewing a prompt for an agent"
+    if decision.recipient_session_id is not None and req.question_type != QuestionType.PROMPT_REVIEW:
+        return "recipient_session_id is only allowed when reviewing a prompt for an agent"
 
     if req.question_type not in CHOICE_TYPES:
         if selected:

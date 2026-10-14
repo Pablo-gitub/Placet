@@ -4,7 +4,8 @@ from typing import List, Optional, Set
 
 from backend.app.config import PlacetConfig
 from backend.app.database import Database
-from backend.app.models import RequestModel, RequestStatus
+from backend.app import envelopes
+from backend.app.models import RequestModel
 from bridge.stores import BridgeStore, LocalStore, Work
 from bridge.tmux_controller import SessionSpec, TmuxController
 
@@ -14,11 +15,6 @@ logger = logging.getLogger(__name__)
 # the text would mix with what the user is typing.
 RECENT_INPUT_SECONDS = 15.0
 
-_OUTCOME_NOTES = {
-    RequestStatus.DELIVERY_FAILED: "Il prompt non è stato confermato dall'agente destinatario dopo più tentativi.",
-    RequestStatus.STALLED: "L'agente destinatario ha ricevuto il prompt ma non ha risposto entro il tempo massimo.",
-    RequestStatus.EXPIRED: "La richiesta è scaduta.",
-}
 
 
 class BridgeDaemon:
@@ -35,43 +31,10 @@ class BridgeDaemon:
         self.tmux = tmux or TmuxController()
 
     def format_injection_envelope(self, req: RequestModel, ack_mode: str = "mcp") -> str:
-        prompt_to_send = req.edited_prompt if req.edited_prompt is not None else req.prompt
-        context_part = f"\n[Contesto]: {req.context}" if req.context else ""
-        ack_part = (
-            f"Prima di iniziare chiama placet_ack(request_id={req.id}) per confermare la ricezione. "
-            if ack_mode == "mcp" else ""
-        )
-        return (
-            f"[Placet Request #{req.id} da {req.sender_id}]: {prompt_to_send}{context_part}\n"
-            f"{ack_part}Quando hai terminato, rispondi usando lo strumento MCP "
-            f"placet_reply(request_id={req.id}, response=\"...\")."
-        )
+        return envelopes.injection(req, ack_mode=ack_mode, channel="tmux")
 
     def format_result_envelope(self, req: RequestModel) -> str:
-        if req.recipient_id == "human":
-            lines = [f"[Placet] Decisione dell'utente sulla richiesta #{req.id}: {req.status.value}."]
-            if req.selected_options:
-                lines.append(f"Opzioni scelte: {', '.join(req.selected_options)}")
-            if req.custom_text:
-                label = "Altro" if req.options else "Nota dell'utente"
-                lines.append(f"{label}: {req.custom_text}")
-            if req.edited_prompt is not None and req.edited_prompt != req.prompt:
-                lines.append(f"Testo modificato dall'utente: {req.edited_prompt}")
-        else:
-            lines = [f"[Placet] Esito della richiesta #{req.id} a {req.recipient_id}: {req.status.value}."]
-            if req.status in _OUTCOME_NOTES:
-                lines.append(_OUTCOME_NOTES[req.status])
-            if req.response is not None:
-                origin = (
-                    " (risposta implicita: ultimo messaggio dell'agente, non inviato con placet_reply)"
-                    if req.response.implicit else ""
-                )
-                lines.append(f"Risposta di {req.response.responder_id}{origin}: {req.response.content}")
-        lines.append(
-            "Riprendi il lavoro che avevi sospeso in attesa di questo esito "
-            f"(dettagli con placet_check_status(request_id={req.id}))."
-        )
-        return "\n".join(lines)
+        return envelopes.outcome(req, channel="tmux")
 
     def _session_ready(
         self, agent_id: str, busy_sessions: Set[str], busy_agents: Set[str]
