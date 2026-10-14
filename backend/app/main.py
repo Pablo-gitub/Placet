@@ -1,10 +1,13 @@
 import os
 import asyncio
+from pathlib import Path
 from typing import List, Optional, Dict
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
+
 
 from backend.app.config import PlacetConfig, load_agents_config
 from backend.app.database import Database
@@ -203,7 +206,24 @@ def create_app(
 
         return EventSourceResponse(event_generator())
 
+    # Serve built PWA if frontend/dist exists
+    dist_path = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+    if dist_path.exists():
+        assets_path = dist_path / "assets"
+        if assets_path.exists():
+            app.mount("/assets", StaticFiles(directory=assets_path), name="assets")
+
+        @app.get("/{full_path:path}")
+        async def serve_pwa(full_path: str):
+            if full_path.startswith("api/"):
+                raise HTTPException(status_code=404, detail="API route not found")
+            file_candidate = dist_path / full_path
+            if file_candidate.is_file():
+                return FileResponse(file_candidate)
+            return FileResponse(dist_path / "index.html")
+
     return app
+
 
 
 # Default app instance

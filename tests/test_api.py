@@ -140,3 +140,14 @@ async def test_api_unauthorized_route(test_setup):
         }
         resp = await client.post("/api/requests", json=payload)
         assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_pwa_index_served(test_setup):
+    app, db, config = test_setup
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/")
+        assert resp.status_code == 200
+        assert "Placet" in resp.text
+
