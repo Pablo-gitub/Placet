@@ -370,3 +370,67 @@ project_relations(project_id, relation_id)          un progetto mostra/usa relaz
 | Contesto | ✅ dal transcript | ✅ statusline | ✅ rollout | da trovare |
 | Limiti 5h / 7d | via sessione CLI | ✅ statusline | ✅ rollout | da trovare |
 | Visibile su altri dispositivi | ✅ | ✅ (anche dall'app desktop) | — | — |
+- **Esp. A2 — hook di Antigravity (`agy`, documentazione inclusa nel
+  binario)**: file `.agents/hooks.json` (progetto) con hook nominati; eventi
+  `SessionStart`, `PreToolUse`, `PostToolUse`, `PreInvocation` (prima di
+  ogni chiamata al modello), `PostInvocation`, `Stop`. Payload JSON in
+  camelCase con `conversationId`, `workspacePaths`, `transcriptPath`,
+  `modelName`. Hook **solo sincroni** ("no async execution"): nessun
+  risveglio di una sessione ferma. Però:
+  - `PreInvocation` → `injectSteps: [{"userMessage": "..."}]` o
+    `ephemeralMessage`: canale "Subito" ancora più preciso di Claude.
+  - `Stop` → `"decision": "continue"` + `reason`: per lo Stop che aspetta.
+  - Risveglio di sessioni ferme: solo via API interna dell'app
+    (`SendUserCascadeMessage` sul server `agy --hub`) o `agy` CLI in tmux.
+- **Ricerca (fatta da Codex) su Antigravity 2.0**:
+  - Nessun equivalente pubblico di `codex queue`. Candidato: RPC interna
+    `exa.language_server_pb.LanguageServerService/SendUserCascadeMessage`
+    (Connect, POST JSON, header `x-codeium-csrf-token`) sul language server
+    dell'app (`/opt/antigravity-2/resources/bin/language_server`, porte
+    locali, token nella riga di comando). Corpo candidato:
+    `{"cascadeId", "items": [{"text"}], "deliveryStrategy":
+    "MESSAGE_DELIVERY_STRATEGY_WHEN_IDLE"}` (esiste anche `NEXT_INVOCATION`,
+    utile per "Subito"). Non documentata: da validare e da isolare dietro
+    un adattatore, perché può cambiare a ogni versione.
+  - `agy --conversation <id> -p …` riprende la conversazione in un altro
+    processo: visibilità live nell'app non garantita.
+  - Contesto e quote: `/context` e `/usage` nella CLI; la statusline della
+    CLI ha un JSON con `context_window.used_percentage` e
+    `quota.<bucket>.remaining_fraction` / `reset_time` (finestre 5h per
+    Pro/Ultra, settimanali). Come per Claude: una sessione CLI di servizio.
+  - Hook: si attivano in Settings → Customizations → Hooks (app) o `/hooks`
+    (CLI); nessuna approvazione per hash.
+- **Esp. A2b — hook di Antigravity 2.0 nell'app**: FUNZIONANO, senza
+  approvazione (bastava aggiungere `placet-hook-lab` come progetto). Sequenza
+  di un turno: `SessionStart` → (`PreInvocation` → `PostToolUse`* →
+  `PostInvocation`)×N → `Stop` (`terminationReason: NO_TOOL_CALL`,
+  `fullyIdle: true`). Ogni payload ha `conversationId`, `workspacePaths`,
+  `modelName` (es. `gemini-3.8-flash-medium`), `transcriptPath`. Lo Stop non
+  contiene l'ultima risposta: va letta dal transcript.
+- **Esp. A3 — risveglio Antigravity 2.0 via API interna**: FUNZIONA (lato
+  file). `SendUserCascadeMessage` sul language server dell'app
+  (`http://127.0.0.1:<porta>`, header `x-codeium-csrf-token` letto dalla
+  riga di comando del processo `language_server`) con `cascadeId`,
+  `items: [{"text"}]`, `deliveryStrategy: WHEN_IDLE` **e `cascadeConfig`**:
+  senza config il messaggio entra ma il turno fallisce ("neither PlanModel
+  nor RequestedModel specified"). Con la `userConfig` dell'ultimo
+  `USER_INPUT` della conversazione (letta con `GetCascadeTrajectory`) il
+  turno parte: risposta `MELONE-GEMINI` in 1 s, hook PreInvocation/Stop
+  eseguiti. Confermato: messaggi e risposta compaiono da soli nell'app. API non documentata: adattatore isolato, con controllo di
+  versione e fallback (tmux + `agy`).
+
+### Combinazioni tra provider: cosa è verificato
+
+Ogni scambio A → B si compone di tre pezzi: A invia (server MCP Placet in
+A), B viene svegliato (canale del provider B), la risposta di B torna a
+Placet.
+
+| Pezzo | Claude | Codex | Antigravity |
+|---|---|---|---|
+| Invia tramite Placet (MCP) | ✅ | ✅ (C1) | da provare (`agy mcp`) |
+| Viene svegliato | ✅ waiter | ✅ `codex queue` | ✅ API interna |
+| Risposta torna a Placet | ✅ Stop hook | ✅ placet_reply / rollout | da provare (Stop hook + transcript) |
+
+Provati da capo a capo: Claude → Claude, Claude → Codex. Le altre
+combinazioni (Codex → Claude, Antigravity ↔ Claude/Codex) diventano test di
+accettazione dopo l'implementazione degli adattatori nel bridge.
