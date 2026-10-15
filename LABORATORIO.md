@@ -1,202 +1,16 @@
-# Proposte in discussione
+# Laboratorio Placet
 
-Note di progetto non ancora implementate. Ogni punto resta qui finché non
-viene deciso; poi passa in REQUISITI.md / ARCHITETTURA.md.
+Diario degli esperimenti del 15–16/10/2026 sul banco di prova
+`~/Projects/placet-hook-lab`. Le decisioni che ne sono derivate stanno in
+[REQUISITI.md](REQUISITI.md) (v2.0) e [ARCHITETTURA.md](ARCHITETTURA.md)
+(v2.0); qui restano le prove, con cosa è stato fatto e cosa è successo.
 
-## 1. La sessione sul telefono
+Materiale del laboratorio (non nel repository): hook di debug di Claude,
+Codex (`.codex/hooks.json`) e Antigravity (`.agents/hooks.json`), skill di
+prova (`placet-banana`, `placet-command-interface`), `steer_hook.py`,
+`codex_lab_bridge.py`.
 
-### Idea
-La notifica non è più "una domanda isolata" ma **la sessione stessa**,
-riprodotta nella PWA come appare in Claude Code:
-
-1. Arriva una notifica "Claude · ⟨nome sessione⟩" (contratto API di Placet,
-   consegnata via ntfy).
-2. Aprendola si vede la conversazione della sessione: in fondo l'ultimo
-   messaggio e la domanda in corso; scorrendo verso l'alto si caricano i
-   messaggi precedenti.
-3. Si risponde alla domanda nella conversazione stessa.
-4. Si può aprire una sessione anche **senza domande in corso**, leggerla e
-   scriverle: il messaggio la risveglia (canale hook) come se lo avessi
-   scritto al PC.
-
-### Decisioni prese
-- **Lettura a richiesta tramite il bridge**, nessuna copia delle
-  conversazioni sul backend. Il bridge gira come `paolo` e può leggere i
-  transcript; il backend (`placet`) no, ed è giusto così.
-- **Paginazione dal fondo**: prima pagina = ultimi messaggi, le precedenti
-  arrivano con lo scroll.
-- **Privacy**: si mostrano i messaggi dell'utente e le risposte testuali
-  dell'agente. Le chiamate ai tool diventano una riga ("ha letto X",
-  "ha eseguito `cmd`"); i loro risultati e il ragionamento interno
-  (`thinking`) non vengono mostrati.
-- Lettura **e** scrittura.
-
-### Dati disponibili (verificato)
-- Claude Code (CLI e app desktop) salva ogni sessione in
-  `~/.claude/projects/<cartella>/<session_id>.jsonl`, una riga JSON per voce.
-- Voci utili: `user` (testo o `tool_result`), `assistant` (`text`,
-  `tool_use`, `thinking`). Da scartare: `attachment`, `queue-operation`,
-  `custom-title`, `last-prompt`, `file-history-snapshot`, `system`, …
-- Ogni hook riceve `transcript_path`: lo registriamo in SessionStart, così il
-  bridge non deve indovinare il file.
-
-### Schema proposto
-
-```
-PWA ──GET /api/sessions/{id}/transcript?before=<cursore>──▶ backend
-backend ──job "leggi transcript" (long-poll già esistente)──▶ bridge
-bridge legge il .jsonl dal fondo, filtra, restituisce una pagina
-backend ──risposta (attesa max ~5 s)──▶ PWA
-```
-
-- Il bridge oggi non ascolta connessioni: interroga il backend. Le letture
-  diventano un nuovo tipo di lavoro nella stessa coda (`/api/bridge/work`),
-  con risposta su `/api/bridge/transcript/{job}`. Nessuna porta nuova.
-- **Cursore** = posizione nel file (byte) della voce più vecchia restituita;
-  il bridge legge a ritroso a blocchi, senza caricare file da centinaia di kB.
-- **Aggiornamento dal vivo**: lo Stop hook genera già `session_update` via
-  SSE; la PWA chiede allora solo i messaggi dopo l'ultimo che ha.
-- **Sicurezza**: il bridge legge solo percorsi sotto `~/.claude/projects`
-  (o equivalenti dei provider) e solo per sessioni registrate; mai un
-  percorso arbitrario passato dal backend.
-- **Adattatore per provider**: Claude (`.jsonl`) ora; Codex
-  (`~/.codex/sessions`, da verificare quando installato) e Antigravity
-  (`~/.gemini/antigravity`, formato da esplorare) dopo.
-- Le compattazioni restano nel file: si mostrano come separatore
-  "conversazione compattata".
-
-### Scrittura in una sessione
-- Un messaggio libero dalla PWA è una richiesta `human → sessione`
-  (`recipient_session_id`), consegnata come i prompt tra agenti: canale hook
-  per l'app desktop, tmux per la CLI.
-- Se la sessione sta lavorando, il messaggio attende la fine del turno (Stop).
-- Nell'app desktop il risveglio appare come "Stop hook feedback", non come
-  un tuo messaggio: lo preambolo dirà "Messaggio di Paolo dalla PWA" e nella
-  vista sul telefono lo mostriamo come messaggio tuo.
-- Scrivere a una sessione equivale a darle un comando da remoto: l'accesso
-  resta legato all'identità Tailscale.
-
-### Decisioni (seconda tornata)
-- **Home**: in cima il riquadro delle domande in corso; sotto l'elenco delle
-  sessioni **aggiunte** dall'utente, ordinate per attività (chi ha appena
-  finito il turno sta in cima).
-- **Aggiungi / vedi tutte**: sotto l'elenco, un pulsante apre una finestra:
-  scegli il provider, vedi le sue sessioni aperte, quelle già aggiunte hanno
-  la spunta, spunti quelle da aggiungere. Le altre sessioni non compaiono
-  nella home.
-- **Anche sessioni che non hanno mai usato Placet**: hook installati
-  globalmente (`~/.claude/settings.json`), così ogni nuova sessione si
-  registra da sola. Le sessioni aperte prima dell'installazione restano in
-  sola lettura finché non vengono riaperte.
-- **Notifiche**: due tipi distinti.
-  - Domanda: priorità alta, con suono.
-  - Turno finito: silenziosa, solo per le sessioni aggiunte.
-- **Messaggio dal telefono a una sessione che sta lavorando**:
-  - *In coda*: arriva a fine turno (Stop).
-  - *Subito*: entra nel turno in corso dopo la prossima azione dell'agente
-    (output `additionalContext` dell'hook PostToolUse); se nel turno non ci
-    sono più tool, arriva comunque a fine turno.
-  - Un'impostazione generale fa da default; accanto a Invia si può cambiare
-    per il singolo messaggio. A sessione ferma il messaggio parte subito.
-- **PC spento**: avviso "PC non raggiungibile". Nella pratica la PWA non
-  caricherà nemmeno, perché Tailscale non raggiunge il muletto.
-
-## 2. Creare sessioni, consumi e controlli
-
-### Creare una sessione
-- Dalla PWA: provider, cartella (esistente, oppure nuova creata sul muletto),
-  modello, effort.
-- Placet non può creare sessioni nell'app desktop: le crea come **CLI in tmux**
-  (gestite dal bridge), con gli hook già attivi.
-- Al PC si possono **riprendere nell'app desktop**: il transcript è lo stesso
-  formato e la stessa cartella `~/.claude/projects` (da verificare in lab).
-
-### Sessioni temporanee
-- Lavorano **direttamente sulla cartella** della sessione da cui nascono
-  (possono leggere e modificare), con **provider a scelta** (es. Codex che
-  rivede il lavoro di Claude).
-- A lavoro finito consegnano il risultato e **si chiudono da sole**; la
-  sessione (tmux e registrazione) si può eliminare.
-- Riusano il canale tmux già funzionante.
-
-### Consumi dei provider
-- **Barra in home**, una riga per provider:
-  `Gemini  5h 42% · reset 1h20 — 7d 60% · reset 3d5h`.
-- Fonti da verificare per provider: Claude (dati `rate_limits` passati alla
-  statusline), Codex (eventi `rate_limits` nei file di sessione), Gemini /
-  Antigravity (da esplorare).
-
-### Nella sessione a cui scrivi
-- **Contesto**: `72.7k / 1M · 7%`, calcolato dai token dell'ultimo messaggio
-  nel transcript (lo legge il bridge), così decidi se lanciare un compact.
-- **Effort** modificabile; **compact** lanciabile.
-- Cambio modello: non indispensabile (fa rileggere il contesto e consuma).
-- Nelle sessioni CLI in tmux i comandi (`/compact`, `/effort`) si digitano
-  davvero. Nell'app desktop il testo arriva come messaggio: **da provare** se
-  l'agente lo interpreta e invoca la skill/il comando.
-
-### Skill con `/`
-- Digitando `/` nel campo messaggio: elenco delle skill e dei comandi di quel
-  provider (letti dal bridge: skill utente, di progetto, plugin), con la skill
-  evidenziata in un colore diverso nel testo. Utile, non indispensabile.
-
-### Esperimenti da fare in lab prima di implementare
-1. PostToolUse `additionalContext` entra nel turno in corso nell'app desktop
-   (per l'invio "Subito").
-2. Un comando/skill inviato via canale hook a una sessione desktop viene
-   eseguito.
-3. Una sessione CLI creata in tmux si riprende nell'app desktop.
-4. Dove leggere i limiti 5h/7d per ciascun provider.
-
-## 3. Progetti, relazioni tra sessioni e tipi
-
-### Oggi
-`placet_send_to_agent(target_agent, prompt | prompt_file, context,
-target_session?, priority, timeout)`; l'approvazione dipende da regole per
-**coppia di agenti** in `AGENTS.md`. `context` serve solo alla PWA.
-
-### Proposta
-- **Via il campo `context`**: con la lettura delle chat (punto 1) il contesto
-  si legge direttamente dalla conversazione della sessione.
-- Modello dati:
-
-```
-nodes            (id, nome, provider, cartella)    "sessione Placet" con nome stabile
-                  └ la sessione reale aperta si collega al nodo; se viene
-                    riaperta o fa /clear (nuovo session_id) si ricollega
-projects         (id, nome)
-project_nodes    (project_id, node_id)              un nodo in più progetti
-relation_types   (id, nome, descrizione)            riusabile in più relazioni;
-                                                    la descrizione la legge l'AI
-relations        (id, da_node, a_node, type_id,     GLOBALE, unica per
-                  approval: manual | automatic)     (da, a, tipo)
-project_relations(project_id, relation_id)          un progetto mostra/usa relazioni
-```
-
-- **API agente**: `send(target, type_id, prompt)`. L'agente vede (tool di
-  elenco) le relazioni che partono dalla sua sessione: destinazione, tipo,
-  descrizione. **Mai** il campo `approval`.
-- **manual**: arriva a te con la notifica, approvi / modifichi / rifiuti.
-  **automatic**: passa direttamente a B. Per il mittente le due cose sono
-  indistinguibili (stessi testi, stesso esito "approvato"): pensa sempre che
-  passi dall'utente.
-- **Senza relazione** definita: sempre manual; dalla card si può creare la
-  relazione per le volte successive.
-- Relazioni **globali**: A e B sono sempre le stesse sessioni (stessa
-  cartella), quindi A→B di tipo T è una sola relazione, con una sola
-  approvazione, anche se compare in più progetti.
-- Quando in un progetto crei A→B con un tipo già usato per A→B altrove, l'app
-  avvisa ("esiste già in Progetto_A: le modifiche valgono per entrambi") e
-  propone un tipo diverso o uno nuovo; puoi comunque confermare e riusarla.
-- Le regole per coppia di agenti in `AGENTS.md` vengono sostituite.
-
-### PWA
-- **Grafo per progetto**: nodi = sessioni, frecce orientate = relazioni,
-  etichetta = tipo (e indicazione manual/automatic visibile solo a te).
-- **Sezione Progetti**: crea progetto, aggiungi sessioni, disegna relazioni,
-  gestisci i tipi.
-
-## Risultati laboratorio
+## Claude Code
 
 - **Esp. 1a — comando integrato via canale hook (desktop)**: `/compact`
   inviato come messaggio NON viene eseguito; l'agente lo riconosce come
@@ -268,7 +82,9 @@ project_relations(project_id, relation_id)          un progetto mostra/usa relaz
     (contesto = input + cache_read + cache_creation), `message.model`,
     `effort` e `perTurnEffort`. Dimensione della finestra dal modello.
 
-## Ricognizione Codex e Antigravity (15/10/2026)
+## Codex e Antigravity
+
+### Ricognizione (15/10/2026)
 
 **Codex** — CLI `codex-cli 0.145.0` + app desktop (ChatGPT/Codex, in esecuzione).
 - Sessioni: `~/.codex/sessions/AAAA/MM/GG/rollout-…-<id>.jsonl` (JSONL, come
@@ -357,19 +173,6 @@ project_relations(project_id, relation_id)          un progetto mostra/usa relaz
   viene riavviata (successo due volte). Nell'implementazione il canale Codex
   va nel bridge di Placet (servizio utente systemd), non in una sessione.
 
-### Riepilogo laboratorio
-
-| | Claude desktop | Claude CLI tmux (+ Remote Control) | Codex desktop | Antigravity |
-|---|---|---|---|---|
-| Leggere la chat | ✅ transcript JSONL | ✅ transcript JSONL | ✅ rollout JSONL | ✅ transcript.jsonl |
-| Messaggio da Placet (risveglio) | ✅ waiter + asyncRewake | ✅ waiter / send-keys | ✅ `codex queue` | da provare |
-| Risposta a Placet | ✅ Stop hook / placet_reply | ✅ | ✅ placet_reply / rollout | da provare |
-| Skill da remoto | ✅ | ✅ (presumibile) | da provare | da provare |
-| "Subito" a metà turno | ✅ PostToolUse | da provare | `turn/steer` da provare | da provare |
-| `/compact`, `/effort` da remoto | ❌ solo al PC | ✅ send-keys | da provare | da provare |
-| Contesto | ✅ dal transcript | ✅ statusline | ✅ rollout | da trovare |
-| Limiti 5h / 7d | via sessione CLI | ✅ statusline | ✅ rollout | da trovare |
-| Visibile su altri dispositivi | ✅ | ✅ (anche dall'app desktop) | — | — |
 - **Esp. A2 — hook di Antigravity (`agy`, documentazione inclusa nel
   binario)**: file `.agents/hooks.json` (progetto) con hook nominati; eventi
   `SessionStart`, `PreToolUse`, `PostToolUse`, `PreInvocation` (prima di
@@ -419,7 +222,28 @@ project_relations(project_id, relation_id)          un progetto mostra/usa relaz
   eseguiti. Confermato: messaggi e risposta compaiono da soli nell'app. API non documentata: adattatore isolato, con controllo di
   versione e fallback (tmux + `agy`).
 
-### Combinazioni tra provider: cosa è verificato
+- **Esp. A4 — Placet in Antigravity 2.0 (mittente)**: FUNZIONA. Server MCP
+  in `~/.gemini/config/mcp_config.json` (formato `mcpServers` come Claude;
+  NON `~/.gemini/antigravity/mcp_config.json`, che l'app non legge), agente
+  `gemini`. Richiesta #17 `placet_ask_human` con attesa 300 s: domanda sul
+  telefono, risposta "Sì" ricevuta direttamente dallo strumento.
+
+## Riepilogo
+
+| | Claude desktop | Claude CLI tmux (+ Remote Control) | Codex desktop | Antigravity |
+|---|---|---|---|---|
+| Leggere la chat | ✅ transcript JSONL | ✅ transcript JSONL | ✅ rollout JSONL | ✅ transcript.jsonl |
+| Messaggio da Placet (risveglio) | ✅ waiter + asyncRewake | ✅ waiter / send-keys | ✅ `codex queue` | ✅ API interna (A3) |
+| Risposta a Placet | ✅ Stop hook / placet_reply | ✅ | ✅ placet_reply / rollout | da provare (Stop hook + transcript) |
+| Skill da remoto | ✅ | ✅ (presumibile) | da provare | da provare |
+| "Subito" a metà turno | ✅ PostToolUse | da provare | `turn/steer` da provare | PreInvocation `userMessage` (documentato, da provare) |
+| `/compact`, `/effort` da remoto | ❌ solo al PC | ✅ send-keys | da provare | da provare |
+| Contesto | ✅ dal transcript | ✅ statusline | ✅ rollout | statusline `agy` (documentato, da provare) |
+| Limiti 5h / 7d | via sessione CLI | ✅ statusline | ✅ rollout | statusline `agy` (documentato, da provare) |
+| Visibile su altri dispositivi | ✅ | ✅ (anche dall'app desktop) | — | Remote Control (documentato) |
+| Invia tramite Placet (MCP) | ✅ | ✅ | ✅ (C1) | ✅ (A4) |
+
+### Combinazioni tra provider
 
 Ogni scambio A → B si compone di tre pezzi: A invia (server MCP Placet in
 A), B viene svegliato (canale del provider B), la risposta di B torna a
@@ -434,8 +258,3 @@ Placet.
 Provati da capo a capo: Claude → Claude, Claude → Codex. Le altre
 combinazioni (Codex → Claude, Antigravity ↔ Claude/Codex) diventano test di
 accettazione dopo l'implementazione degli adattatori nel bridge.
-- **Esp. A4 — Placet in Antigravity 2.0 (mittente)**: FUNZIONA. Server MCP
-  in `~/.gemini/config/mcp_config.json` (formato `mcpServers` come Claude;
-  NON `~/.gemini/antigravity/mcp_config.json`, che l'app non legge), agente
-  `gemini`. Richiesta #17 `placet_ask_human` con attesa 300 s: domanda sul
-  telefono, risposta "Sì" ricevuta direttamente dallo strumento.
