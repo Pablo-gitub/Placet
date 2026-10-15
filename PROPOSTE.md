@@ -427,10 +427,15 @@ Placet.
 
 | Pezzo | Claude | Codex | Antigravity |
 |---|---|---|---|
-| Invia tramite Placet (MCP) | ✅ | ✅ (C1) | da provare (`agy mcp`) |
+| Invia tramite Placet (MCP) | ✅ | ✅ (C1) | ✅ (A4) |
 | Viene svegliato | ✅ waiter | ✅ `codex queue` | ✅ API interna |
 | Risposta torna a Placet | ✅ Stop hook | ✅ placet_reply / rollout | da provare (Stop hook + transcript) |
 
 Provati da capo a capo: Claude → Claude, Claude → Codex. Le altre
 combinazioni (Codex → Claude, Antigravity ↔ Claude/Codex) diventano test di
 accettazione dopo l'implementazione degli adattatori nel bridge.
+- **Esp. A4 — Placet in Antigravity 2.0 (mittente)**: FUNZIONA. Server MCP
+  in `~/.gemini/config/mcp_config.json` (formato `mcpServers` come Claude;
+  NON `~/.gemini/antigravity/mcp_config.json`, che l'app non legge), agente
+  `gemini`. Richiesta #17 `placet_ask_human` con attesa 300 s: domanda sul
+  telefono, risposta "Sì" ricevuta direttamente dallo strumento.
