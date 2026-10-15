@@ -4,7 +4,7 @@ agents:
     name: "Claude Code"
     tmux_session: "agent-claude"
     token: "${PLACET_TOKEN_CLAUDE}"
-    allowed_targets: ["gemini", "codex", "human"]
+    allowed_targets: ["claude", "gemini", "codex", "human"]
     default_timeout_seconds: 180
     # Prompt vuoto, anche con il suggerimento grigio 'Try "..."' (calibrato su Claude Code 2.1)
     idle_patterns: ['^\s*[│|]?\s*[>❯]\s*(Try ".*")?\s*[│|]?\s*$']
@@ -26,6 +26,8 @@ agents:
     idle_patterns: ['^\s*›\s*$']
 
 rules:
+  claude -> claude:
+    require_approval: true
   claude -> gemini:
     require_approval: true
   gemini -> claude:

@@ -364,3 +364,34 @@ async def test_ambiguous_busy_sessions_are_not_guessed(setup):
         assert created["sender_session_id"] is None
         await _event(claude, "b", event="tool", request_id=created["id"])
     assert db.get_request(created["id"]).sender_session_id == "b"
+
+
+@pytest.mark.asyncio
+async def test_same_agent_sessions_talk_without_self_delivery():
+    """claude -> claude: the sender session never receives its own request."""
+    db = Database(os.path.join(tempfile.mkdtemp(), "placet.db"))
+    db.init_db()
+    config = PlacetConfig(agents={"claude": AgentSpec(tmux_session="agent-claude", token="tok-claude",
+                                                      allowed_targets=["claude", "human"])})
+    app = create_app(db=db, config=config)
+    async with agent_client(app, "tok-claude") as claude:
+        await _event(claude, "A", event="start")
+        await _event(claude, "B", event="start")
+        await _event(claude, "A", event="prompt")
+        created = (await claude.post("/api/requests", json={"recipient_id": "claude", "prompt": "Rivedi"})).json()
+        assert created["sender_session_id"] == "A"
+        self_target = await claude.post("/api/requests", json={
+            "recipient_id": "claude", "prompt": "x", "recipient_session_id": "A"})
+        assert self_target.status_code == 422
+        await _event(claude, "A", event="stop")
+    async with human_client(app) as human:
+        await human.post(f"/api/requests/{created['id']}/decision", json={"status": "APPROVED"})
+    async with agent_client(app, "tok-claude") as claude:
+        assert (await claude.get("/api/sessions/A/inbox")).status_code == 204
+        message = (await claude.get("/api/sessions/B/inbox")).json()
+        assert message["request_id"] == created["id"]
+        await _event(claude, "B", event="prompt", request_id=created["id"])
+        await claude.post(f"/api/requests/{created['id']}/reply", json={"content": "Rivisto"})
+        await _event(claude, "B", event="stop")
+        outcome = (await claude.get("/api/sessions/A/inbox")).json()
+    assert outcome["kind"] == "outcome" and "Rivisto" in outcome["text"]

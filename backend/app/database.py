@@ -884,9 +884,11 @@ class Database:
                 SELECT id FROM requests
                 WHERE status = ? AND recipient_id = ?
                   AND (recipient_session_id = ? OR recipient_session_id IS NULL)
+                  -- a session never receives its own request (agent -> same agent)
+                  AND (sender_session_id IS NULL OR sender_session_id != ?)
                 ORDER BY (recipient_session_id IS NULL) ASC, id ASC
                 """,
-                (RequestStatus.APPROVED.value, session.agent_id, session.id),
+                (RequestStatus.APPROVED.value, session.agent_id, session.id, session.id),
             )
             candidates = [r["id"] for r in cursor.fetchall()]
             for req_id in candidates:

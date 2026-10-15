@@ -248,6 +248,11 @@ def create_app(
             raise HTTPException(status_code=404, detail="Request not found")
         return req
 
+    def created_sender_session(who: Principal) -> Optional[str]:
+        """The session about to create a request: the only busy one of the agent."""
+        busy = [s for s in db.list_sessions(agent_id=who.id) if s.state == "busy"]
+        return busy[0].id if len(busy) == 1 else None
+
     def origin_of(req: RequestModel) -> Optional[str]:
         """The sender session's project, to say where a request comes from."""
         if not req.sender_session_id:
@@ -318,6 +323,11 @@ def create_app(
 
         if req.recipient_session_id is not None:
             check_target_session(req.recipient_session_id, req.recipient_id)
+            if req.recipient_session_id == created_sender_session(who):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="A session cannot send a request to itself.",
+                )
 
         if req.priority is None:
             req = req.model_copy(update={
