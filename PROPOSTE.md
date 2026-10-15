@@ -246,10 +246,17 @@ project_relations(project_id, relation_id)          un progetto mostra/usa relaz
   l'origine verificabile (es. la sessione può controllare la richiesta con un
   tool Placet) e le richieste vecchie non vanno consegnate a sessioni diverse
   da quella prevista.
-- **Osservazione — MCP scollegato**: dopo l'aggiornamento di Claude Code una
-  sessione desktop ha perso il server MCP Placet; un'altra ha cercato l'id
-  breve tra le sessioni dell'app. Servono nomi stabili (punto 3) e un modo
-  per accorgersi che il server MCP non è collegato.
+- **Osservazione — MCP scollegato**: le sessioni del laboratorio hanno perso
+  il server MCP Placet. Causa reale (trovata dopo): avviando la CLI in tmux
+  si è risposto "Continue without using this MCP server" al server di
+  progetto, e la scelta è finita in `.claude/settings.local.json`
+  (`disabledMcpjsonServers: ["placet"]`) per TUTTE le sessioni del progetto,
+  desktop comprese; il disabilitato vince sull'abilitato. Inoltre l'app
+  desktop sovrascrive `~/.claude.json` (modificarlo a mano mentre è aperta
+  non serve). Una sessione ha anche cercato l'id breve tra le sessioni
+  dell'app. Servono: nomi stabili (punto 3), un controllo che segnali
+  "Placet non è collegato a questa sessione" (es. dall'hook SessionStart) e
+  le sessioni create da Placet devono approvare il server in modo esplicito.
 - **Esp. 4 — contesto, effort e limiti d'uso (Claude)**:
   - **CLI**: la statusline riceve tutto in JSON: `context_window`
     (es. 39.5k / 1M · 4%), `effort.level`, `model`, `cost`, `session_name` e
@@ -320,3 +327,46 @@ project_relations(project_id, relation_id)          un progetto mostra/usa relaz
   (risposta `KIWI-CODEX` in 3 s). È il canale di risveglio per Codex:
   equivalente del waiter di Claude, ma senza processo in attesa.
   Confermato: messaggio e risposta compaiono da soli nell'app, in tempo reale.
+- **Esp. A1 — chat di Antigravity**: leggibili.
+  `~/.gemini/antigravity/brain/<conversation_id>/.system_generated/logs/transcript.jsonl`:
+  JSON per passo (`step_index`, `source`, `type`, `status`, `created_at`,
+  `content`, `thinking`, `tool_calls`). Tipi: `USER_INPUT`,
+  `PLANNER_RESPONSE` (risposte del modello), `GENERIC` (esiti dei tool),
+  `SYSTEM_MESSAGE`, `CHECKPOINT`, `ERROR_MESSAGE`. Il database SQLite
+  `conversations/<id>.db` contiene gli stessi passi in protobuf.
+  Contesto e limiti d'uso non sono nel transcript: da cercare.
+- **Ricognizione A2 — risveglio Antigravity 2.0** (`/opt/antigravity-2`):
+  - L'app avvia `agy --hub --hub-port=<porta> --csrf_token=<token>`: un
+    server locale con API interne, tra cui `SendUserCascadeMessage`,
+    `SendAllQueuedMessages`, `GetCascadeTrajectory`, `CancelCascadeInvocation`.
+    Non documentate: funzionerebbero ma possono cambiare a ogni versione.
+  - Hook supportati da `agy` (SessionStart, PreToolUse, PostToolUse, Stop,
+    Notification) in `.agents/hooks.json` (progetto) o
+    `~/.gemini/config/hooks.json` (utente). Async/rewake da verificare.
+- **Esp. C4 — Claude → Codex attraverso Placet**: FUNZIONA. Richiesta #16
+  da una chat Claude desktop del laboratorio alla sessione Codex desktop
+  `01a1418c…`, approvata dal telefono. Un ponte di laboratorio
+  (`placet-hook-lab/codex_lab_bridge.py`) registra il thread come sessione
+  dell'agente `codex`, prende il messaggio dall'inbox, lo consegna con
+  `codex queue`, aspetta `task_complete` nel rollout e manda lo stop con
+  l'ultima risposta. Codex ha creato `codex-was-here.txt` e ha risposto da
+  solo con `placet_reply`; l'esito è tornato alla sessione Claude. Tempo
+  dalla consegna alla risposta: 24 s.
+- **Problema trovato — ponte legato alla sessione**: il ponte avviato come
+  processo in background di una sessione Claude Code muore quando l'app
+  viene riavviata (successo due volte). Nell'implementazione il canale Codex
+  va nel bridge di Placet (servizio utente systemd), non in una sessione.
+
+### Riepilogo laboratorio
+
+| | Claude desktop | Claude CLI tmux (+ Remote Control) | Codex desktop | Antigravity |
+|---|---|---|---|---|
+| Leggere la chat | ✅ transcript JSONL | ✅ transcript JSONL | ✅ rollout JSONL | ✅ transcript.jsonl |
+| Messaggio da Placet (risveglio) | ✅ waiter + asyncRewake | ✅ waiter / send-keys | ✅ `codex queue` | da provare |
+| Risposta a Placet | ✅ Stop hook / placet_reply | ✅ | ✅ placet_reply / rollout | da provare |
+| Skill da remoto | ✅ | ✅ (presumibile) | da provare | da provare |
+| "Subito" a metà turno | ✅ PostToolUse | da provare | `turn/steer` da provare | da provare |
+| `/compact`, `/effort` da remoto | ❌ solo al PC | ✅ send-keys | da provare | da provare |
+| Contesto | ✅ dal transcript | ✅ statusline | ✅ rollout | da trovare |
+| Limiti 5h / 7d | via sessione CLI | ✅ statusline | ✅ rollout | da trovare |
+| Visibile su altri dispositivi | ✅ | ✅ (anche dall'app desktop) | — | — |
