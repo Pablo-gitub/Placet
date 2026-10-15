@@ -248,6 +248,15 @@ def create_app(
             raise HTTPException(status_code=404, detail="Request not found")
         return req
 
+    def origin_of(req: RequestModel) -> Optional[str]:
+        """The sender session's project, to say where a request comes from."""
+        if not req.sender_session_id:
+            return None
+        session = db.get_session(req.sender_session_id)
+        if session is None or not session.cwd:
+            return None
+        return session.cwd.rstrip("/").rsplit("/", 1)[-1]
+
     def check_target_session(session_id: str, agent_id: str) -> None:
         session = db.get_session(session_id)
         if session is None or session.agent_id != agent_id or session.ended_at is not None:
@@ -339,6 +348,7 @@ def create_app(
                 send_ntfy_notification,
                 request=created,
                 cfg=ntfy,
+                origin=origin_of(created),
             )
         notify_change(created.id)
 

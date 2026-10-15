@@ -24,7 +24,7 @@ def mock_client():
 # Test 1: Backend Unreachable / Connection error returns structured JSON error
 def test_mcp_backend_down_returns_structured_error():
     with patch("httpx.Client.post", side_effect=httpx.ConnectError("Connection refused")):
-        res_str = placet_ask_human("Can I proceed?", options=["Yes", "No"])
+        res_str = placet_ask_human("Can I proceed?", context="Deploy in corso", options=["Yes", "No"])
         res = json.loads(res_str)
         assert res["status"] == "ERROR"
         assert "Connection refused" in res["error"]

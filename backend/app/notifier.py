@@ -75,11 +75,15 @@ def _ascii_header(value: str) -> str:
 
 
 def build_notification(
-    request: RequestModel, cfg: NtfyConfig
+    request: RequestModel, cfg: NtfyConfig, origin: Optional[str] = None
 ) -> Tuple[str, Dict[str, str], str]:
-    """Returns (url, headers, body) for the ntfy publish call."""
+    """
+    Returns (url, headers, body) for the ntfy publish call. `origin` names
+    where the request comes from (e.g. the sender session's project).
+    """
     open_url = f"{cfg.base_url}/#request-{request.id}"
-    title = f"Placet #{request.id}: {request.sender_id} -> {request.recipient_id}"
+    sender = f"{request.sender_id} ({origin})" if origin else request.sender_id
+    title = f"Placet #{request.id}: {sender} -> {request.recipient_id}"
 
     if cfg.is_private:
         body = request.prompt
@@ -138,11 +142,12 @@ async def send_ntfy_notification(
     request: RequestModel,
     cfg: NtfyConfig,
     client: Optional[httpx.AsyncClient] = None,
+    origin: Optional[str] = None,
 ) -> bool:
     if not cfg.enabled:
         return False
 
-    url, headers, body = build_notification(request, cfg)
+    url, headers, body = build_notification(request, cfg, origin)
     try:
         if client is not None:
             resp = await client.post(url, content=body.encode("utf-8"), headers=headers)

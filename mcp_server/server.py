@@ -43,14 +43,17 @@ def _format_error(e: Exception) -> str:
 @mcp.tool()
 def placet_ask_human(
     question: str,
+    context: str,
     options: Optional[List[str]] = None,
     multiple: bool = False,
-    context: Optional[str] = None,
     timeout_seconds: int = 180,
     priority: Optional[PriorityLevel] = None,
 ) -> str:
     """
     Richiede una decisione, un'approvazione o una scelta all'utente umano (Paolo su iPhone).
+    `context` è obbligatorio: la domanda arriva sul telefono senza nient'altro, mentre l'utente
+    fa altro. Spiega in 1-3 frasi su cosa stai lavorando, cosa succede con ciascuna risposta e
+    perché ti serve la sua decisione. Una domanda come "Procedo?" senza contesto non è decidibile.
     - Senza `options`: domanda di conferma (approva/rifiuta) con eventuale nota libera dell'utente.
     - Con `options`: l'utente sceglie un'opzione (`multiple=False`) o più opzioni (`multiple=True`).
       L'utente ha sempre anche l'opzione "Altro" con testo libero: non aggiungerla tu.

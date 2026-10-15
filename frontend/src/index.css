@@ -508,3 +508,10 @@ fieldset.options-list {
   font: inherit;
   font-size: 0.85rem;
 }
+
+.request-origin {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin: -0.4rem 0 0.75rem;
+  overflow-wrap: anywhere;
+}

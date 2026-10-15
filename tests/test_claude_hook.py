@@ -85,3 +85,10 @@ def test_tool_response_wrapped_in_content_object():
     wrapped = {"content": [{"type": "text", "text": json.dumps(body)}], "isError": False}
     assert _request_id_from_tool_response(wrapped) == 11
     assert _request_id_from_tool_response(json.dumps(wrapped)) == 11
+
+
+def test_tool_response_as_sent_by_the_desktop_app():
+    """Captured from the Claude desktop app: {"result": "<request JSON as text>"} as text."""
+    inner = json.dumps({"id": 5, "sender_id": "claude", "status": "PENDING"}, indent=2)
+    captured = json.dumps({"result": inner})
+    assert _request_id_from_tool_response(captured) == 5

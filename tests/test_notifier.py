@@ -102,3 +102,8 @@ async def test_send_reports_server_errors():
 @pytest.mark.asyncio
 async def test_send_skipped_when_disabled():
     assert not await send_ntfy_notification(_request(), NtfyConfig())
+
+
+def test_origin_in_title():
+    _, headers, _ = build_notification(_request(), PRIVATE, origin="placet-hook-lab")
+    assert headers["Title"] == "Placet #7: claude (placet-hook-lab) -> human"

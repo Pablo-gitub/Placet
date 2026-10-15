@@ -8,7 +8,7 @@ import {
   ShieldCheck,
   AlertCircle,
 } from "lucide-react";
-import RequestCard from "./RequestCard";
+import RequestCard, { Origin } from "./RequestCard";
 import Timeline from "./Timeline";
 import Sessions from "./Sessions";
 import { requestIdFromHash } from "./decisions";
@@ -388,6 +388,8 @@ export default function App() {
                       {STATUS_LABELS[req.status] || req.status}
                     </span>
                   </div>
+                  <Origin req={req} sessions={sessions} />
+                  {req.context && <div className="card-context">{req.context}</div>}
                   <p style={{ fontSize: "0.9rem", marginBottom: "0.6rem" }}>
                     <strong>{req.recipient_id === "human" ? "Domanda:" : "Prompt:"}</strong>{" "}
                     {req.edited_prompt || req.prompt}

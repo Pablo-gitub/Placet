@@ -1,7 +1,18 @@
 import React, { useState } from "react";
 import { ArrowRight, CheckCircle, XCircle } from "lucide-react";
 import { OTHER, buildDecision, canApprove } from "./decisions";
-import { sessionName, sessionStatus } from "./sessionInfo";
+import { sessionName, sessionOrigin, sessionStatus } from "./sessionInfo";
+
+/** Where a request comes from: the sender's session, when known. */
+export function Origin({ req, sessions }) {
+  const origin = sessionOrigin(sessions.find((s) => s.id === req.sender_session_id));
+  if (!origin) return null;
+  return (
+    <div className="request-origin" data-testid={`origin-${req.id}`}>
+      da {req.sender_id} · {origin}
+    </div>
+  );
+}
 
 export default function RequestCard({ req, submitting, highlighted, onDecide, sessions = [] }) {
   const [editedPrompt, setEditedPrompt] = useState(undefined);
@@ -49,6 +60,8 @@ export default function RequestCard({ req, submitting, highlighted, onDecide, se
           <span className="status-badge status-pending">In attesa</span>
         </div>
       </div>
+
+      <Origin req={req} sessions={sessions} />
 
       {req.context && (
         <div className="card-context">

@@ -53,3 +53,14 @@ describe("choosing the recipient session", () => {
     expect(screen.queryByTestId("target-session-60")).toBeNull();
   });
 });
+
+describe("request origin", () => {
+  it("shows the project and client of the sender session", () => {
+    const req = {
+      id: 70, sender_id: "claude", recipient_id: "human", question_type: "confirmation",
+      prompt: "Procedo?", options: [], status: "PENDING", created_at: now, sender_session_id: "s2",
+    };
+    render(<RequestCard req={req} onDecide={vi.fn()} sessions={sessions} />);
+    expect(screen.getByTestId("origin-70")).toHaveTextContent("da claude · social · app desktop · Post Instagram");
+  });
+});

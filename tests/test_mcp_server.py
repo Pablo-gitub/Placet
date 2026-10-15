@@ -107,7 +107,7 @@ def test_server_tools_wrapper():
     from mcp_server.server import placet_ask_human, placet_list_agents, client
     with patch.object(client, "ask_human") as mock_ask:
         mock_ask.return_value = {"id": 10, "status": "APPROVED"}
-        res_str = placet_ask_human("Test question?", ["Yes", "No"])
+        res_str = placet_ask_human("Test question?", "Contesto di prova", ["Yes", "No"])
         import json
         data = json.loads(res_str)
         assert data["id"] == 10
