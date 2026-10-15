@@ -337,6 +337,15 @@ def create_app(
         # Check if approval required
         needs_approval = config.requires_approval(req.sender_id, req.recipient_id)
 
+        target_warning = None
+        if req.recipient_session_id is not None:
+            target = db.get_session(req.recipient_session_id)
+            if target is not None and not target.reachable and not target.tmux_session:
+                target_warning = (
+                    f"Session {req.recipient_session_id} is not reachable now: the request "
+                    "will be delivered only if it comes back before expiring."
+                )
+
         created = db.create_request(req, actor=who.actor)
         # The session making a request is in the middle of a turn: if exactly
         # one session of this agent is busy, it is the sender. The PostToolUse
@@ -363,7 +372,9 @@ def create_app(
         notify_change(created.id)
 
         if wait_seconds > 0:
-            return deliver_to(who, await wait_until_settled(created.id, float(wait_seconds)))
+            created = deliver_to(who, await wait_until_settled(created.id, float(wait_seconds)))
+        if target_warning:
+            return {**created.model_dump(mode="json"), "warning": target_warning}
         return created
 
     @app.get("/api/requests", response_model=List[RequestModel])

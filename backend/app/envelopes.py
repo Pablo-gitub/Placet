@@ -52,6 +52,11 @@ def outcome(req: RequestModel, channel: str = "tmux") -> str:
             lines.append(f"Testo modificato dall'utente: {req.edited_prompt}")
     else:
         lines = [f"[Placet] Esito della richiesta #{req.id} a {req.recipient_id}: {req.status.value}."]
+        if req.edited_prompt is not None and req.edited_prompt != req.prompt:
+            lines.append(
+                "Attenzione: l'utente ha modificato il tuo prompt prima di inviarlo. "
+                f"{req.recipient_id} ha ricevuto ed eseguito questo testo: {req.edited_prompt}"
+            )
         if req.status in OUTCOME_NOTES:
             lines.append(OUTCOME_NOTES[req.status])
         if req.response is not None:

@@ -395,3 +395,24 @@ async def test_same_agent_sessions_talk_without_self_delivery():
         await _event(claude, "B", event="stop")
         outcome = (await claude.get("/api/sessions/A/inbox")).json()
     assert outcome["kind"] == "outcome" and "Rivisto" in outcome["text"]
+
+
+def test_outcome_tells_the_sender_its_prompt_was_edited(setup):
+    from backend.app import envelopes
+    _, db = setup
+    req = db.create_request(RequestCreate(sender_id="claude", recipient_id="gemini", prompt="Scrivi un haiku"))
+    db.update_request_decision(req.id, RequestStatus.APPROVED, edited_prompt="Scrivi ciao", actor="human:p")
+    db.claim_injection(req.id)
+    done = db.record_reply(req.id, "gemini", "ciao")
+    text = envelopes.outcome(done, channel="hook")
+    assert "l'utente ha modificato il tuo prompt" in text and "Scrivi ciao" in text
+
+
+@pytest.mark.asyncio
+async def test_sending_to_an_unreachable_session_warns(setup):
+    app, db = setup
+    db.upsert_session("g-old", "gemini")  # registered, no waiter listening
+    async with agent_client(app, "tok-claude") as claude:
+        resp = await claude.post("/api/requests", json={
+            "recipient_id": "gemini", "prompt": "x", "recipient_session_id": "g-old"})
+    assert resp.status_code == 201 and "not reachable" in resp.json()["warning"]

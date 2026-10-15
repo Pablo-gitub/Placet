@@ -123,11 +123,15 @@ class PlacetClient:
             data = resp.json()
             sessions = client.get(f"{self.base_url}/api/sessions", headers=self._headers())
             if sessions.status_code == 200 and isinstance(sessions.json(), list):
-                data["sessions"] = [
+                listed = [
                     {k: s.get(k) for k in ("id", "agent_id", "cwd", "title", "entrypoint",
                                            "state", "reachable", "last_seen_at")}
                     for s in sessions.json()
                 ]
+                # Sessions Placet can wake now come first; the others only
+                # receive messages if they come back.
+                data["sessions"] = [s for s in listed if s["reachable"]]
+                data["unreachable_sessions"] = [s for s in listed if not s["reachable"]]
             return data
 
     def check_status(self, request_id: int) -> Dict[str, Any]:
