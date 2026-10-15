@@ -319,6 +319,12 @@ def create_app(
         needs_approval = config.requires_approval(req.sender_id, req.recipient_id)
 
         created = db.create_request(req, actor=who.actor)
+        # The session making a request is in the middle of a turn: if exactly
+        # one session of this agent is busy, it is the sender. The PostToolUse
+        # hook links it too, but must not be the only way.
+        busy = [s for s in db.list_sessions(agent_id=who.id) if s.state == "busy"]
+        if len(busy) == 1 and db.link_sender_session(created.id, busy[0].id, who.id):
+            created = db.get_request(created.id)
 
         if not needs_approval:
             # Auto-approval

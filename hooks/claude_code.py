@@ -47,24 +47,31 @@ def _tmux_session():
         return None
 
 
-def _request_id_from_tool_response(response):
-    """The id of the request a Placet MCP tool created, from its JSON result."""
-    texts = []
-    if isinstance(response, str):
-        texts.append(response)
+def _request_id_from_tool_response(response, depth: int = 0):
+    """
+    The id of the request a Placet MCP tool created. The tool returns the
+    request as JSON text; clients wrap it differently (plain string, content
+    blocks, {"content": [...]}, structured result), so search recursively.
+    """
+    if depth > 6 or response is None:
+        return None
+    if isinstance(response, dict):
+        if isinstance(response.get("id"), int) and "sender_id" in response:
+            return response["id"]
+        children = list(response.values())
     elif isinstance(response, list):
-        texts += [b.get("text", "") for b in response if isinstance(b, dict)]
-    elif isinstance(response, dict):
-        if "id" in response and "sender_id" in response:
-            return int(response["id"])
-        texts.append(json.dumps(response))
-    for text in texts:
+        children = response
+    elif isinstance(response, str):
         try:
-            data = json.loads(text)
+            return _request_id_from_tool_response(json.loads(response), depth + 1)
         except (TypeError, ValueError):
-            continue
-        if isinstance(data, dict) and isinstance(data.get("id"), int) and "sender_id" in data:
-            return data["id"]
+            return None
+    else:
+        return None
+    for child in children:
+        found = _request_id_from_tool_response(child, depth + 1)
+        if found is not None:
+            return found
     return None
 
 
@@ -76,9 +83,11 @@ def build_event(event: dict):
         "entrypoint": os.environ.get("CLAUDE_CODE_ENTRYPOINT"),
         "cwd": event.get("cwd"),
         "title": event.get("session_title"),
+        # On every event: a session may predate its first SessionStart hook.
+        "tmux_session": _tmux_session(),
     }
     if name == "SessionStart":
-        return {"event": "start", "tmux_session": _tmux_session(), **common}
+        return {"event": "start", **common}
     if name == "UserPromptSubmit":
         payload = {"event": "prompt", **common}
         match = PLACET_REQUEST.search(event.get("prompt") or "")

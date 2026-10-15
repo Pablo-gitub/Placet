@@ -340,3 +340,27 @@ def test_waiter_ignores_opted_out_projects(tmp_path):
     res = subprocess.run([sys.executable, str(WAITER), "--agent", "gemini"], env=env, text=True,
                          input=json.dumps({"session_id": "x", "cwd": str(tmp_path)}), timeout=10)
     assert res.returncode == 0
+
+
+@pytest.mark.asyncio
+async def test_request_is_linked_to_the_only_busy_session(setup):
+    """Server-side link: does not depend on the PostToolUse hook firing."""
+    app, db = setup
+    async with agent_client(app, "tok-claude") as claude:
+        await _event(claude, "desk", event="start")
+        await _event(claude, "tmux", event="start", tmux_session="agent-claude")
+        await _event(claude, "desk", event="prompt")
+        created = (await claude.post("/api/requests", json={"recipient_id": "human", "prompt": "x"})).json()
+    assert created["sender_session_id"] == "desk"
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_busy_sessions_are_not_guessed(setup):
+    app, db = setup
+    async with agent_client(app, "tok-claude") as claude:
+        await _event(claude, "a", event="prompt")
+        await _event(claude, "b", event="prompt")
+        created = (await claude.post("/api/requests", json={"recipient_id": "human", "prompt": "x"})).json()
+        assert created["sender_session_id"] is None
+        await _event(claude, "b", event="tool", request_id=created["id"])
+    assert db.get_request(created["id"]).sender_session_id == "b"

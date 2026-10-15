@@ -78,3 +78,10 @@ def test_never_fails_or_prints_even_if_backend_is_down():
                                           "last_assistant_message": "x"})]:
         res = _run(env, stdin, "--agent", "claude")
         assert res.returncode == 0 and res.stdout == ""
+
+
+def test_tool_response_wrapped_in_content_object():
+    body = {"id": 11, "sender_id": "claude"}
+    wrapped = {"content": [{"type": "text", "text": json.dumps(body)}], "isError": False}
+    assert _request_id_from_tool_response(wrapped) == 11
+    assert _request_id_from_tool_response(json.dumps(wrapped)) == 11
