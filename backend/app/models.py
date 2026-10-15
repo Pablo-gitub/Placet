@@ -97,6 +97,8 @@ class RequestCreate(BaseModel):
     prompt: str
     context: Optional[str] = None
     options: List[str] = Field(default_factory=list)
+    # File the prompt was read from (e.g. "PROMPT_GEMINI.md"), for display.
+    prompt_source: Optional[str] = Field(None, max_length=255)
     # Defaults to high for questions to the human, normal for agent-to-agent.
     priority: Optional[Priority] = None
     # Deliver to this session of the recipient agent (default: any of its
@@ -157,6 +159,7 @@ class RequestModel(BaseModel):
     options: List[str] = Field(default_factory=list)
     status: RequestStatus = RequestStatus.PENDING
     priority: Priority = Priority.NORMAL
+    prompt_source: Optional[str] = None
     edited_prompt: Optional[str] = None
     selected_options: List[str] = Field(default_factory=list)
     custom_text: Optional[str] = None

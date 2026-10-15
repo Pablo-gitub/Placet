@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 import logging
 from typing import List, Literal, Optional
 
@@ -15,6 +16,22 @@ mcp = MCPServer(
 )
 
 client = PlacetClient()
+
+
+MAX_PROMPT_FILE_BYTES = 200_000
+PROMPT_FILE_SUFFIXES = {".md", ".markdown", ".txt"}
+
+
+def read_prompt_file(path: str):
+    """Reads a prompt prepared in a text/Markdown file: (content, file name)."""
+    file = Path(path).expanduser()
+    if not file.is_absolute():
+        raise ValueError("prompt_file must be an absolute path.")
+    if file.suffix.lower() not in PROMPT_FILE_SUFFIXES:
+        raise ValueError(f"prompt_file must be one of {sorted(PROMPT_FILE_SUFFIXES)}.")
+    if file.stat().st_size > MAX_PROMPT_FILE_BYTES:
+        raise ValueError(f"prompt_file is larger than {MAX_PROMPT_FILE_BYTES} bytes.")
+    return file.read_text(encoding="utf-8"), file.name
 
 
 def _format_error(e: Exception) -> str:
@@ -84,24 +101,34 @@ def placet_ask_human(
 @mcp.tool()
 def placet_send_to_agent(
     target_agent: str,
-    prompt: str,
+    prompt: Optional[str] = None,
+    prompt_file: Optional[str] = None,
     context: Optional[str] = None,
     timeout_seconds: int = 180,
     priority: Optional[PriorityLevel] = None,
     target_session: Optional[str] = None,
 ) -> str:
     """
-    Invia un prompt o un compito a un'altra sessione aperta e attiva di un agente registrato
-    (es. 'claude', 'gemini', 'codex').
-    Se richiesto dalle policy o dalle regole in AGENTS.md, la richiesta viene prima mostrata all'utente
-    su iPhone per revisione/approvazione del prompt prima di essere iniettata nel terminale target.
-    `target_session` (facoltativo): id di una sessione precisa dell'agente destinatario, da
+    Invia un prompt a un'altra sessione di un agente registrato (es. 'claude', 'gemini', 'codex').
+    - `prompt`: il testo (Markdown) che l'agente destinatario riceverà, e solo quello.
+    - `prompt_file`: in alternativa, il percorso assoluto di un file .md/.txt con il prompt
+      (ad esempio un prompt preparato in un file); il contenuto diventa il prompt.
+    - `context`: spiega all'utente perché mandi questo prompt e cosa ti aspetti. Lo legge
+      solo l'utente su iPhone, mentre decide se approvare o modificare: NON arriva al destinatario.
+    L'utente può approvare, rifiutare o modificare il prompt prima dell'invio, secondo le regole
+    in AGENTS.md.
+    `target_session` (facoltativo): id di una sessione raggiungibile del destinatario, da
     placet_list_agents; senza, Placet usa la prima sessione libera di quell'agente.
     Lo strumento attende la risposta dell'altro agente fino al timeout. Se restituisce uno stato
-    non finale (PENDING, APPROVED, EXECUTING), termina il turno: Placet scriverà l'esito in questa
-    sessione (messaggio che inizia con "[Placet]") quando sarà disponibile.
+    non finale (PENDING, APPROVED, DELIVERING, EXECUTING), termina il turno: Placet scriverà
+    l'esito in questa sessione (messaggio che inizia con "[Placet]") quando sarà disponibile.
     """
     try:
+        prompt_source = None
+        if prompt_file:
+            prompt, prompt_source = read_prompt_file(prompt_file)
+        if not prompt:
+            raise ValueError("Specify prompt or prompt_file.")
         res = client.send_to_agent(
             target_agent=target_agent,
             prompt=prompt,
@@ -109,6 +136,7 @@ def placet_send_to_agent(
             timeout_seconds=timeout_seconds,
             priority=priority,
             target_session=target_session,
+            prompt_source=prompt_source,
         )
         return json.dumps(res, indent=2, ensure_ascii=False)
     except Exception as e:

@@ -101,16 +101,19 @@ describe("Placet Frontend PWA App", () => {
     expect(screen.getByText("gemini")).toBeInTheDocument();
     expect(screen.getByText("Refactoring test context")).toBeInTheDocument();
 
-    const textarea = screen.getByTestId("prompt-textarea-1");
-    expect(textarea.value).toBe("Original prompt proposal");
+    // Shown rendered first; the raw text appears with "Modifica".
+    expect(screen.getByTestId("prompt-preview-1")).toHaveTextContent("Original prompt proposal");
+    fireEvent.click(screen.getByTestId("toggle-edit-1"));
+    expect(screen.getByTestId("prompt-textarea-1").value).toBe("Original prompt proposal");
   });
 
   it("allows editing the prompt before approving and sends edited text", async () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("prompt-textarea-1")).toBeInTheDocument();
+      expect(screen.getByTestId("toggle-edit-1")).toBeInTheDocument();
     });
+    fireEvent.click(screen.getByTestId("toggle-edit-1"));
 
     const textarea = screen.getByTestId("prompt-textarea-1");
     fireEvent.change(textarea, { target: { value: "Modified prompt by Paolo" } });

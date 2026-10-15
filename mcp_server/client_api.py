@@ -69,6 +69,7 @@ class PlacetClient:
         timeout_seconds: int = 180,
         priority: Optional[str] = None,
         target_session: Optional[str] = None,
+        prompt_source: Optional[str] = None,
     ) -> Dict[str, Any]:
         timeout = max(5, min(int(timeout_seconds), 600))
         url = f"{self.base_url}/api/requests"
@@ -76,6 +77,7 @@ class PlacetClient:
             "sender_id": self.agent_id,
             "recipient_id": target_agent,
             "recipient_session_id": target_session,
+            "prompt_source": prompt_source,
             "question_type": "prompt_review",
             "prompt": prompt,
             "context": context,

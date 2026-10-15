@@ -515,3 +515,98 @@ fieldset.options-list {
   margin: -0.4rem 0 0.75rem;
   overflow-wrap: anywhere;
 }
+
+.request-section {
+  margin-bottom: 0.9rem;
+}
+
+.section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.section-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 0.4rem;
+}
+
+.prompt-source {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+}
+
+.link-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: none;
+  border: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 0.25rem 0;
+}
+
+.prompt-preview {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 0.75rem 0.9rem;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.edited-note {
+  font-size: 0.75rem;
+  color: #fbbf24;
+  margin-top: 0.4rem;
+}
+
+.markdown {
+  font-size: 0.9rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.markdown > :first-child { margin-top: 0; }
+.markdown > :last-child { margin-bottom: 0; }
+.markdown p, .markdown ul, .markdown ol, .markdown pre, .markdown table, .markdown blockquote {
+  margin: 0 0 0.6rem;
+}
+.markdown h1, .markdown h2, .markdown h3, .markdown h4 {
+  font-size: 1rem;
+  margin: 0.8rem 0 0.4rem;
+}
+.markdown ul, .markdown ol { padding-left: 1.2rem; }
+.markdown code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82em;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 0.1rem 0.3rem;
+  border-radius: 4px;
+}
+.markdown pre {
+  background: rgba(0, 0, 0, 0.35);
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+.markdown pre code { background: none; padding: 0; }
+.markdown blockquote {
+  border-left: 3px solid var(--border-color);
+  padding-left: 0.75rem;
+  color: var(--text-muted);
+}
+.markdown table { border-collapse: collapse; display: block; overflow-x: auto; }
+.markdown th, .markdown td { border: 1px solid var(--border-color); padding: 0.3rem 0.5rem; }
+.markdown a { color: var(--accent); }
+
+.card-context .markdown { font-size: 0.82rem; color: var(--text-muted); }

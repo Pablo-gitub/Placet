@@ -113,3 +113,27 @@ def test_server_tools_wrapper():
         assert data["id"] == 10
         assert data["status"] == "APPROVED"
 
+
+
+def test_send_to_agent_reads_prompt_file(tmp_path):
+    from unittest.mock import patch
+    from mcp_server.server import placet_send_to_agent, client
+    prompt_file = tmp_path / "PROMPT_GEMINI.md"
+    prompt_file.write_text("# Compito\n\n- verifica i casi limite\n", encoding="utf-8")
+    with patch.object(client, "send_to_agent", return_value={"id": 1}) as send:
+        placet_send_to_agent("gemini", prompt_file=str(prompt_file), context="perché")
+    kwargs = send.call_args.kwargs
+    assert kwargs["prompt"].startswith("# Compito")
+    assert kwargs["prompt_source"] == "PROMPT_GEMINI.md"
+    assert kwargs["context"] == "perché"
+
+
+def test_send_to_agent_rejects_unsafe_prompt_files(tmp_path):
+    import json as _json
+    from mcp_server.server import placet_send_to_agent
+    secret = tmp_path / "id_rsa"
+    secret.write_text("x")
+    for path in [str(secret), "relative.md", str(tmp_path / "missing.md")]:
+        out = _json.loads(placet_send_to_agent("gemini", prompt_file=path))
+        assert out["status"] == "ERROR"
+    assert _json.loads(placet_send_to_agent("gemini"))["status"] == "ERROR"

@@ -416,3 +416,13 @@ async def test_sending_to_an_unreachable_session_warns(setup):
         resp = await claude.post("/api/requests", json={
             "recipient_id": "gemini", "prompt": "x", "recipient_session_id": "g-old"})
     assert resp.status_code == 201 and "not reachable" in resp.json()["warning"]
+
+
+def test_recipient_receives_only_the_prompt(setup):
+    from backend.app import envelopes
+    _, db = setup
+    req = db.create_request(RequestCreate(sender_id="claude", recipient_id="gemini",
+                                          prompt="# Compito\nverifica", context="Serve per il rilascio di venerdì"))
+    for channel in ("hook", "tmux"):
+        text = envelopes.injection(req, channel=channel)
+        assert "# Compito" in text and "rilascio di venerdì" not in text

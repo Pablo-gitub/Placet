@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { ArrowRight, CheckCircle, XCircle } from "lucide-react";
+import { ArrowRight, CheckCircle, XCircle, Pencil, Eye } from "lucide-react";
+import Markdown from "./Markdown";
 import { OTHER, buildDecision, canApprove } from "./decisions";
 import { sessionName, sessionOrigin, sessionStatus } from "./sessionInfo";
 
@@ -16,6 +17,7 @@ export function Origin({ req, sessions }) {
 
 export default function RequestCard({ req, submitting, highlighted, onDecide, sessions = [] }) {
   const [editedPrompt, setEditedPrompt] = useState(undefined);
+  const [editing, setEditing] = useState(false);
   const [selected, setSelected] = useState([]);
   const [otherText, setOtherText] = useState("");
   const [targetSession, setTargetSession] = useState(req.recipient_session_id || "");
@@ -64,23 +66,61 @@ export default function RequestCard({ req, submitting, highlighted, onDecide, se
       <Origin req={req} sessions={sessions} />
 
       {req.context && (
-        <div className="card-context">
-          <strong>Contesto:</strong> {req.context}
-        </div>
+        <section className="request-section">
+          <h3 className="section-label">Contesto</h3>
+          <div className="card-context">
+            <Markdown testId={`context-${req.id}`}>{req.context}</Markdown>
+          </div>
+        </section>
       )}
 
       {req.question_type === "prompt_review" ? (
         <>
-          <label className="prompt-editor-label" htmlFor={`prompt-${req.id}`}>
-            Prompt per {req.recipient_id} (modificabile prima dell'invio):
-          </label>
-          <textarea
-            id={`prompt-${req.id}`}
-            data-testid={`prompt-textarea-${req.id}`}
-            className="prompt-textarea"
-            value={editedPrompt !== undefined ? editedPrompt : req.prompt}
-            onChange={(e) => setEditedPrompt(e.target.value)}
-          />
+          <section className="request-section">
+            <div className="section-head">
+              <h3 className="section-label">
+                Prompt per {req.recipient_id}
+                {req.prompt_source && (
+                  <span className="prompt-source" data-testid={`prompt-source-${req.id}`}>
+                    {" "}· da {req.prompt_source}
+                  </span>
+                )}
+              </h3>
+              <button
+                type="button"
+                className="link-button"
+                data-testid={`toggle-edit-${req.id}`}
+                onClick={() => setEditing((v) => !v)}
+              >
+                {editing ? <Eye size={14} /> : <Pencil size={14} />}
+                {editing ? "Anteprima" : "Modifica"}
+              </button>
+            </div>
+            {editing ? (
+              <textarea
+                aria-label={`Prompt per ${req.recipient_id}`}
+                data-testid={`prompt-textarea-${req.id}`}
+                className="prompt-textarea"
+                value={editedPrompt !== undefined ? editedPrompt : req.prompt}
+                onChange={(e) => setEditedPrompt(e.target.value)}
+              />
+            ) : (
+              <div className="prompt-preview">
+                <Markdown testId={`prompt-preview-${req.id}`}>
+                  {editedPrompt !== undefined ? editedPrompt : req.prompt}
+                </Markdown>
+              </div>
+            )}
+            {editedPrompt !== undefined && editedPrompt !== req.prompt && (
+              <p className="edited-note">Modificato da te: {req.recipient_id} riceverà questa versione.</p>
+            )}
+          </section>
+          <section className="request-section">
+            <h3 className="section-label">Domanda</h3>
+            <p className="question-text">
+              Inviare questo prompt a {req.recipient_id}? Riceverà solo il prompt, non il contesto.
+            </p>
+          </section>
           {targetSessions.length > 0 && (
             <>
               <label className="prompt-editor-label" htmlFor={`target-${req.id}`}>
@@ -104,9 +144,12 @@ export default function RequestCard({ req, submitting, highlighted, onDecide, se
           )}
         </>
       ) : (
-        <p className="question-text" data-testid={`question-${req.id}`}>
-          {req.prompt}
-        </p>
+        <section className="request-section">
+          <h3 className="section-label">Domanda</h3>
+          <div className="question-text">
+            <Markdown testId={`question-${req.id}`}>{req.prompt}</Markdown>
+          </div>
+        </section>
       )}
 
       {isChoice && (

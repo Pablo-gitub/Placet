@@ -11,6 +11,7 @@ import {
 import RequestCard, { Origin } from "./RequestCard";
 import Timeline from "./Timeline";
 import Sessions from "./Sessions";
+import Markdown from "./Markdown";
 import { requestIdFromHash } from "./decisions";
 
 const STATUS_LABELS = {
@@ -389,11 +390,24 @@ export default function App() {
                     </span>
                   </div>
                   <Origin req={req} sessions={sessions} />
-                  {req.context && <div className="card-context">{req.context}</div>}
-                  <p style={{ fontSize: "0.9rem", marginBottom: "0.6rem" }}>
-                    <strong>{req.recipient_id === "human" ? "Domanda:" : "Prompt:"}</strong>{" "}
-                    {req.edited_prompt || req.prompt}
-                  </p>
+                  {req.context && (
+                    <section className="request-section">
+                      <h3 className="section-label">Contesto</h3>
+                      <div className="card-context">
+                        <Markdown>{req.context}</Markdown>
+                      </div>
+                    </section>
+                  )}
+                  <section className="request-section">
+                    <h3 className="section-label">
+                      {req.recipient_id === "human"
+                        ? "Domanda"
+                        : req.edited_prompt
+                          ? `Prompt inviato a ${req.recipient_id} (modificato da te)`
+                          : `Prompt per ${req.recipient_id}`}
+                    </h3>
+                    <Markdown>{req.edited_prompt || req.prompt}</Markdown>
+                  </section>
                   {(req.selected_options?.length > 0 || req.custom_text) && (
                     <p
                       data-testid={`history-answer-${req.id}`}

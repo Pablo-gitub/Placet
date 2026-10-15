@@ -80,7 +80,8 @@ class Database:
                 delivering_since TEXT,
                 executing_since TEXT,
                 sender_session_id TEXT,
-                recipient_session_id TEXT
+                recipient_session_id TEXT,
+                prompt_source TEXT
             );
             """)
             cursor.execute("""
@@ -137,7 +138,7 @@ class Database:
             cols = [r["name"] for r in cursor.fetchall()]
             for col in ("expires_at", "updated_at", "delivered_at", "priority",
                         "delivering_since", "executing_since",
-                        "sender_session_id", "recipient_session_id"):
+                        "sender_session_id", "recipient_session_id", "prompt_source"):
                 if col not in cols:
                     cursor.execute(f"ALTER TABLE requests ADD COLUMN {col} TEXT;")
             if "delivery_attempts" not in cols:
@@ -197,8 +198,8 @@ class Database:
                 INSERT INTO requests (
                     sender_id, recipient_id, question_type, prompt, context,
                     options, status, created_at, expires_at, updated_at, priority,
-                    recipient_session_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    recipient_session_id, prompt_source
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     req.sender_id,
@@ -213,6 +214,7 @@ class Database:
                     now.isoformat(),
                     (req.priority or Priority.NORMAL).value,
                     req.recipient_session_id,
+                    req.prompt_source,
                 ),
             )
             req_id = cursor.lastrowid
@@ -271,6 +273,7 @@ class Database:
             executing_since=_ts(row["executing_since"]),
             sender_session_id=row["sender_session_id"],
             recipient_session_id=row["recipient_session_id"],
+            prompt_source=row["prompt_source"],
             response=resp_model,
         )
 

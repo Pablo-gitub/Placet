@@ -25,15 +25,16 @@ HOOK_PREFACE = (
 
 
 def injection(req: RequestModel, ack_mode: str = "mcp", channel: str = "tmux") -> str:
+    # Only the prompt: the context explains the request to the human and is
+    # not part of what the recipient receives.
     prompt_to_send = req.edited_prompt if req.edited_prompt is not None else req.prompt
-    context_part = f"\n[Contesto]: {req.context}" if req.context else ""
     # Over the hook channel the delivery is confirmed by the turn it opens.
     ack_part = (
         f"Prima di iniziare chiama placet_ack(request_id={req.id}) per confermare la ricezione. "
         if ack_mode == "mcp" and channel == "tmux" else ""
     )
     text = (
-        f"[Placet Request #{req.id} da {req.sender_id}]: {prompt_to_send}{context_part}\n"
+        f"[Placet Request #{req.id} da {req.sender_id}]: {prompt_to_send}\n"
         f"{ack_part}Quando hai terminato, rispondi usando lo strumento MCP "
         f"placet_reply(request_id={req.id}, response=\"...\")."
     )
