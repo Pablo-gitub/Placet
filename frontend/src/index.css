@@ -729,7 +729,8 @@ fieldset.options-list {
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  z-index: 20;
+  /* Above the phone's bottom bar (z-index 20), below the attachment viewers (50). */
+  z-index: 40;
 }
 .dialog {
   background: var(--bg-secondary);
