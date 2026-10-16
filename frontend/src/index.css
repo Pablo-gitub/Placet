@@ -1134,3 +1134,10 @@ body.chat-open { overflow: hidden; }
 .mention-picker button[aria-selected="true"] { background: var(--prov-soft, var(--bg-card-hover)); }
 .mention-picker button:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 .mention-picker span { font-size: .75rem; color: var(--text-muted); }
+.attachment-file {
+  display: flex; align-items: center; gap: 0.5rem; max-width: min(320px, 85vw);
+  padding: 0.5rem 0.4rem 0.5rem 0.7rem; border: 1px solid var(--border-color); border-radius: 10px;
+  background: var(--bg-card); color: var(--text-main);
+}
+.attachment-file svg:first-child { color: #f87171; flex-shrink: 0; }
+.attachment-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.85rem; }

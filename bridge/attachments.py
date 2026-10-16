@@ -14,6 +14,11 @@ same parser. Only attachments a provider adapter recognises are readable
 - be a regular file owned by the user, at most MAX_BYTES;
 - really be a JPEG, PNG or WebP (magic bytes, not the name), with at most
   MAX_PIXELS pixels. SVG and HTML are never served.
+
+Files an agent shares on purpose with placet_share_file (a PDF it wrote, a
+chart) follow their own rules (check_shared): anywhere in the user's home
+but never in a hidden folder (.ssh, .config, ...), never in a project with
+.placet-off, a regular file of the user, an image as above or a real PDF.
 """
 import base64
 import binascii
@@ -24,6 +29,8 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 MAX_BYTES = 10 * 1024 * 1024
+MAX_PDF_BYTES = 20 * 1024 * 1024
+SHARE_TOOL = "placet_share_file"
 MAX_PIXELS = 50_000_000
 CODEX_CLIPBOARD = re.compile(r"^/tmp/codex-clipboard-[0-9a-f-]{36}\.(png|jpe?g|webp)$")
 
@@ -44,9 +51,20 @@ def file(path: str, name: Optional[str] = None) -> dict:
     return {"name": name or os.path.basename(path), "_src": {"kind": "file", "path": path}}
 
 
+def shared(path: str, title: Optional[str] = None) -> dict:
+    """A file the agent shared with placet_share_file."""
+    return {"name": title or os.path.basename(path or "") or "file", "_src": {"kind": "shared", "path": path or ""}}
+
+
+def kind_of(attachment: dict) -> str:
+    path = (attachment.get("_src") or {}).get("path") or attachment.get("name") or ""
+    return "pdf" if path.lower().endswith(".pdf") else "image"
+
+
 def public(attachments, cursor: str) -> list:
-    """What the PWA sees: an id and a name, never where the file is."""
-    return [{"id": f"{cursor}:{i}", "name": a.get("name") or "immagine"} for i, a in enumerate(attachments)]
+    """What the PWA sees: an id, a name and a kind, never where the file is."""
+    return [{"id": f"{cursor}:{i}", "name": a.get("name") or "immagine", "kind": kind_of(a)}
+            for i, a in enumerate(attachments)]
 
 
 # --- Content checks ---------------------------------------------------------------
@@ -112,6 +130,19 @@ def check_image(data: bytes) -> str:
     return mime
 
 
+def check_pdf(data: bytes) -> str:
+    if len(data) > MAX_PDF_BYTES:
+        raise AttachmentError("too_large", "PDF larger than the limit.")
+    if not data.startswith(b"%PDF-"):
+        raise AttachmentError("unsupported", "Not a PDF.")
+    return "application/pdf"
+
+
+def check_content(data: bytes) -> str:
+    """Images as check_image; PDFs by their header."""
+    return check_pdf(data) if data.startswith(b"%PDF-") else check_image(data)
+
+
 # --- Where files may come from ------------------------------------------------------
 
 
@@ -131,6 +162,33 @@ def _allowed(provider: str, session_id: str, path: str, home: Path) -> Path:
     raise AttachmentError("forbidden", "This file is not one of the conversation's images.")
 
 
+def check_shared(path: str, home: Optional[Path] = None) -> Path:
+    """
+    Where a shared file may be: raises AttachmentError, else its real path.
+    Used by the MCP tool (to tell the agent at once) and again when read.
+    """
+    from hooks.placet_common import active
+    home = Path(os.path.realpath(home or Path.home()))
+    if not path or not os.path.isabs(path):
+        raise AttachmentError("forbidden", "Give the absolute path of the file.")
+    real = Path(os.path.realpath(path))
+    if not real.is_relative_to(home) or real == home:
+        raise AttachmentError("forbidden", "Only files in your home can be shared.")
+    if any(part.startswith(".") for part in real.relative_to(home).parts):
+        raise AttachmentError("forbidden", "Files in hidden folders (like .ssh or .config) are never shared.")
+    if not active(str(real.parent)):
+        raise AttachmentError("forbidden", "This project is excluded from Placet (.placet-off).")
+    try:
+        st = os.stat(real)
+    except OSError:
+        raise AttachmentError("not_found", "The file is no longer on this computer.") from None
+    if not os.path.isfile(real) or st.st_uid != os.getuid():
+        raise AttachmentError("forbidden", "Not a regular file of this user.")
+    if st.st_size > MAX_PDF_BYTES:
+        raise AttachmentError("too_large", "File larger than the limit.")
+    return real
+
+
 def load(provider: str, session_id: str, attachment: dict, home: Optional[Path] = None) -> Tuple[str, bytes]:
     """(mime, bytes) of a recognised attachment; raises AttachmentError."""
     home = home or Path.home()
@@ -141,6 +199,11 @@ def load(provider: str, session_id: str, attachment: dict, home: Optional[Path] 
         except (binascii.Error, ValueError):
             raise AttachmentError("unsupported", "Corrupted image.") from None
         return check_image(data), data
+    if src.get("kind") == "shared":
+        real = check_shared(src.get("path") or "", home)
+        with open(real, "rb") as f:
+            data = f.read(MAX_PDF_BYTES + 1)
+        return check_content(data), data
     if src.get("kind") != "file":
         raise AttachmentError("not_found", "Unknown attachment.")
     real = _allowed(provider, session_id, src.get("path") or "", home)

@@ -270,3 +270,17 @@ describe("images in the conversation", () => {
     expect(screen.getByTestId("attachment-missing-10:0:0")).toHaveTextContent("PC non raggiungibile");
   });
 });
+
+describe("files an agent shares", () => {
+  it("shows a PDF as a card that opens or downloads", async () => {
+    mockFetch([[transcriptOf("s1"), { ...latest, messages: [
+      { role: "media", text: "File condiviso", at: null, cursor: "30:0",
+        attachments: [{ id: "30:0:0", name: "Rapporto.pdf", kind: "pdf" }] }] }]]);
+    renderView();
+    await waitFor(() => expect(screen.getByTestId("attachment-30:0:0")).toHaveTextContent("Rapporto.pdf"));
+    const open = screen.getByTestId("attachment-open-30:0:0");
+    expect(open).toHaveAttribute("href", "/api/sessions/s1/attachments/30%3A0%3A0");
+    expect(open).toHaveAttribute("target", "_blank");
+    expect(screen.getByTestId("chat-media")).toHaveTextContent("File condiviso");
+  });
+});

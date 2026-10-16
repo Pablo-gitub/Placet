@@ -229,3 +229,96 @@ def test_the_bridge_job_reads_and_honours_placet_off(tmp_path, monkeypatch):
     assert result["ok"] and base64.b64decode(result["page"]["data"]) == png()
     (tmp_path / ".placet-off").touch()
     assert daemon.handle_job(job)["error"] == "excluded"
+
+
+# --- Files an agent shares with placet_share_file -------------------------------------
+
+PDF = b"%PDF-1.7\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n"
+
+
+def shared_home(tmp_path):
+    (tmp_path / "Projects" / "app" / "out").mkdir(parents=True)
+    (tmp_path / "Projects" / "app" / "out" / "report.pdf").write_bytes(PDF)
+    (tmp_path / "Downloads").mkdir()
+    (tmp_path / "Downloads" / "grafico.png").write_bytes(png())
+    (tmp_path / ".ssh").mkdir()
+    (tmp_path / ".ssh" / "key.pdf").write_bytes(PDF)
+    (tmp_path / "Projects" / "app" / "notes.txt").write_text("ciao")
+    return tmp_path
+
+
+def test_shared_file_rules(tmp_path):
+    home = shared_home(tmp_path)
+    assert att.check_shared(str(home / "Projects/app/out/report.pdf"), home).name == "report.pdf"
+    assert att.check_shared(str(home / "Downloads/grafico.png"), home)
+    (home / "Projects" / "link.pdf").symlink_to(home / ".ssh" / "key.pdf")
+    outside = tmp_path.parent / "fuori.pdf"
+    outside.write_bytes(PDF)
+    for bad in (str(home / ".ssh/key.pdf"), str(home / "Projects/link.pdf"), str(outside),
+                "Projects/app/out/report.pdf", str(home), str(home / "Projects/app/../../.ssh/key.pdf")):
+        with pytest.raises(AttachmentError):
+            att.check_shared(bad, home)
+    (home / "Projects" / "app" / ".placet-off").touch()
+    with pytest.raises(AttachmentError):
+        att.check_shared(str(home / "Projects/app/out/report.pdf"), home)
+
+
+def test_only_pdfs_and_images_are_served(tmp_path):
+    home = shared_home(tmp_path)
+    assert att.load("codex", SID, att.shared(str(home / "Projects/app/out/report.pdf")), home) == (
+        "application/pdf", PDF)
+    with pytest.raises(AttachmentError) as e:
+        att.load("codex", SID, att.shared(str(home / "Projects/app/notes.txt")), home)
+    assert e.value.code == "unsupported"
+
+
+def test_each_provider_records_the_share_call(tmp_path):
+    home = shared_home(tmp_path)
+    path = str(home / "Projects/app/out/report.pdf")
+    # Claude
+    write_jsonl(home / ".claude" / "projects" / "-p" / f"{SID}.jsonl", [{"type": "assistant", "timestamp": "t",
+        "message": {"content": [{"type": "tool_use", "name": "mcp__placet__placet_share_file",
+                                 "input": {"path": path, "title": "Rapporto"}}]}}])
+    page = read_transcript("claude-code", SID, home=home)
+    media = [m for m in page["messages"] if m["role"] == "media"][0]
+    assert media["text"] == "File condiviso" and media["attachments"][0]["name"] == "Rapporto"
+    assert media["attachments"][0]["kind"] == "pdf" and path not in json.dumps(page)
+    assert read_attachment("claude-code", SID, media["attachments"][0]["id"], home=home)[0] == "application/pdf"
+    # Codex
+    write_jsonl(home / ".codex" / "sessions" / f"rollout-2026-10-17T00-00-00-{SID}.jsonl", [
+        {"type": "event_msg", "timestamp": "t", "payload": {"type": "item_completed", "item": {
+            "type": "McpToolCall", "server": "placet", "tool": "placet_share_file", "arguments": {"path": path}}}}])
+    page = read_transcript("codex", SID, home=home)
+    assert [m["role"] for m in page["messages"]] == ["action", "media"]
+    # Antigravity: arguments are a JSON string
+    agy_home(home, [{"type": "PLANNER_RESPONSE", "created_at": "t", "tool_calls": [{"name": "call_mcp_tool", "args": {
+        "ServerName": '"placet"', "ToolName": '"placet_share_file"', "Arguments": json.dumps({"path": path})}}]}])
+    page = read_transcript("antigravity", SID, home=home)
+    assert page["messages"][-1]["attachments"][0]["kind"] == "pdf"
+    # Another tool with a "path" argument is not a share.
+    write_jsonl(home / ".claude" / "projects" / "-p" / f"{SID}.jsonl", [{"type": "assistant", "timestamp": "t",
+        "message": {"content": [{"type": "tool_use", "name": "mcp__other__read", "input": {"path": path}}]}}])
+    assert all(m["role"] != "media" for m in read_transcript("claude-code", SID, home=home)["messages"])
+
+
+def test_the_mcp_tool_answers_the_agent_at_once(tmp_path, monkeypatch):
+    home = shared_home(tmp_path)
+    monkeypatch.setenv("HOME", str(home))
+    from mcp_server.server import placet_share_file
+    assert "File condiviso" in placet_share_file(str(home / "Projects/app/out/report.pdf"), "Rapporto")
+    assert placet_share_file(str(home / ".ssh/key.pdf")).startswith("File non condiviso")
+    assert placet_share_file(str(home / "Projects/app/notes.txt")).startswith("File non condiviso")
+
+
+@pytest.mark.asyncio
+async def test_pdfs_are_served_inline_without_the_image_sandbox(api_setup):  # noqa: F811
+    app, db = api_setup
+    await register(app)
+    bridge = asyncio.create_task(fake_bridge(app, lambda job: {"ok": True, "page": {
+        "mime": "application/pdf", "data": base64.b64encode(PDF).decode()}}))
+    await asyncio.sleep(0.05)
+    async with human_client(app) as human:
+        resp = await human.get(f"/api/sessions/{SESSION}/attachments/1:0:0")
+    await bridge
+    assert resp.status_code == 200 and resp.headers["content-type"] == "application/pdf"
+    assert resp.headers["content-disposition"] == "inline" and resp.headers["cache-control"] == "no-store"

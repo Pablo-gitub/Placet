@@ -174,6 +174,32 @@ def placet_reply(
 
 
 @mcp.tool()
+def placet_share_file(path: str, title: Optional[str] = None) -> str:
+    """
+    Mostra all'utente, nella conversazione sul telefono (PWA Placet), un file che hai
+    prodotto per lui: un PDF o un'immagine (JPEG, PNG, WebP). Usalo quando l'utente deve
+    vedere o scaricare il risultato, non per i file di lavoro intermedi.
+
+    - path: percorso assoluto del file, nella home dell'utente e non in cartelle nascoste
+      (mai .ssh, .config...); non in progetti esclusi con .placet-off.
+    - title: nome da mostrare (facoltativo).
+
+    Il file non viene copiato: l'utente lo legge dal PC finché esiste. Non serve
+    citare il percorso nella risposta.
+    """
+    from bridge.attachments import AttachmentError, check_content, check_shared
+    try:
+        real = check_shared(path)
+        with open(real, "rb") as f:
+            check_content(f.read(21 * 1024 * 1024))
+    except AttachmentError as e:
+        return f"File non condiviso: {e}"
+    except OSError as e:
+        return f"File non condiviso: {e}"
+    return f"File condiviso con l'utente: {title or real.name}. Lo vede nella conversazione sul telefono."
+
+
+@mcp.tool()
 def placet_list_agents() -> str:
     """
     Restituisce gli agenti registrati in Placet (ruoli, regole di approvazione) e le loro

@@ -118,7 +118,7 @@ ATTACHMENT_ERRORS = {
     **TRANSCRIPT_ERRORS,
     "not_found": (404, "Il file non è più disponibile sul PC."),
     "forbidden": (403, "Questo file non si può mostrare."),
-    "unsupported": (415, "Formato non supportato: si mostrano immagini JPEG, PNG e WebP."),
+    "unsupported": (415, "Formato non supportato: si mostrano immagini JPEG, PNG e WebP e file PDF."),
     "too_large": (413, "Immagine troppo grande."),
 }
 ATTACHMENT_ID_PATTERN = r"^\d+:\d+:\d+$"
@@ -1018,18 +1018,20 @@ def create_app(
             return {"mime": mime, "data": base64.b64encode(data).decode("ascii")}
 
         result = await bridge_call("attachment", {**params, "cwd": session.cwd}, local, ATTACHMENT_ERRORS)
-        if result.get("mime") not in ("image/jpeg", "image/png", "image/webp"):
+        mime = result.get("mime")
+        if mime not in ("image/jpeg", "image/png", "image/webp", "application/pdf"):
             raise HTTPException(status_code=415, detail=ATTACHMENT_ERRORS["unsupported"][1])
-        return Response(
-            content=base64.b64decode(result.get("data") or ""),
-            media_type=result["mime"],
-            headers={
-                # Not kept by the browser or the service worker: the PC is the source.
-                "Cache-Control": "no-store",
-                "X-Content-Type-Options": "nosniff",
-                "Content-Security-Policy": "default-src 'none'; sandbox",
-            },
-        )
+        headers = {
+            # Not kept by the browser or the service worker: the PC is the source.
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        }
+        if mime != "application/pdf":
+            headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
+        else:
+            # The browser's own PDF viewer; it does not run in the page's origin.
+            headers["Content-Disposition"] = "inline"
+        return Response(content=base64.b64decode(result.get("data") or ""), media_type=mime, headers=headers)
 
     # --- Local bridge (tmux injection and outcome delivery) -----------------
 

@@ -45,6 +45,14 @@ def _with_attachments(entries: List[dict], found: List[dict], at: Optional[str],
     return entries + [_entry(role, "", at, attachments=list(found))]
 
 
+def _shared_entry(tool: Optional[str], args, at: Optional[str]) -> List[dict]:
+    """A placet_share_file call: the agent shares a file with the user."""
+    if tool != att.SHARE_TOOL or not isinstance(args, dict) or not isinstance(args.get("path"), str):
+        return []
+    title = args.get("title") if isinstance(args.get("title"), str) else None
+    return [_entry("media", "File condiviso", at, attachments=[att.shared(args["path"], title)])]
+
+
 class TranscriptError(Exception):
     """`code` is one of: invalid, unsupported, not_found."""
 
@@ -165,6 +173,7 @@ def parse_claude(obj: dict) -> List[dict]:
                 if name.startswith("mcp__"):
                     _, server, tool = (name.split("__", 2) + ["", ""])[:3]
                     out.append(_action(tool or name, "mcp", server, at))
+                    out += _shared_entry(tool, args, at)
                     continue
                 tool_kind, key = _CLAUDE_TOOLS.get(name, ("other", None))
                 out.append(_action(name, tool_kind, args.get(key) if key else None, at))
@@ -211,7 +220,8 @@ def parse_codex(obj: dict) -> List[dict]:
             command = command[-1] if command else ""
         return [_action("exec", "command", command, at)]
     if kind == "McpToolCall":
-        return [_action(item.get("tool", ""), "mcp", item.get("server"), at)]
+        tool = item.get("tool", "")
+        return [_action(tool, "mcp", item.get("server"), at)] + _shared_entry(tool, item.get("arguments"), at)
     if kind == "Extension":
         action = item.get("action") or {}
         queries = action.get("queries") or [item.get("query") or action.get("query")]
@@ -279,6 +289,13 @@ def parse_antigravity(obj: dict) -> List[dict]:
             args = {k: _antigravity_arg(v) for k, v in (call.get("args") or {}).items()}
             if name == "call_mcp_tool":
                 out.append(_action(args.get("ToolName") or name, "mcp", args.get("ServerName"), at))
+                tool_args = args.get("Arguments")
+                if isinstance(tool_args, str):
+                    try:
+                        tool_args = json.loads(tool_args)
+                    except ValueError:
+                        tool_args = None
+                out += _shared_entry(args.get("ToolName"), tool_args, at)
                 continue
             tool_kind, key = _ANTIGRAVITY_TOOLS.get(name, ("other", None))
             detail = args.get(key) if key else None

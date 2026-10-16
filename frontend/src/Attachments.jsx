@@ -1,8 +1,26 @@
 import React, { useEffect, useState } from "react";
-import { Download, ImageOff, X } from "lucide-react";
+import { Download, ExternalLink, FileText, ImageOff, X } from "lucide-react";
 
 const attachmentUrl = (sessionId, id) =>
   `/api/sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(id)}`;
+
+/** A PDF the agent shared: opened in the browser's viewer, or downloaded. */
+function FileCard({ sessionId, attachment }) {
+  const url = attachmentUrl(sessionId, attachment.id);
+  return (
+    <div className="attachment-file" data-testid={`attachment-${attachment.id}`}>
+      <FileText size={22} />
+      <span className="attachment-file-name">{attachment.name}</span>
+      <a href={url} target="_blank" rel="noopener noreferrer" className="icon-button" aria-label="Apri"
+        data-testid={`attachment-open-${attachment.id}`}>
+        <ExternalLink size={16} />
+      </a>
+      <a href={url} download={attachment.name} className="icon-button" aria-label="Scarica">
+        <Download size={16} />
+      </a>
+    </div>
+  );
+}
 
 /** One thumbnail: read from the PC on demand; says so when it cannot be. */
 function Thumb({ sessionId, attachment, onOpen }) {
@@ -60,9 +78,13 @@ export default function Attachments({ sessionId, items }) {
   return (
     <>
       <div className="attachments" data-testid="attachments">
-        {items.map((a) => (
-          <Thumb key={a.id} sessionId={sessionId} attachment={a} onOpen={setOpen} />
-        ))}
+        {items.map((a) =>
+          a.kind === "pdf" ? (
+            <FileCard key={a.id} sessionId={sessionId} attachment={a} />
+          ) : (
+            <Thumb key={a.id} sessionId={sessionId} attachment={a} onOpen={setOpen} />
+          )
+        )}
       </div>
       {open && <Viewer sessionId={sessionId} attachment={open} onClose={() => setOpen(null)} />}
     </>
