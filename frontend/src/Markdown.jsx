@@ -1,6 +1,7 @@
 import React from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import CodeBlock from "./CodeBlock";
 
 /**
  * Renders agent-written Markdown. The text comes from agents, so raw HTML is
@@ -19,6 +20,16 @@ export default function Markdown({ children, testId }) {
             <a href={href} target="_blank" rel="noopener noreferrer">
               {text}
             </a>
+          ),
+          // Fenced blocks become CodeBlock; inline code stays a plain <code>.
+          pre: ({ children: block }) => {
+            const code = React.Children.toArray(block)[0];
+            return <CodeBlock className={code?.props?.className}>{code?.props?.children}</CodeBlock>;
+          },
+          table: ({ children: rows }) => (
+            <div className="markdown-table">
+              <table>{rows}</table>
+            </div>
           ),
         }}
       >

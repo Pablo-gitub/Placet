@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { AlertCircle, CheckCircle, Home as HomeIcon, Radio, ShieldCheck } from "lucide-react";
+import { AlertCircle, CheckCircle, Home as HomeIcon, MessagesSquare, Radio, ShieldCheck } from "lucide-react";
 import Home from "./Home";
 import History from "./History";
 import SessionView from "./SessionView";
 import { requestIdFromHash, routeFromHash } from "./decisions";
+import { useWide } from "./useWide";
 
 function upsert(list, item) {
   const index = list.findIndex((x) => x.id === item.id);
@@ -27,7 +28,9 @@ export default function App() {
   const [connected, setConnected] = useState(false);
   const [submittingId, setSubmittingId] = useState(null);
   const [feedback, setFeedback] = useState(null);
-  const inSession = route.view === "session";
+  const wide = useWide();
+  // On the phone a conversation takes the whole screen (and follows the keyboard).
+  const inSession = route.view === "session" && !wide;
 
   useEffect(() => {
     if (!inSession) return;
@@ -283,16 +286,75 @@ export default function App() {
   const openSession = (id) => navigate(`#/sessione/${id}`);
   const pendingCount = requests.filter((r) => r.status === "PENDING").length;
 
+  const homeView = (
+    <Home
+      requests={requests}
+      sessions={sessions}
+      onDecide={handleDecision}
+      submittingId={submittingId}
+      focusId={focusId}
+      onOpenSession={openSession}
+      onTogglePin={togglePin}
+      activeSessionId={route.view === "session" ? route.sessionId : null}
+    />
+  );
+  const sessionView = route.view === "session" && (
+    <SessionView
+      key={route.sessionId}
+      sessionId={route.sessionId}
+      session={sessions.find((s) => s.id === route.sessionId)}
+      requests={requests}
+      sessions={sessions}
+      onBack={() => navigate("#/")}
+      onDecide={handleDecision}
+      onSend={sendMessage}
+      onDelivery={deliveryAction}
+      submittingId={submittingId}
+      focusId={focusId}
+    />
+  );
+  const historyView = route.view === "history" && (
+    <History requests={requests} sessions={sessions} focusId={focusId} onOpenSession={openSession} />
+  );
+
+  const navTabs = (
+    <nav className="nav-tabs" data-testid="nav-tabs">
+      <button
+        data-testid="tab-home"
+        className={`nav-tab ${route.view !== "history" ? "active" : ""}`}
+        onClick={() => navigate("#/")}
+      >
+        <HomeIcon size={16} />
+        Home
+        {pendingCount > 0 && (
+          <span className="badge-count" data-testid="pending-badge">
+            {pendingCount}
+          </span>
+        )}
+      </button>
+      <button
+        data-testid="tab-history"
+        className={`nav-tab ${route.view === "history" ? "active" : ""}`}
+        onClick={() => navigate("#/storico")}
+      >
+        <ShieldCheck size={16} />
+        Storico
+      </button>
+    </nav>
+  );
+
+  const layout = wide ? " wide" : route.view === "session" ? " in-session" : " with-bottom-bar";
   return (
-    <div className={`app-container${route.view === "session" ? " in-session" : ""}`}>
+    <div className={`app-container${layout}`}>
       <header>
         <div className="brand">
           <div className="logo-icon">P</div>
           <div>
             <h1>Placet</h1>
-            <p style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Human Supervision & Agent Bus</p>
+            <p className="brand-tagline">Human Supervision & Agent Bus</p>
           </div>
         </div>
+        {wide && navTabs}
         <div className="live-indicator" data-testid="live-indicator">
           <Radio size={12} className={connected ? "text-emerald-400 animate-pulse" : "text-amber-400"} />
           {connected ? "LIVE" : "RICONNESSIONE…"}
@@ -306,63 +368,33 @@ export default function App() {
         </div>
       )}
 
-      {route.view !== "session" && (
-        <nav className="nav-tabs">
-          <button
-            data-testid="tab-home"
-            className={`nav-tab ${route.view === "home" ? "active" : ""}`}
-            onClick={() => navigate("#/")}
-          >
-            <HomeIcon size={16} />
-            Home
-            {pendingCount > 0 && (
-              <span className="badge-count" data-testid="pending-badge">
-                {pendingCount}
-              </span>
+      {wide ? (
+        // Desktop: questions and sessions on the left, the open conversation
+        // (or the history) on the right.
+        <div className="workspace">
+          <aside className="sidebar" data-testid="sidebar">
+            {homeView}
+          </aside>
+          <main className="pane" data-testid="pane">
+            {sessionView || historyView || (
+              <div className="pane-empty" data-testid="pane-empty">
+                <MessagesSquare size={28} />
+                <p>Apri una sessione per leggere la conversazione e scriverle.</p>
+              </div>
             )}
-          </button>
-          <button
-            data-testid="tab-history"
-            className={`nav-tab ${route.view === "history" ? "active" : ""}`}
-            onClick={() => navigate("#/storico")}
-          >
-            <ShieldCheck size={16} />
-            Storico
-          </button>
-        </nav>
+          </main>
+        </div>
+      ) : (
+        <>
+          <main>
+            {route.view === "home" && homeView}
+            {historyView}
+            {sessionView}
+          </main>
+          {/* Phone: the bar sits at the bottom, out of the way inside a conversation. */}
+          {route.view !== "session" && navTabs}
+        </>
       )}
-
-      <main>
-        {route.view === "home" && (
-          <Home
-            requests={requests}
-            sessions={sessions}
-            onDecide={handleDecision}
-            submittingId={submittingId}
-            focusId={focusId}
-            onOpenSession={openSession}
-            onTogglePin={togglePin}
-          />
-        )}
-        {route.view === "history" && (
-          <History requests={requests} sessions={sessions} focusId={focusId} onOpenSession={openSession} />
-        )}
-        {route.view === "session" && (
-          <SessionView
-            key={route.sessionId}
-            sessionId={route.sessionId}
-            session={sessions.find((s) => s.id === route.sessionId)}
-            requests={requests}
-            sessions={sessions}
-            onBack={() => navigate("#/")}
-            onDecide={handleDecision}
-            onSend={sendMessage}
-            onDelivery={deliveryAction}
-            submittingId={submittingId}
-            focusId={focusId}
-          />
-        )}
-      </main>
     </div>
   );
 }

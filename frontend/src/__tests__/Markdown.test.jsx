@@ -56,3 +56,30 @@ describe("prompt review card", () => {
     });
   });
 });
+
+describe("code blocks", () => {
+  it("highlights a known language, names it, and copies the source", async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.assign(navigator, { clipboard: { writeText } });
+    render(<Markdown testId="md">{"Esegui:\n\n```sh\ngit status # stato\n```\n\nPoi `npm test`."}</Markdown>);
+    const block = screen.getByTestId("code-block");
+    expect(block).toHaveTextContent("bash");
+    expect(block.querySelector(".hljs-comment")).toHaveTextContent("# stato");
+    expect(screen.getByTestId("md").querySelector("p code")).toHaveTextContent("npm test"); // inline stays inline
+    fireEvent.click(screen.getByTestId("code-copy"));
+    expect(writeText).toHaveBeenCalledWith("git status # stato");
+    expect(await screen.findByText("Copiato")).toBeInTheDocument();
+  });
+
+  it("shows unknown languages as plain, escaped text", () => {
+    render(<Markdown testId="md">{"```brainfuck\n<b>++</b>\n```"}</Markdown>);
+    const block = screen.getByTestId("code-block");
+    expect(block.querySelector("b")).toBeNull();
+    expect(block).toHaveTextContent("<b>++</b>");
+  });
+
+  it("escapes highlighted code too", () => {
+    render(<Markdown testId="md">{'```html\n<img src=x onerror="alert(1)">\n```'}</Markdown>);
+    expect(screen.getByTestId("code-block").querySelector("img")).toBeNull();
+  });
+});

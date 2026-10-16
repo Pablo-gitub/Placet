@@ -13,12 +13,13 @@ import {
   timeAgo,
 } from "./sessionInfo";
 
-function SessionRow({ session, questions, onOpen }) {
+function SessionRow({ session, questions, onOpen, active }) {
   const status = sessionStatus(session);
   return (
     <button
       type="button"
-      className={`card session-row-card ${providerClass(session)}`}
+      className={`card session-row-card ${providerClass(session)}${active ? " active" : ""}`}
+      aria-current={active ? "page" : undefined}
       data-testid={`session-row-${session.id}`}
       onClick={() => onOpen(session.id)}
     >
@@ -56,7 +57,7 @@ function loadCollapsed() {
  * The followed sessions of one provider, under a header that opens and
  * closes; providers come in order of their latest activity.
  */
-function ProviderGroup({ provider, sessions, questionsOf, collapsed, onToggle, onOpen }) {
+function ProviderGroup({ provider, sessions, questionsOf, collapsed, onToggle, onOpen, activeId }) {
   const busy = sessions.filter((s) => sessionStatus(s).key === "busy").length;
   const questions = sessions.reduce((n, s) => n + questionsOf(s.id), 0);
   return (
@@ -78,7 +79,9 @@ function ProviderGroup({ provider, sessions, questionsOf, collapsed, onToggle, o
         {questions > 0 && <span className="badge-count">{questions}</span>}
       </button>
       {!collapsed &&
-        sessions.map((s) => <SessionRow key={s.id} session={s} questions={questionsOf(s.id)} onOpen={onOpen} />)}
+        sessions.map((s) => (
+          <SessionRow key={s.id} session={s} questions={questionsOf(s.id)} onOpen={onOpen} active={s.id === activeId} />
+        ))}
     </div>
   );
 }
@@ -92,6 +95,7 @@ export default function Home({
   focusId,
   onOpenSession,
   onTogglePin,
+  activeSessionId,
 }) {
   const [adding, setAdding] = useState(false);
   const [collapsed, setCollapsed] = useState(loadCollapsed);
@@ -161,6 +165,7 @@ export default function Home({
             collapsed={collapsed.has(g.provider.key)}
             onToggle={toggleProvider}
             onOpen={onOpenSession}
+            activeId={activeSessionId}
           />
         ))}
         <button

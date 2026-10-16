@@ -1,6 +1,6 @@
 import React from "react";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import App from "../App";
 import { MockEventSource, mockFetch, transcriptOf } from "./testUtils";
 
@@ -257,5 +257,50 @@ describe("followed sessions by provider", () => {
     expect(JSON.parse(localStorage.getItem("placet.collapsedProviders"))).toEqual(["claude-code"]);
     fireEvent.click(screen.getByTestId("provider-toggle-claude-code"));
     expect(screen.getByTestId("session-row-new")).toBeInTheDocument();
+  });
+});
+
+describe("adaptive layout", () => {
+  const original = window.matchMedia;
+  const screenWide = (wide) => {
+    window.matchMedia = (query) => ({
+      matches: wide, media: query, addEventListener: () => {}, removeEventListener: () => {},
+    });
+  };
+  beforeEach(() => {
+    window.location.hash = "";
+  });
+  afterEach(() => {
+    window.matchMedia = original;
+  });
+
+  it("on a wide screen keeps the sessions on the left and opens the conversation on the right", async () => {
+    screenWide(true);
+    setup();
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId("pane-empty")).toBeInTheDocument());
+    const sidebar = screen.getByTestId("sidebar");
+    await waitFor(() => expect(within(sidebar).getByTestId("session-row-new")).toBeInTheDocument());
+    fireEvent.click(within(sidebar).getByTestId("session-row-new"));
+    await waitFor(() => expect(within(screen.getByTestId("pane")).getByTestId("session-view")).toBeInTheDocument());
+    expect(within(sidebar).getByTestId("session-row-new")).toHaveClass("active");
+    // The navigation stays available next to the conversation.
+    expect(screen.getByTestId("tab-history")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("tab-history"));
+    await waitFor(() => expect(within(screen.getByTestId("pane")).getByTestId("history-section")).toBeInTheDocument());
+    expect(within(sidebar).getByTestId("home-section")).toBeInTheDocument();
+  });
+
+  it("on the phone puts the navigation in a bottom bar, hidden inside a conversation", async () => {
+    screenWide(false);
+    setup();
+    const { container } = render(<App />);
+    await waitFor(() => expect(screen.getByTestId("nav-tabs")).toBeInTheDocument());
+    expect(container.firstChild).toHaveClass("with-bottom-bar");
+    window.location.hash = "#/sessione/cx1";
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+    await waitFor(() => expect(screen.getByTestId("session-view")).toBeInTheDocument());
+    expect(screen.queryByTestId("nav-tabs")).toBeNull();
+    expect(container.firstChild).toHaveClass("in-session");
   });
 });
