@@ -1,162 +1,186 @@
 import React from "react";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { describe, it, expect, beforeEach } from "vitest";
 import App from "../App";
+import { MockEventSource, mockFetch, transcriptOf } from "./testUtils";
 
-// Mock EventSource globally
-class MockEventSource {
-  constructor(url) {
-    this.url = url;
-    setTimeout(() => {
-      if (this.onopen) this.onopen();
-    }, 0);
-  }
-  addEventListener(event, callback) {
-    this.callback = callback;
-  }
-  close() {}
-}
 global.EventSource = MockEventSource;
 
-describe("Placet Frontend PWA App", () => {
-  const mockRequests = [
-    {
-      id: 1,
-      sender_id: "claude",
-      recipient_id: "gemini",
-      question_type: "prompt_review",
-      prompt: "Original prompt proposal",
-      context: "Refactoring test context",
-      options: [],
-      status: "PENDING",
-      created_at: new Date().toISOString(),
-    },
-    {
-      id: 2,
-      sender_id: "claude",
-      recipient_id: "human",
-      question_type: "single_choice",
-      prompt: "Which choice?",
-      options: ["Choice A", "Choice B"],
-      status: "COMPLETED",
-      response: {
-        responder_id: "human",
-        content: "Choice A",
-      },
-      created_at: new Date().toISOString(),
-    },
-  ];
+const now = Date.now();
+const ago = (minutes) => new Date(now - minutes * 60000).toISOString();
 
-  const mockAgents = {
-    agents: {
-      claude: { name: "Claude Code", tmux_session: "agent-claude", allowed_targets: ["gemini"], default_timeout_seconds: 180 },
-      gemini: { name: "Gemini CLI", tmux_session: "agent-gemini", allowed_targets: ["claude"], default_timeout_seconds: 180 },
-    },
-    rules: {
-      "claude -> gemini": { require_approval: true },
-    },
-  };
+const requests = [
+  {
+    id: 1, sender_id: "claude", recipient_id: "gemini", question_type: "prompt_review",
+    prompt: "Original prompt proposal", context: "Refactoring test context", options: [],
+    status: "PENDING", created_at: ago(1),
+  },
+  {
+    id: 2, sender_id: "claude", recipient_id: "human", question_type: "single_choice",
+    prompt: "Which choice?", options: ["Choice A", "Choice B"], status: "COMPLETED",
+    selected_options: ["Choice A"], response: { responder_id: "human", content: "Choice A" },
+    created_at: ago(5),
+  },
+  {
+    id: 3, sender_id: "codex", recipient_id: "human", question_type: "confirmation",
+    prompt: "Procedo con il deploy?", options: [], status: "PENDING", created_at: ago(1),
+    sender_session_id: "cx1",
+  },
+];
 
-  const decisionBody = (id) => {
-    const call = global.fetch.mock.calls.find(([url]) => url === `/api/requests/${id}/decision`);
-    return call ? JSON.parse(call[1].body) : undefined;
-  };
+const session = (id, extra) => ({
+  id, agent_id: "claude", provider: "claude-code", entrypoint: "claude-desktop", state: "idle",
+  reachable: true, started_at: ago(60), last_seen_at: ago(1), pinned: false, ...extra,
+});
 
+const sessions = [
+  session("old", { title: "Vecchia", cwd: "/p/placet", pinned: true, activity_at: ago(30) }),
+  session("new", { title: "Recente", cwd: "/p/lab", pinned: true, activity_at: ago(2), state: "busy" }),
+  session("other", { title: "Non seguita", cwd: "/p/x", activity_at: ago(1) }),
+  session("cx1", { agent_id: "codex", provider: "codex", entrypoint: "codex-desktop", title: "Deploy", cwd: "/p/app",
+    activity_at: ago(3) }),
+];
+
+const page = {
+  session_id: "cx1", provider: "codex", before: null, end: 100,
+  messages: [
+    { role: "user", text: "prepara il deploy", at: ago(4), cursor: "0:0" },
+    { role: "assistant", text: "Pronto, ti chiedo conferma.", at: ago(3), cursor: "10:0" },
+  ],
+};
+
+function setup(extraRoutes = []) {
+  return mockFetch([
+    ...extraRoutes,
+    ["/api/requests", requests],
+    ["/api/sessions?include_ended=true", sessions],
+    [transcriptOf("cx1"), page],
+    [transcriptOf("new"), { ...page, session_id: "new", messages: [] }],
+    [(url) => url.includes("/decision"), { id: 1, status: "APPROVED" }],
+    [(url, o) => url.endsWith("/pin") && o.method === "PUT",
+      (url, o) => ({ ...sessions.find((s) => url.includes(`/${s.id}/`)), pinned: JSON.parse(o.body).pinned })],
+  ]);
+}
+
+const decisionBody = (fetchMock, id) => {
+  const call = fetchMock.mock.calls.find(([url]) => url === `/api/requests/${id}/decision`);
+  return call ? JSON.parse(call[1].body) : undefined;
+};
+
+describe("Placet PWA", () => {
   beforeEach(() => {
     window.location.hash = "";
-    vi.restoreAllMocks();
-    global.fetch = vi.fn((url, options) => {
-      if (url === "/api/requests" && (!options || options.method === "GET")) {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve(mockRequests),
-        });
-      }
-      if (url === "/api/agents") {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve(mockAgents),
-        });
-      }
-      if (url.includes("/decision") && options?.method === "POST") {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ id: 1, status: "APPROVED" }),
-        });
-      }
-      return Promise.reject(new Error("Unknown route " + url));
-    });
   });
 
-  it("renders header, live status, and inbox with pending request", async () => {
+  it("shows the pending questions in the home, with the prompt readable and editable", async () => {
+    setup();
     render(<App />);
-
     expect(screen.getByText("Placet")).toBeInTheDocument();
-
-    await waitFor(() => {
-      expect(screen.getByTestId("request-card-1")).toBeInTheDocument();
-    });
-
-    expect(screen.getByText("claude")).toBeInTheDocument();
-    expect(screen.getByText("gemini")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("request-card-1")).toBeInTheDocument());
+    expect(screen.getByTestId("request-card-3")).toBeInTheDocument();
+    expect(screen.queryByTestId("request-card-2")).toBeNull(); // settled: history only
+    expect(screen.getByTestId("pending-badge")).toHaveTextContent("2");
     expect(screen.getByText("Refactoring test context")).toBeInTheDocument();
-
-    // Shown rendered first; the raw text appears with "Modifica".
     expect(screen.getByTestId("prompt-preview-1")).toHaveTextContent("Original prompt proposal");
     fireEvent.click(screen.getByTestId("toggle-edit-1"));
     expect(screen.getByTestId("prompt-textarea-1").value).toBe("Original prompt proposal");
   });
 
-  it("allows editing the prompt before approving and sends edited text", async () => {
+  it("sends the edited prompt with the approval", async () => {
+    const fetchMock = setup();
     render(<App />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId("toggle-edit-1")).toBeInTheDocument();
-    });
+    await waitFor(() => expect(screen.getByTestId("toggle-edit-1")).toBeInTheDocument());
     fireEvent.click(screen.getByTestId("toggle-edit-1"));
-
-    const textarea = screen.getByTestId("prompt-textarea-1");
-    fireEvent.change(textarea, { target: { value: "Modified prompt by Paolo" } });
-    expect(textarea.value).toBe("Modified prompt by Paolo");
-
-    const approveBtn = screen.getByTestId("btn-approve-1");
-    fireEvent.click(approveBtn);
-
-    await waitFor(() => {
-      expect(decisionBody(1)).toEqual({
-        status: "APPROVED",
-        edited_prompt: "Modified prompt by Paolo",
-        selected_options: [],
-      });
-    });
+    fireEvent.change(screen.getByTestId("prompt-textarea-1"), { target: { value: "Modified prompt by Paolo" } });
+    fireEvent.click(screen.getByTestId("btn-approve-1"));
+    await waitFor(() =>
+      expect(decisionBody(fetchMock, 1)).toEqual({
+        status: "APPROVED", edited_prompt: "Modified prompt by Paolo", selected_options: [],
+      })
+    );
   });
 
-  it("switches tabs between Inbox, Agenti, and Storico correctly", async () => {
+  it("lists only the followed sessions, most recently active first", async () => {
+    setup();
     render(<App />);
+    await waitFor(() => expect(screen.getByTestId("session-row-new")).toBeInTheDocument());
+    const rows = screen.getAllByTestId(/^session-row-/).map((r) => r.dataset.testid);
+    expect(rows).toEqual(["session-row-new", "session-row-old"]);
+    expect(screen.getByTestId("session-row-new")).toHaveTextContent("Al lavoro");
+    expect(screen.getByTestId("session-row-new")).toHaveTextContent("Claude");
+  });
 
-    await waitFor(() => {
-      expect(screen.getByTestId("request-card-1")).toBeInTheDocument();
-    });
+  it("adds a session from the dialog, provider by provider", async () => {
+    const fetchMock = setup();
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId("open-add-sessions")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("open-add-sessions"));
+    const dialog = screen.getByTestId("add-sessions-dialog");
+    expect(within(dialog).getByTestId("pick-toggle-old")).toBeChecked();
+    expect(within(dialog).getByTestId("pick-toggle-other")).not.toBeChecked();
+    expect(within(dialog).queryByTestId("pick-cx1")).toBeNull(); // Claude tab first
 
-    // Switch to Agenti tab
-    const agentsTab = screen.getByTestId("tab-agents");
-    fireEvent.click(agentsTab);
+    fireEvent.click(within(dialog).getByTestId("provider-tab-codex"));
+    fireEvent.click(within(dialog).getByTestId("pick-toggle-cx1"));
+    await waitFor(() => expect(screen.getByTestId("session-row-cx1")).toBeInTheDocument());
+    const call = fetchMock.mock.calls.find(([url, o]) => url === "/api/sessions/cx1/pin" && o.method === "PUT");
+    expect(JSON.parse(call[1].body)).toEqual({ pinned: true });
+    expect(within(dialog).getByTestId("provider-tab-antigravity")).toHaveTextContent("0");
+  });
 
-    await waitFor(() => {
-      expect(screen.getByTestId("agents-section")).toBeInTheDocument();
-      expect(screen.getByText("tmux: agent-claude")).toBeInTheDocument();
-      expect(screen.getByText("tmux: agent-gemini")).toBeInTheDocument();
-    });
+  it("opens a session's conversation with its question at the bottom", async () => {
+    setup();
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId("open-session-3")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("open-session-3"));
+    await waitFor(() => expect(screen.getByTestId("session-view")).toBeInTheDocument());
+    expect(window.location.hash).toBe("#/sessione/cx1");
+    expect(screen.getByTestId("session-view-name")).toHaveTextContent("Deploy");
+    await waitFor(() => expect(screen.getByText("prepara il deploy")).toBeInTheDocument());
+    const view = screen.getByTestId("chat-scroll");
+    expect(within(view).getByTestId("request-card-3")).toBeInTheDocument();
+    expect(within(view).queryByTestId("request-card-1")).toBeNull(); // not from this session
+    expect(screen.queryByTestId("tab-home")).toBeNull();
+    fireEvent.click(screen.getByLabelText("Indietro"));
+    await waitFor(() => expect(screen.getByTestId("home-section")).toBeInTheDocument());
+  });
 
-    // Switch to Storico tab
-    const historyTab = screen.getByTestId("tab-history");
-    fireEvent.click(historyTab);
+  it("a notification link to a question opens the conversation it belongs to", async () => {
+    window.location.hash = "#request-3";
+    setup();
+    render(<App />);
+    await waitFor(() => expect(window.location.hash).toBe("#/sessione/cx1"));
+    await waitFor(() => expect(screen.getByTestId("request-card-3")).toHaveClass("card-highlight"));
+  });
 
-    await waitFor(() => {
-      expect(screen.getByTestId("history-section")).toBeInTheDocument();
-      expect(screen.getByTestId("history-card-2")).toBeInTheDocument();
-      expect(screen.getByText("Which choice?")).toBeInTheDocument();
-      expect(screen.getByText("Choice A")).toBeInTheDocument();
-    });
+  it("a notification link to a settled request opens the history", async () => {
+    window.location.hash = "#request-2";
+    setup();
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId("history-card-2")).toBeInTheDocument());
+    expect(screen.getByTestId("history-card-2")).toHaveClass("card-highlight");
+    expect(screen.getByTestId("history-answer-2")).toHaveTextContent("Choice A");
+  });
+
+  it("switches between home and history", async () => {
+    setup();
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId("home-section")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("tab-history"));
+    await waitFor(() => expect(screen.getByTestId("history-card-2")).toBeInTheDocument());
+    expect(screen.getByText("Which choice?")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("tab-home"));
+    await waitFor(() => expect(screen.getByTestId("home-section")).toBeInTheDocument());
+  });
+
+  it("follows session updates from the server", async () => {
+    setup();
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId("session-row-new")).toBeInTheDocument());
+    MockEventSource.last.emit("session_update", { ...sessions[1], state: "idle", activity_at: ago(0) });
+    await waitFor(() => expect(screen.getByTestId("session-row-new")).toHaveTextContent("In attesa"));
+    // A closed session the user follows stays, marked closed.
+    MockEventSource.last.emit("session_update", { ...sessions[0], ended_at: ago(0) });
+    await waitFor(() => expect(screen.getByTestId("session-row-old")).toHaveTextContent("Chiusa"));
   });
 });

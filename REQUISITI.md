@@ -90,21 +90,21 @@ Placet è un **punto unico di supervisione umana e bus di cooperazione per agent
 ### 3.4 Le sessioni sul telefono
 | ID | Requisito | Stato |
 |---|---|---|
-| RF-30 | La PWA mostra la **conversazione** di una sessione: in fondo l'ultimo messaggio e l'eventuale domanda, i precedenti si caricano scorrendo verso l'alto | [Deciso] |
+| RF-30 | La PWA mostra la **conversazione** di una sessione: in fondo l'ultimo messaggio e l'eventuale domanda, i precedenti si caricano scorrendo verso l'alto | [Implementato] |
 | RF-31 | Lettura **a richiesta tramite il bridge**: nessuna copia delle conversazioni sul backend | [Implementato] (Claude, Codex, Antigravity) |
-| RF-32 | **Privacy**: si mostrano i messaggi dell'utente e le risposte testuali dell'agente; le azioni diventano una riga ("ha eseguito `cmd`"); risultati dei tool e ragionamento interno non si mostrano. Le compattazioni appaiono come separatore | [Implementato] nel bridge; vista PWA [Deciso] |
-| RF-33 | Si risponde alla domanda **dentro la conversazione** | [Deciso] |
+| RF-32 | **Privacy**: si mostrano i messaggi dell'utente e le risposte testuali dell'agente; le azioni diventano una riga ("ha eseguito `cmd`"); risultati dei tool e ragionamento interno non si mostrano. Le compattazioni appaiono come separatore | [Implementato] |
+| RF-33 | Si risponde alla domanda **dentro la conversazione** | [Implementato] |
 | RF-34 | Si può **scrivere a una sessione** anche senza domande in corso; il messaggio la risveglia come se lo avessi scritto al PC, e nella PWA appare come messaggio tuo | [Deciso] |
 | RF-35 | Se la sessione sta lavorando: **In coda** (a fine turno) o **Subito** (inserito nel turno in corso dopo la prossima azione). Un'impostazione dà il default, modificabile per ogni messaggio | [Deciso] |
 | RF-36 | Dal telefono si possono **lanciare skill** (verificato anche sul desktop). Digitando `/` compaiono le skill e i comandi del provider, con la skill evidenziata | [Deciso] (elenco con `/` utile, non indispensabile) |
-| RF-37 | PC spento: avviso "PC non raggiungibile" | [Deciso] |
+| RF-37 | PC spento: avviso "PC non raggiungibile" | [Implementato] ("Il PC non risponde", con Riprova) |
 
 ### 3.5 Home, elenco sessioni e notifiche
 | ID | Requisito | Stato |
 |---|---|---|
 | RF-10 | Interfaccia come **PWA installata sulla Home dell'iPhone**, servita su Tailscale | [Implementato] |
-| RF-40 | **Home**: in cima le domande in corso; sotto le **sessioni aggiunte**, ordinate per attività (chi ha appena finito il turno in cima) | [Deciso] |
-| RF-41 | **Aggiungi / vedi tutte**: scegli il provider, vedi le sue sessioni aperte, spunti quelle da aggiungere; le altre non compaiono in home | [Deciso] |
+| RF-40 | **Home**: in cima le domande in corso; sotto le **sessioni aggiunte**, ordinate per attività (chi ha appena finito il turno in cima) | [Implementato] |
+| RF-41 | **Aggiungi / vedi tutte**: scegli il provider, vedi le sue sessioni aperte, spunti quelle da aggiungere; le altre non compaiono in home | [Implementato] per sessione; per nodo con la fase 3 |
 | RF-42 | Anche le sessioni che **non hanno mai usato Placet** si registrano, grazie agli hook installati globalmente | [Deciso] |
 | RF-43 | Due tipi di notifica: **domanda** (priorità alta, suono) e **turno finito** (silenziosa, solo per le sessioni aggiunte). Titolo con provider e nome della sessione; il tocco apre la sessione | [Deciso] |
 | RF-11 | Notifiche ntfy self-hosted in tailnet, con solo l'azione "Apri": si decide dalla PWA vedendo il testo completo | [Implementato] nel codice; ntfy da installare |

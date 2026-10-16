@@ -1,21 +1,31 @@
 import React, { useState } from "react";
-import { ArrowRight, CheckCircle, XCircle, Pencil, Eye } from "lucide-react";
+import { ArrowRight, CheckCircle, XCircle, Pencil, Eye, MessagesSquare } from "lucide-react";
 import Markdown from "./Markdown";
 import { OTHER, buildDecision, canApprove } from "./decisions";
 import { sessionName, sessionOrigin, sessionStatus } from "./sessionInfo";
 
-/** Where a request comes from: the sender's session, when known. */
-export function Origin({ req, sessions }) {
+/** Where a request comes from: the sender's session, when known; opens its conversation. */
+export function Origin({ req, sessions, onOpenSession }) {
   const origin = sessionOrigin(sessions.find((s) => s.id === req.sender_session_id));
   if (!origin) return null;
   return (
     <div className="request-origin" data-testid={`origin-${req.id}`}>
       da {req.sender_id} · {origin}
+      {onOpenSession && (
+        <button
+          type="button"
+          className="link-button"
+          data-testid={`open-session-${req.id}`}
+          onClick={() => onOpenSession(req.sender_session_id)}
+        >
+          <MessagesSquare size={13} /> Apri la conversazione
+        </button>
+      )}
     </div>
   );
 }
 
-export default function RequestCard({ req, submitting, highlighted, onDecide, sessions = [] }) {
+export default function RequestCard({ req, submitting, highlighted, onDecide, sessions = [], onOpenSession }) {
   const [editedPrompt, setEditedPrompt] = useState(undefined);
   const [editing, setEditing] = useState(false);
   const [selected, setSelected] = useState([]);
@@ -63,7 +73,7 @@ export default function RequestCard({ req, submitting, highlighted, onDecide, se
         </div>
       </div>
 
-      <Origin req={req} sessions={sessions} />
+      <Origin req={req} sessions={sessions} onOpenSession={onOpenSession} />
 
       {req.context && (
         <section className="request-section">

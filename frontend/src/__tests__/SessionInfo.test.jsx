@@ -1,8 +1,9 @@
 import React from "react";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
-import Sessions from "../Sessions";
 import RequestCard from "../RequestCard";
+import { actionLabel, groupEntries, mergeEntries } from "../chatEntries";
+import { byActivity, providerOf, sessionStatus } from "../sessionInfo";
 
 const now = new Date().toISOString();
 const sessions = [
@@ -14,16 +15,41 @@ const sessions = [
     state: "idle", reachable: false, last_seen_at: now, started_at: now },
 ];
 
-describe("Sessions", () => {
-  it("groups sessions by agent with their state", () => {
-    render(<Sessions sessions={sessions} agents={{ claude: { name: "Claude Code" }, codex: { name: "Codex" } }} />);
-    expect(screen.getByText("Claude Code")).toBeInTheDocument();
-    expect(screen.getByTestId("session-s1")).toHaveTextContent("placet");
-    expect(screen.getByTestId("session-s2")).toHaveTextContent("Post Instagram");
-    expect(screen.getByTestId("session-state-s1")).toHaveTextContent("Al lavoro");
-    expect(screen.getByTestId("session-state-s2")).toHaveTextContent("In attesa");
-    expect(screen.getByTestId("session-state-s3")).toHaveTextContent("Non raggiungibile");
-    expect(screen.getByText("Nessuna sessione aperta.")).toBeInTheDocument(); // codex
+describe("session helpers", () => {
+  it("names the provider, also for old sessions without one", () => {
+    expect(providerOf({ provider: "codex", agent_id: "codex" }).label).toBe("Codex");
+    expect(providerOf({ agent_id: "gemini" }).label).toBe("Antigravity");
+    expect(providerOf({ provider: "ollama", agent_id: "ollama" }).label).toBe("ollama");
+  });
+
+  it("tells the state of a session", () => {
+    expect(sessionStatus(sessions[0]).label).toBe("Al lavoro");
+    expect(sessionStatus(sessions[1]).label).toBe("In attesa");
+    expect(sessionStatus(sessions[2]).label).toBe("Non raggiungibile");
+    expect(sessionStatus({ ...sessions[1], ended_at: now }).label).toBe("Chiusa");
+  });
+
+  it("orders by activity", () => {
+    const a = { activity_at: "2026-10-16T10:00:00Z" };
+    const b = { activity_at: "2026-10-16T11:00:00Z" };
+    expect([a, b].sort(byActivity)).toEqual([b, a]);
+  });
+});
+
+describe("conversation entries", () => {
+  it("describes tool calls in one line", () => {
+    expect(actionLabel({ kind: "command", detail: "ls -la" })).toBe("$ ls -la");
+    expect(actionLabel({ kind: "read", detail: "/a/b/c.py" })).toBe("Legge c.py");
+    expect(actionLabel({ kind: "mcp", tool: "placet_reply", detail: "placet" })).toBe("placet_reply (placet)");
+    expect(actionLabel({ kind: "other", tool: "schedule", detail: "Wait" })).toBe("schedule: Wait");
+    expect(actionLabel({ kind: "other", tool: "Foo" })).toBe("Foo");
+  });
+
+  it("groups consecutive actions and merges pages without duplicates", () => {
+    const e = (cursor, role) => ({ cursor, role });
+    const items = groupEntries([e("1", "user"), e("2", "action"), e("3", "action"), e("4", "assistant"), e("5", "action")]);
+    expect(items.map((i) => (i.type === "actions" ? i.entries.length : i.entry.role))).toEqual(["user", 2, "assistant", 1]);
+    expect(mergeEntries([e("1"), e("2")], [e("2"), e("3")]).map((x) => x.cursor)).toEqual(["1", "2", "3"]);
   });
 });
 

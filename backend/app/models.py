@@ -196,6 +196,10 @@ class SessionModel(BaseModel):
     last_seen_at: datetime
     waiter_seen_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
+    # Last turn start or end: orders the PWA home by activity (RF-40).
+    activity_at: Optional[datetime] = None
+    # Added by the user to the PWA home (RF-41).
+    pinned: bool = False
     # Computed: a background waiter is listening, so Placet can wake it.
     reachable: bool = False
 

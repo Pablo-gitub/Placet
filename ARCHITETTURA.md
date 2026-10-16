@@ -83,8 +83,11 @@ Trasformano gli eventi del client in fatti per Placet (`POST /api/sessions/{id}/
 
 ### 2.5 PWA (`frontend/`)
 - React + Vite, servita dal backend; Markdown con `react-markdown` + `remark-gfm` (HTML grezzo ignorato, link `javascript:` bloccati).
-- Oggi: Inbox (sezioni Contesto / Prompt per X / Domanda, modifica del prompt), Sessioni, Storico con timeline.
-- *(da implementare)*: home con domande in corso e sessioni aggiunte; vista chat di una sessione con risposta e scrittura; finestra "Aggiungi / vedi tutte"; barra dei consumi; grafo ed editor dei progetti.
+- **Percorsi** (hash): `#/` home, `#/storico`, `#/sessione/<id>`. I link delle notifiche `#request-N` portano alla conversazione della sessione che ha fatto la domanda, oppure alla home o allo storico.
+- **Home** (`Home.jsx`): domande in corso, poi le sessioni aggiunte ordinate per attività (`activity_at`: inizio o fine dell'ultimo turno, non i controlli del waiter), con provider, stato e numero di domande. "Aggiungi / vedi tutte" (`AddSessionsDialog.jsx`): un provider alla volta, spunta = sessione seguita (`PUT /api/sessions/{id}/pin`).
+- **Conversazione** (`SessionView.jsx`, `useTranscript.js`): pagine da `/api/sessions/{id}/transcript`; si apre in fondo, scorrendo in alto carica le precedenti mantenendo la posizione; a ogni cambio di turno (`session_update` via SSE) chiede solo le voci nuove (`after`). Le azioni consecutive diventano un gruppo richiudibile; le domande aperte della sessione stanno in fondo alla conversazione.
+- **Storico** (`History.jsx`) con la timeline di ogni richiesta.
+- *(da implementare)*: scrittura alle sessioni (blocco 3), barra dei consumi, grafo ed editor dei progetti.
 
 ---
 
@@ -173,7 +176,6 @@ bridge ── trova il file, lo legge dal fondo, filtra ──► POST /api/brid
 - **Filtro (RF-32):** messaggi dell'utente e risposte testuali; azioni come una riga; niente risultati dei tool né ragionamento. Voci di servizio scartate (Claude: `attachment`, `queue-operation`, `file-history-snapshot`, …).
 - **Aggiornamento dal vivo:** l'evento `stop` di una sessione produce `session_update` via SSE; la PWA chiede solo i messaggi nuovi.
 - **Sicurezza (RS-06):** il backend passa solo provider e id della sessione registrata; il bridge cerca il file nelle cartelle del provider (`~/.claude/projects/*/<id>.jsonl`, `~/.codex/sessions/**/rollout-*-<id>.jsonl`, `~/.gemini/antigravity/brain/<id>/…/transcript.jsonl`), accetta solo id `[A-Za-z0-9_-]` e rifiuta i link simbolici che portano fuori da quelle cartelle.
-- *(da implementare, blocco 2)* la vista nella PWA.
 
 ---
 
@@ -183,7 +185,7 @@ bridge ── trova il file, lo legge dal fondo, filtra ──► POST /api/brid
 - **`requests`**: `id`, `sender_id`, `recipient_id`, `question_type`, `prompt`, `edited_prompt`, `prompt_source`, `context`, `options`, `selected_options`, `custom_text`, `status`, `priority`, `created_at`, `expires_at`, `decided_at`, `completed_at`, `updated_at`, `delivered_at`, `delivery_attempts`, `delivering_since`, `executing_since`, `sender_session_id`, `recipient_session_id`.
 - **`responses`**: `request_id` (unico), `responder_id`, `content`, `implicit`, `created_at`.
 - **`request_events`**: timeline per richiesta (`actor`, `event`, `details`, `at`).
-- **`sessions`**: `id` (id del provider), `agent_id`, `provider`, `entrypoint`, `cwd`, `title`, `tmux_session`, `state` (idle/busy), `turn_request_id`, `started_at`, `last_seen_at`, `waiter_seen_at`, `ended_at`.
+- **`sessions`**: `id` (id del provider), `agent_id`, `provider`, `entrypoint`, `cwd`, `title`, `tmux_session`, `state` (idle/busy), `turn_request_id`, `started_at`, `last_seen_at`, `waiter_seen_at`, `ended_at`, `activity_at` (ultimo inizio o fine turno), `pinned_at` (aggiunta alla home).
 - **`agent_states`**: stato per agente (canale tmux).
 
 ### Da aggiungere *(da implementare)*
@@ -198,7 +200,6 @@ relations          (id, da_node, a_node, type_id,           globale, unica per (
                     approval: manual | automatic)
 project_relations  (project_id, relation_id)
 requests.relation_id ─► relations.id                        per lo storico e l'audit
-user_sessions      (session/node aggiunti alla home, ordine, notifiche)
 ```
 - `context` resta per compatibilità con le richieste passate, ma non viene più richiesto (RF-05b).
 - L'approvazione non viene mai restituita agli agenti (RFC-06).

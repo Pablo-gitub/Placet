@@ -70,6 +70,10 @@ class SessionEventPayload(BaseModel):
     last_message: Optional[str] = None
 
 
+class PinPayload(BaseModel):
+    pinned: bool
+
+
 class BridgeJobResult(BaseModel):
     """What the bridge reports for a job: a result, or an error code."""
     ok: bool
@@ -257,7 +261,7 @@ def create_app(
             CORSMiddleware,
             allow_origins=cors_origins,
             allow_credentials=False,
-            allow_methods=["GET", "POST", "DELETE"],
+            allow_methods=["GET", "POST", "PUT", "DELETE"],
             allow_headers=["Authorization", "Content-Type"],
         )
 
@@ -735,6 +739,15 @@ def create_app(
         if who.kind == "bridge":
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not for the bridge.")
         return db.list_sessions(agent_id=agent_id, include_ended=include_ended)
+
+    @app.put("/api/sessions/{session_id}/pin", response_model=SessionModel)
+    async def pin_session(session_id: str, body: PinPayload, who: Principal = Depends(principal)):
+        """Adds a session to the PWA home or removes it (RF-41)."""
+        require_human(who)
+        if not db.set_session_pinned(session_id, body.pinned):
+            raise HTTPException(status_code=404, detail="Session not found")
+        notify_session(session_id)
+        return db.get_session(session_id)
 
     def transcript_error(code: Optional[str], message: Optional[str] = None) -> HTTPException:
         status_code, detail = TRANSCRIPT_ERRORS.get(code or "", (502, message or "Errore del bridge."))

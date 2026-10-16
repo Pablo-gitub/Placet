@@ -48,3 +48,15 @@ export function requestIdFromHash(hash) {
   const match = /^#request-(\d+)$/.exec(hash || "");
   return match ? Number(match[1]) : null;
 }
+
+/**
+ * Where the PWA is: "#/" home, "#/storico" history, "#/sessione/<id>" a
+ * session's conversation; "#request-N" (notification links) is resolved by
+ * the app once the request is loaded.
+ */
+export function routeFromHash(hash) {
+  const session = /^#\/sessione\/([A-Za-z0-9_-]+)$/.exec(hash || "");
+  if (session) return { view: "session", sessionId: session[1] };
+  if (hash === "#/storico") return { view: "history" };
+  return { view: "home" };
+}

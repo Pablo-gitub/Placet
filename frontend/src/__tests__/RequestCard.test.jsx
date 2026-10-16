@@ -135,7 +135,7 @@ describe("deep links", () => {
       expect(screen.getByTestId("history-answer-20")).toHaveTextContent("Nota: ok ma piano");
     });
 
-    it("highlights a pending request in the inbox", async () => {
+    it("highlights a pending request in the home", async () => {
       window.location.hash = "#request-10";
       render(<App />);
       await waitFor(() => {
@@ -153,7 +153,7 @@ describe("deep link after answering", () => {
     close() {}
   }
 
-  it("stays on the inbox when the linked request gets answered", async () => {
+  it("stays on the home when the linked request gets answered", async () => {
     global.EventSource = MockEventSource;
     const pending = { ...base, id: 30, question_type: "confirmation", prompt: "Ok?", options: [] };
     const other = { ...base, id: 31, question_type: "confirmation", prompt: "Altra?", options: [] };
@@ -170,7 +170,7 @@ describe("deep link after answering", () => {
     // The request is answered: an SSE update moves it out of PENDING.
     MockEventSource.emit({ data: JSON.stringify({ ...pending, status: "APPROVED" }) });
     await waitFor(() => expect(screen.queryByTestId("request-card-30")).toBeNull());
-    expect(screen.getByTestId("inbox-section")).toBeInTheDocument();
+    expect(screen.getByTestId("home-section")).toBeInTheDocument();
     expect(screen.getByTestId("request-card-31")).toBeInTheDocument();
   });
 });

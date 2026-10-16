@@ -109,7 +109,9 @@ class Database:
                 started_at TEXT NOT NULL,
                 last_seen_at TEXT NOT NULL,
                 waiter_seen_at TEXT,
-                ended_at TEXT
+                ended_at TEXT,
+                activity_at TEXT,
+                pinned_at TEXT
             );
             """)
             cursor.execute("""
@@ -145,6 +147,13 @@ class Database:
                 cursor.execute(
                     "ALTER TABLE requests ADD COLUMN delivery_attempts INTEGER NOT NULL DEFAULT 0;"
                 )
+            cursor.execute("PRAGMA table_info(sessions);")
+            session_cols = [r["name"] for r in cursor.fetchall()]
+            # activity_at: last turn start or end (the waiter's polls do not count);
+            # pinned_at: the user added the session to the PWA home.
+            for col in ("activity_at", "pinned_at"):
+                if col not in session_cols:
+                    cursor.execute(f"ALTER TABLE sessions ADD COLUMN {col} TEXT;")
             cursor.execute("PRAGMA table_info(responses);")
             if "implicit" not in [r["name"] for r in cursor.fetchall()]:
                 cursor.execute("ALTER TABLE responses ADD COLUMN implicit INTEGER NOT NULL DEFAULT 0;")
@@ -726,6 +735,8 @@ class Database:
             last_seen_at=datetime.fromisoformat(row["last_seen_at"]),
             waiter_seen_at=waiter,
             ended_at=_ts(row["ended_at"]),
+            activity_at=_ts(row["activity_at"]) or datetime.fromisoformat(row["started_at"]),
+            pinned=row["pinned_at"] is not None,
             reachable=reachable,
         )
 
@@ -755,10 +766,10 @@ class Database:
                 cursor.execute(
                     """
                     INSERT INTO sessions (id, agent_id, provider, entrypoint, cwd, title,
-                                          tmux_session, state, started_at, last_seen_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?)
+                                          tmux_session, state, started_at, last_seen_at, activity_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?, ?)
                     """,
-                    (session_id, agent_id, provider, entrypoint, cwd, title, tmux_session, now, now),
+                    (session_id, agent_id, provider, entrypoint, cwd, title, tmux_session, now, now, now),
                 )
             else:
                 cursor.execute(
@@ -810,9 +821,22 @@ class Database:
         now = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
             conn.execute(
-                "UPDATE sessions SET state = ?, turn_request_id = ?, last_seen_at = ? WHERE id = ?",
-                (state, turn_request_id, now, session_id),
+                "UPDATE sessions SET state = ?, turn_request_id = ?, last_seen_at = ?, activity_at = ?"
+                " WHERE id = ?",
+                (state, turn_request_id, now, now, session_id),
             )
+
+    def set_session_pinned(self, session_id: str, pinned: bool) -> bool:
+        """Adds a session to the PWA home, or removes it; False if unknown."""
+        now = datetime.now(timezone.utc).isoformat() if pinned else None
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE sessions SET pinned_at = CASE WHEN ? IS NULL THEN NULL"
+                " ELSE COALESCE(pinned_at, ?) END WHERE id = ?",
+                (now, now, session_id),
+            )
+            return cursor.rowcount > 0
 
     def touch_waiter(self, session_id: str) -> None:
         now = datetime.now(timezone.utc).isoformat()

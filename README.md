@@ -163,7 +163,7 @@ tmux new -s agent-gemini gemini
 ### 1a. Sessioni dell'app desktop e della CLI (canale hook, consigliato)
 
 Le sessioni Claude Code, sia dell'app desktop (tab Code) sia della CLI, si collegano a Placet con gli hook, senza tmux:
-- **Registrazione:** ogni sessione si registra all'avvio, e nella PWA (tab **Sessioni**) vedi progetto, titolo e stato (al lavoro, in attesa, non raggiungibile).
+- **Registrazione:** ogni sessione si registra all'avvio. Nella PWA, "Aggiungi / vedi tutte" mostra le sessioni aperte di ogni provider con progetto, titolo e stato (al lavoro, in attesa, non raggiungibile): quelle che spunti compaiono in home, e toccandole leggi la conversazione.
 - **Esiti alla sessione giusta:** gli esiti delle richieste tornano alla sessione che le ha fatte.
 - **Risveglio:** un ascoltatore in background (`hooks/placet_waiter.py`, hook `asyncRewake`) resta in attesa sulla casella di posta della sessione e la risveglia quando arriva un esito o un prompt da un altro agente. Mentre la sessione è al lavoro, i messaggi restano in coda.
 - **Visibilità:** l'app desktop non mostra il testo del risveglio, quindi Placet chiede all'agente di riportare per prima cosa chi gli scrive e cosa chiede.
