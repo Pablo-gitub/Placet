@@ -229,20 +229,38 @@ export default function App() {
     }
   };
 
-  /** Riprova / Annulla on a message whose delivery is uncertain or still waiting (RF-29). */
+  /**
+   * Riprova / Annulla on a message whose delivery is uncertain or still waiting
+   * (RF-29); "finished" / "queue_next" move a session's queue past a delivered
+   * request whose end Placet cannot see (RF-29b).
+   */
   const deliveryAction = async (requestId, action) => {
     if (action === "retry" && !window.confirm("Il messaggio potrebbe essere già arrivato: inviarlo di nuovo?")) {
       return;
     }
+    const release = action === "finished" || action === "queue_next";
     try {
-      const res = await fetch(`/api/requests/${requestId}/delivery/${action}`, { method: "POST" });
+      const res = release
+        ? await fetch(`/api/requests/${requestId}/queue/release`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ reason: action }),
+          })
+        : await fetch(`/api/requests/${requestId}/delivery/${action}`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         showFeedback(data.detail || `Operazione non riuscita (${res.status})`, true);
         return;
       }
       setRequests((prev) => upsert(prev, data));
-      showFeedback(action === "retry" ? "Nuovo tentativo di consegna." : "Messaggio annullato.");
+      showFeedback(
+        {
+          retry: "Nuovo tentativo di consegna.",
+          cancel: "Messaggio annullato.",
+          finished: "Segnata come terminata: la sessione riceve il prossimo messaggio.",
+          queue_next: "Il prossimo messaggio parte senza aspettare.",
+        }[action]
+      );
     } catch {
       showFeedback("Errore di connessione.", true);
     }

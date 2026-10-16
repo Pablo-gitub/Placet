@@ -202,3 +202,39 @@ describe("uncertain deliveries", () => {
     expect(screen.queryByTestId("cancel-3")).toBeNull();
   });
 });
+
+describe("a delivered request whose end Placet cannot see", () => {
+  const delivered = {
+    id: 20, sender_id: "human", recipient_id: "claude", question_type: "message", prompt: "lungo",
+    options: [], status: "EXECUTING", delivery: "accepted", execution: "unobserved",
+    start_unconfirmed_at: "2026-10-16T10:02:00Z", created_at: "2026-10-16T10:00:00Z", recipient_session_id: "s1",
+  };
+  const waiting = { ...delivered, id: 21, prompt: "dopo", status: "APPROVED", delivery: "waiting",
+    start_unconfirmed_at: null };
+
+  it("says the next messages wait, and lets the user move the queue on", async () => {
+    mockFetch([[transcriptOf("s1"), latest]]);
+    const onDelivery = vi.fn();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderView({ onDelivery, requests: [delivered, waiting] });
+    await waitFor(() => expect(screen.getByText("ciao")).toBeInTheDocument());
+    expect(screen.getByTestId("queue-hold-20")).toHaveTextContent("non riesce a verificare l'esecuzione");
+    expect(screen.getByTestId("queue-hold-20")).toHaveTextContent("restano in attesa");
+    fireEvent.click(screen.getByTestId("finished-20"));
+    expect(onDelivery).toHaveBeenCalledWith(20, "finished");
+    fireEvent.click(screen.getByTestId("queue-next-20"));
+    expect(onDelivery).toHaveBeenCalledWith(20, "queue_next");
+    fireEvent.click(screen.getByTestId("cancel-20"));
+    expect(onDelivery).toHaveBeenCalledWith(20, "cancel");
+  });
+
+  it("stays quiet while the start is still within its time, or once released", async () => {
+    mockFetch([[transcriptOf("s1"), latest]]);
+    renderView({ onDelivery: vi.fn(), requests: [
+      { ...delivered, start_unconfirmed_at: null },
+      { ...delivered, id: 22, queue_released_at: "2026-10-16T10:05:00Z" },
+    ] });
+    await waitFor(() => expect(screen.getByText("ciao")).toBeInTheDocument());
+    expect(screen.queryByTestId(/^queue-hold-/)).toBeNull();
+  });
+});

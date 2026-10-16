@@ -31,6 +31,7 @@ import spool  # noqa: E402
 
 PLACET_REQUEST = re.compile(r"\[Placet Request #(\d+)\b")
 MAX_MESSAGE_CHARS = 20000
+ADAPTER = "antigravity.py/2"
 TAIL_BYTES = 4 * 1024 * 1024  # how far back to look for the turn's steps
 # At Stop the last answer may not be in the file yet: look again briefly.
 ANSWER_RETRIES = 5
@@ -97,6 +98,7 @@ def build_event(event_name: str, payload: dict):
         "provider": "antigravity",
         "entrypoint": "antigravity",
         "cwd": workspaces[0] if workspaces else None,
+        "adapter": ADAPTER,
     }
     transcript = payload.get("transcriptPath") or ""
     if event_name == "SessionStart":

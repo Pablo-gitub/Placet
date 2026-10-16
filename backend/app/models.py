@@ -47,10 +47,11 @@ RESULT_MAX_AGE_SECONDS = 6 * 3600
 # delivery becomes uncertain and the user decides (RF-29).
 ACK_TIMEOUT_SECONDS = 90.0
 MAX_DELIVERY_ATTEMPTS = 3
-# One request at a time per session (RF-29b): a delivered request whose turn
-# was never seen starting stops blocking the next one after this long (the
-# session's hooks may be missing).
-EXECUTION_START_GRACE_SECONDS = 120.0
+# One request at a time per session (RF-29b). Time never frees the queue: a
+# delivered request whose turn is not seen starting within this long only
+# raises a warning ("avvio non confermato"); the queue moves on with a proof
+# that the turn ended, or when the user says so.
+START_UNCONFIRMED_SECONDS = 120.0
 # An agent that declared itself busy is trusted for at most this long (a
 # crashed CLI never sends "idle").
 AGENT_BUSY_TTL_SECONDS = 30 * 60
@@ -196,7 +197,13 @@ class RequestModel(BaseModel):
     attempt_id: Optional[str] = None
     execution: str = "unobserved"
     execution_at: Optional[datetime] = None
+    # Who observed the execution: hook or adapter, with its version.
+    execution_source: Optional[str] = None
     reply: str = "none"
+    # The turn was not seen starting in time (a warning, the queue still waits).
+    start_unconfirmed_at: Optional[datetime] = None
+    # The user let the session's queue move on past this request.
+    queue_released_at: Optional[datetime] = None
 
 
 # Providers whose sessions the bridge wakes from outside (RF-24): Codex with

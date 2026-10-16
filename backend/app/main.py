@@ -60,6 +60,8 @@ EXPIRY_SWEEP_SECONDS = 30.0
 class SessionEventPayload(BaseModel):
     """What an agent CLI / desktop app hook reports about one of its sessions."""
     event: Literal["start", "prompt", "stop", "tool", "end"]
+    # The hook script and its version: the provenance of execution proofs.
+    adapter: Optional[str] = Field(None, max_length=64)
     # Set by the hooks' local queue: an event forwarded twice is applied once.
     event_id: Optional[str] = Field(None, max_length=64)
     provider: Optional[str] = None
@@ -72,6 +74,10 @@ class SessionEventPayload(BaseModel):
     request_id: Optional[int] = None
     # stop: the agent's last message, used as implicit reply if needed.
     last_message: Optional[str] = None
+
+
+class QueueRelease(BaseModel):
+    reason: Literal["finished", "queue_next"]
 
 
 class PinPayload(BaseModel):
@@ -186,11 +192,19 @@ def create_app(
         for req_id in db.unconfirmed_to_uncertain(ACK_TIMEOUT_SECONDS):
             notify_change(req_id)
             alert(req_id, "consegna incerta: riprova o annulla")
+        for req_id in db.unconfirmed_starts():
+            notify_change(req_id)
+            alert(req_id, "avvio non confermato: i messaggi successivi restano in attesa")
         for req_id in db.stall_executing(execution_timeout):
             notify_change(req_id)
             stalled = db.get_request(req_id)
-            # The user's own messages need no reply: the answer is in the chat.
-            if stalled is not None and stalled.question_type != QuestionType.MESSAGE:
+            if stalled is None:
+                continue
+            if stalled.recipient_session_id and stalled.queue_released_at is None:
+                # Still holding the session's queue: only the user moves it on.
+                alert(req_id, "da verificare: la sessione non riceve altro finché non decidi")
+            elif stalled.question_type != QuestionType.MESSAGE:
+                # The user's own messages need no reply: the answer is in the chat.
                 alert(req_id, "nessuna risposta, richiesta bloccata")
 
     async def expiry_sweeper():
@@ -585,7 +599,21 @@ def create_app(
         get_or_404(request_id)
         if not db.cancel_delivery(request_id, actor=who.actor):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT,
-                                detail="Il messaggio è già stato consegnato.")
+                                detail="Il messaggio non si può più annullare.")
+        notify_change(request_id)
+        return get_or_404(request_id)
+
+    @app.post("/api/requests/{request_id}/queue/release", response_model=RequestModel)
+    async def release_queue(request_id: int, payload: QueueRelease, who: Principal = Depends(principal)):
+        """
+        The user moves a session's queue past a delivered request whose end
+        Placet cannot see: "finished" (they say it ended) or "queue_next".
+        """
+        require_human(who)
+        get_or_404(request_id)
+        if not db.release_queue(request_id, actor=who.actor, reason=payload.reason):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                                detail="La richiesta non sta trattenendo la sessione.")
         notify_change(request_id)
         return get_or_404(request_id)
 
@@ -698,6 +726,7 @@ def create_app(
             raise HTTPException(status_code=404, detail="Session not found")
         session = db.get_session(session_id)
         result: Dict[str, object] = {"session": session_id, "event": payload.event}
+        source = " ".join(filter(None, [payload.provider or session.provider, payload.adapter or "hook"]))
 
         if payload.event == "start":
             db.set_session_state(session_id, "idle")
@@ -707,7 +736,7 @@ def create_app(
                 try:
                     ack_request(who, payload.request_id, via="hook")
                     turn_request_id = payload.request_id
-                    db.set_execution(turn_request_id, "started", actor=f"{who.actor}:hook")
+                    db.set_execution(turn_request_id, "started", actor=f"{who.actor}:hook", source=source)
                 except HTTPException as e:
                     result["ack_error"] = e.detail
             elif session.state == "busy" and session.turn_request_id is not None:
@@ -721,7 +750,8 @@ def create_app(
         elif payload.event == "stop":
             db.set_session_state(session_id, "idle")
             if session.turn_request_id is not None:
-                db.set_execution(session.turn_request_id, "completed", actor=f"{who.actor}:hook")
+                db.set_execution(session.turn_request_id, "completed", actor=f"{who.actor}:hook",
+                                 source=source)
                 notify_change(session.turn_request_id)
             replied = implicit_reply(who, session.turn_request_id, payload.last_message)
             if replied is not None:
@@ -730,7 +760,8 @@ def create_app(
             result["linked"] = db.link_sender_session(payload.request_id, session_id, who.id)
         elif payload.event == "end":
             if session.turn_request_id is not None and session.state == "busy":
-                db.set_execution(session.turn_request_id, "interrupted", actor=f"{who.actor}:hook")
+                db.set_execution(session.turn_request_id, "interrupted", actor=f"{who.actor}:hook",
+                                 source=source)
                 notify_change(session.turn_request_id)
             db.end_session(session_id)
 

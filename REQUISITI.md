@@ -90,7 +90,7 @@ Placet è un **punto unico di supervisione umana e bus di cooperazione per agent
 | RF-27 | Placet si accorge se una sessione **non ha il server MCP collegato** e lo segnala (sessione e PWA) | [Deciso] |
 | RF-28 | **Coda locale degli eventi**: gli hook non chiamano il backend; scrivono ogni evento in una coda di file sul PC e terminano subito. Il bridge la svuota verso il backend, con ritentativi; gli eventi non si perdono se il backend è spento (salvo disco pieno o mancanza di corrente). Un turno non viene mai rallentato da Placet oltre l'avvio dello script | [Deciso] |
 | RF-29 | **Tre aspetti di ogni richiesta**, ciascuno con le sue prove e orari: consegna (in attesa, in corso, accettata, incerta, fallita, annullata), esecuzione (non osservata, iniziata, completata, interrotta), risposta (nessuna, esplicita, implicita, ambigua). Una consegna incerta (es. timeout del comando) non viene reinviata in automatico: la PWA la mostra con Riprova e Annulla | [Implementato] |
-| RF-29b | **Una richiesta alla volta per sessione**, fino alla sua conclusione; i messaggi scritti direttamente nell'app restano liberi (se finiscono nello stesso turno la risposta diventa "ambigua"). "Subito" è l'eccezione esplicita | [Implementato] ("Subito" nel blocco 4) |
+| RF-29b | **Una richiesta alla volta per sessione**, fino alla sua conclusione (prova di fine turno o decisione dell'utente: "Confermo che è terminata", "Accoda comunque il prossimo"; il tempo non sblocca, avvisa); i messaggi scritti direttamente nell'app restano liberi (se finiscono nello stesso turno la risposta diventa "ambigua"). "Subito" è l'eccezione esplicita | [Implementato] ("Subito" nel blocco 4) |
 
 ### 3.4 Le sessioni sul telefono
 | ID | Requisito | Stato |

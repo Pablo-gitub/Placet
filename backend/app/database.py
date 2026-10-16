@@ -8,7 +8,7 @@ import uuid
 from pathlib import Path
 from backend.app.models import (
     BRIDGE_PROVIDERS,
-    EXECUTION_START_GRACE_SECONDS,
+    START_UNCONFIRMED_SECONDS,
     OPEN_STATUSES,
     RequestCreate,
     RequestEvent,
@@ -205,6 +205,15 @@ class Database:
                         cursor.execute(f"ALTER TABLE requests ADD COLUMN {col} TEXT;")
                 cursor.execute("ALTER TABLE requests ADD COLUMN turn_mixed INTEGER NOT NULL DEFAULT 0;")
                 cursor.execute(_BACKFILL_ASPECTS_SQL)
+            if "queue_released_at" not in cols:
+                for col in ("queue_released_at", "start_unconfirmed_at", "execution_source"):
+                    cursor.execute(f"ALTER TABLE requests ADD COLUMN {col} TEXT;")
+                # Older requests never had their turns observed: they must not
+                # hold any session's queue.
+                cursor.execute(
+                    "UPDATE requests SET queue_released_at = COALESCE(updated_at, created_at)"
+                    " WHERE status NOT IN ('PENDING', 'APPROVED', 'DELIVERING');"
+                )
             cursor.execute("PRAGMA table_info(responses);")
             if "implicit" not in [r["name"] for r in cursor.fetchall()]:
                 cursor.execute("ALTER TABLE responses ADD COLUMN implicit INTEGER NOT NULL DEFAULT 0;")
@@ -341,7 +350,10 @@ class Database:
             attempt_id=row["attempt_id"],
             execution=row["execution_state"] or "unobserved",
             execution_at=_ts(row["execution_at"]),
+            execution_source=row["execution_source"],
             reply=row["reply_state"] or "none",
+            start_unconfirmed_at=_ts(row["start_unconfirmed_at"]),
+            queue_released_at=_ts(row["queue_released_at"]),
         )
 
     def list_requests(
@@ -582,10 +594,23 @@ class Database:
             return True
 
     def cancel_delivery(self, request_id: int, actor: str) -> bool:
-        """The user withdraws a message still waiting or in an uncertain delivery."""
+        """
+        The user withdraws a message still waiting or in an uncertain delivery;
+        or one already delivered, which the agent may still be working on:
+        Placet stops waiting for it, it cannot stop the agent.
+        """
         now = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
             cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE requests SET status = ?, updated_at = ?, queue_released_at = COALESCE(queue_released_at, ?)"
+                " WHERE id = ? AND status IN (?, ?) AND delivery_state = 'accepted'",
+                (RequestStatus.CANCELLED.value, now, now, request_id,
+                 RequestStatus.EXECUTING.value, RequestStatus.STALLED.value),
+            )
+            if cursor.rowcount:
+                self._log(cursor, request_id, actor, "cancelled", {"after_delivery": True}, at=now)
+                return True
             cursor.execute(
                 "UPDATE requests SET status = ?, updated_at = ?, delivery_state = 'cancelled'"
                 " WHERE id = ? AND ((status = ? AND delivery_state = 'uncertain') OR status = ?)",
@@ -609,8 +634,8 @@ class Database:
             ids = [r["id"] for r in cursor.fetchall()]
         return [r for r in (self.get_request(i) for i in ids) if r is not None]
 
-    def set_execution(self, request_id: int, state: str, actor: str) -> bool:
-        """Records what the recipient's turn did with a request (RF-29)."""
+    def set_execution(self, request_id: int, state: str, actor: str, source: Optional[str] = None) -> bool:
+        """Records what the recipient's turn did with a request (RF-29), and who saw it."""
         allowed_from = {
             "started": ("unobserved",),
             "completed": ("unobserved", "started"),
@@ -620,14 +645,60 @@ class Database:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                f"UPDATE requests SET execution_state = ?, execution_at = ?"
+                f"UPDATE requests SET execution_state = ?, execution_at = ?,"
+                f" execution_source = COALESCE(?, execution_source)"
                 f" WHERE id = ? AND COALESCE(execution_state, 'unobserved')"
                 f" IN ({','.join('?' for _ in allowed_from)})",
-                (state, now, request_id, *allowed_from),
+                (state, now, source, request_id, *allowed_from),
             )
             if cursor.rowcount == 0:
                 return False
-            self._log(cursor, request_id, actor, f"execution_{state}", at=now)
+            self._log(cursor, request_id, actor, f"execution_{state}",
+                      {"source": source} if source else None, at=now)
+            return True
+
+    def unconfirmed_starts(self, seconds: float = START_UNCONFIRMED_SECONDS) -> List[int]:
+        """
+        Delivered requests whose turn was not seen starting in time: marked
+        once, for a warning. They keep holding the session's queue.
+        """
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
+        cutoff = (now_dt - timedelta(seconds=seconds)).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE requests SET start_unconfirmed_at = ?"
+                " WHERE start_unconfirmed_at IS NULL AND queue_released_at IS NULL"
+                " AND recipient_session_id IS NOT NULL AND delivery_state = 'accepted'"
+                " AND COALESCE(execution_state, 'unobserved') = 'unobserved'"
+                " AND status IN (?, ?, ?) AND delivery_at <= ? RETURNING id",
+                (now, RequestStatus.EXECUTING.value, RequestStatus.STALLED.value,
+                 RequestStatus.COMPLETED.value, cutoff),
+            )
+            ids = sorted(r["id"] for r in cursor.fetchall())
+            for req_id in ids:
+                self._log(cursor, req_id, "system", "start_unconfirmed", at=now)
+            return ids
+
+    def release_queue(self, request_id: int, actor: str, reason: str) -> bool:
+        """
+        The user lets the session move on past a delivered request: "finished"
+        (they say the turn ended) or "queue_next" (send the next one anyway).
+        Recorded as their statement: no execution outcome is made up.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE requests SET queue_released_at = ? WHERE id = ? AND queue_released_at IS NULL"
+                " AND delivery_state = 'accepted'",
+                (now, request_id),
+            )
+            if cursor.rowcount == 0:
+                return False
+            event = "marked_finished_by_user" if reason == "finished" else "queue_overridden"
+            self._log(cursor, request_id, actor, event, at=now)
             return True
 
     def mark_turn_mixed(self, request_id: int) -> None:
@@ -1087,19 +1158,17 @@ class Database:
         being delivered (an uncertain one too), or one delivered whose turn
         has not ended. The next waits until it concludes.
         """
-        grace = (datetime.now(timezone.utc) - timedelta(seconds=EXECUTION_START_GRACE_SECONDS)).isoformat()
         with self._get_connection() as conn:
             row = conn.execute(
                 """
-                SELECT id FROM requests WHERE recipient_session_id = ? AND (
+                SELECT id FROM requests WHERE recipient_session_id = ? AND queue_released_at IS NULL AND (
                   status = ?
-                  OR (status = ? AND execution_state = 'started')
-                  OR (status = ? AND COALESCE(execution_state, 'unobserved') = 'unobserved'
-                      AND delivery_at > ?)
+                  OR (status IN (?, ?, ?)
+                      AND COALESCE(execution_state, 'unobserved') IN ('unobserved', 'started'))
                 ) ORDER BY id LIMIT 1
                 """,
                 (session_id, RequestStatus.DELIVERING.value, RequestStatus.EXECUTING.value,
-                 RequestStatus.EXECUTING.value, grace),
+                 RequestStatus.STALLED.value, RequestStatus.COMPLETED.value),
             ).fetchone()
             return row["id"] if row else None
 

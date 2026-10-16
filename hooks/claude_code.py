@@ -42,6 +42,7 @@ PLACET_REQUEST = re.compile(r"\[Placet Request #(\d+)\b")
 # Claude Code names MCP tools mcp__<server>__<tool>; other clients may not.
 PLACET_TOOLS = re.compile(r"(^|__|\.|/)placet_(ask_human|send_to_agent)$")
 MAX_MESSAGE_CHARS = 20000
+ADAPTER = "claude_code.py/2"
 
 
 def _tmux_session():
@@ -90,6 +91,7 @@ def build_event(event: dict, provider: str = "claude-code"):
         "provider": provider,
         "entrypoint": os.environ.get("CLAUDE_CODE_ENTRYPOINT") if provider == "claude-code" else provider,
         "cwd": event.get("cwd"),
+        "adapter": ADAPTER,
         "title": event.get("session_title"),
         # On every event: a session may predate its first SessionStart hook.
         "tmux_session": _tmux_session(),

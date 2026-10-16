@@ -21,7 +21,7 @@ import RequestCard from "./RequestCard";
 import { actionLabel, groupEntries, timeOf } from "./chatEntries";
 import { providerOf, sessionName, sessionPlace, sessionStatus } from "./sessionInfo";
 import { useTranscript } from "./useTranscript";
-import { isUncertain } from "./aspects";
+import { holdsQueueUnseen, isUncertain } from "./aspects";
 
 const ACTION_ICONS = {
   command: Terminal,
@@ -176,6 +176,39 @@ function Outgoing({ req, onDelivery }) {
   );
 }
 
+function QueueHold({ req, waiting, onDelivery }) {
+  const cancel = () => {
+    if (window.confirm("L'agente potrebbe continuare a lavorarci: Placet smette solo di aspettarlo. Annullare?")) {
+      onDelivery(req.id, "cancel");
+    }
+  };
+  return (
+    <div className="queue-hold" data-testid={`queue-hold-${req.id}`}>
+      <p>
+        {req.execution === "started"
+          ? "Il turno è iniziato ma Placet non ne vede la fine."
+          : "Consegnato. Placet non riesce a verificare l'esecuzione."}{" "}
+        {waiting > 0 ? "I messaggi successivi restano in attesa." : "I prossimi messaggi aspetteranno."}
+      </p>
+      <div className="outgoing-actions">
+        <button type="button" data-testid={`finished-${req.id}`} onClick={() => onDelivery(req.id, "finished")}>
+          Confermo che è terminata
+        </button>
+        {waiting > 0 && (
+          <button type="button" data-testid={`queue-next-${req.id}`} onClick={() => onDelivery(req.id, "queue_next")}>
+            Accoda comunque il prossimo
+          </button>
+        )}
+        {req.status !== "COMPLETED" && (
+          <button type="button" data-testid={`cancel-${req.id}`} onClick={cancel}>
+            Annulla
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function SessionView({
   sessionId,
   session,
@@ -200,6 +233,7 @@ export default function SessionView({
   const outgoing = requests
     .filter((r) => r.question_type === "message" && r.recipient_session_id === sessionId && r.status in OUTGOING_STATES)
     .sort((a, b) => a.id - b.id);
+  const held = requests.filter((r) => r.recipient_session_id === sessionId && holdsQueueUnseen(r));
 
   // Keep the view where the reader is: at the bottom while following, on the
   // same message after older ones are added above.
@@ -287,6 +321,15 @@ export default function SessionView({
             )}
           </>
         )}
+        {onDelivery &&
+          held.map((req) => (
+            <QueueHold
+              key={`hold-${req.id}`}
+              req={req}
+              waiting={outgoing.filter((o) => o.status === "APPROVED").length}
+              onDelivery={onDelivery}
+            />
+          ))}
         {outgoing.map((req) => (
           <Outgoing key={req.id} req={req} onDelivery={onDelivery} />
         ))}

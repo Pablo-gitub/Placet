@@ -923,6 +923,11 @@ body.chat-open { overflow: hidden; }
   background: none; border: 1px solid var(--border-color); color: var(--text-main);
   border-radius: 999px; padding: 0.2rem 0.75rem; font-size: 0.8rem; cursor: pointer;
 }
+.queue-hold {
+  margin: 0.5rem 0; padding: 0.6rem 0.8rem; border: 1px dashed #f59e0b; border-radius: 10px;
+  font-size: 0.85rem; color: var(--text-muted);
+}
+.queue-hold p { margin: 0 0 0.3rem; }
 .aspects { font-size: 0.8rem; color: var(--text-muted); margin: 0 0 0.6rem; }
 .msg-user.failed .bubble { background: var(--danger); }
 .msg-user.failed time { color: #f87171; }
