@@ -51,7 +51,7 @@ export default function AddSessionsDialog({ sessions, onToggle, onOpen, onClose 
               role="tab"
               aria-selected={p.key === provider}
               data-testid={`provider-tab-${p.key}`}
-              className={`provider-tab${p.key === provider ? " active" : ""}`}
+              className={`provider-tab prov-${p.key}${p.key === provider ? " active" : ""}`}
               onClick={() => setProvider(p.key)}
             >
               {p.label}

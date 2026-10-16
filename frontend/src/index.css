@@ -931,3 +931,62 @@ body.chat-open { overflow: hidden; }
 .aspects { font-size: 0.8rem; color: var(--text-muted); margin: 0 0 0.6rem; }
 .msg-user.failed .bubble { background: var(--danger); }
 .msg-user.failed time { color: #f87171; }
+
+/* --- Provider themes ---------------------------------------------------------
+   Each provider gets its own accent, applied through --prov / --prov-soft /
+   --prov-ink on rows, groups, the dialog tabs and the session view. Colours
+   only evoke each app; no logos or brand marks. */
+.prov-claude-code {
+  --prov: #d97757;
+  --prov-soft: rgba(217, 119, 87, 0.16);
+  --prov-ink: #fff7f2;
+  --prov-chip-bg: rgba(217, 119, 87, 0.18);
+}
+.prov-codex {
+  --prov: #e2e8f0;
+  --prov-soft: rgba(226, 232, 240, 0.1);
+  --prov-ink: #0f172a;
+  --prov-chip-bg: rgba(226, 232, 240, 0.14);
+  --prov-font: ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+.prov-antigravity {
+  --prov: #6c9bf5;
+  --prov-soft: rgba(108, 155, 245, 0.16);
+  --prov-ink: #ffffff;
+  --prov-chip-bg: linear-gradient(90deg, rgba(66, 133, 244, 0.25), rgba(155, 114, 203, 0.25), rgba(217, 101, 112, 0.25));
+  --prov-gradient: linear-gradient(135deg, #4285f4, #9b72cb 60%, #d96570);
+}
+
+[class*="prov-"] .provider-chip,
+.provider-chip { background: var(--prov-chip-bg, rgba(56, 189, 248, 0.15)); color: var(--prov, var(--accent)); }
+.prov-codex .provider-chip, .prov-codex .provider-group-header strong { font-family: var(--prov-font); }
+
+.session-row-card[class*="prov-"] { border-left: 3px solid var(--prov); }
+.session-row-card[class*="prov-"]:hover { border-color: var(--prov); }
+
+.provider-group { margin-bottom: 0.75rem; }
+.provider-group-header {
+  display: flex; align-items: center; gap: 0.5rem; width: 100%;
+  background: var(--prov-soft); color: var(--text-main);
+  border: 1px solid var(--border-color); border-radius: 10px;
+  padding: 0.55rem 0.75rem; margin-bottom: 0.5rem;
+  font: inherit; cursor: pointer; text-align: left;
+}
+.provider-group-header strong { color: var(--prov); }
+.provider-group-count { color: var(--text-muted); font-size: 0.8rem; flex: 1; }
+.provider-group-header .badge-count { background: var(--primary); color: white; }
+.provider-dot {
+  width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+  background: var(--prov-gradient, var(--prov));
+}
+
+.provider-tab.active[class*="prov-"] {
+  background: var(--prov-gradient, var(--prov)); border-color: var(--prov); color: var(--prov-ink);
+}
+
+.session-view[class*="prov-"] .session-view-header { border-bottom: 2px solid var(--prov); }
+.session-view[class*="prov-"] .session-view-title strong { color: var(--prov); }
+.session-view[class*="prov-"] .msg-user .bubble {
+  background: var(--prov-gradient, var(--prov)); color: var(--prov-ink);
+}
+.session-view[class*="prov-"] .send-button:not(:disabled) { background: var(--prov-gradient, var(--prov)); color: var(--prov-ink); }

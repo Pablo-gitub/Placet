@@ -232,3 +232,30 @@ describe("excluded projects", () => {
     expect(screen.getByTestId("request-card-1")).toBeInTheDocument();
   });
 });
+
+describe("followed sessions by provider", () => {
+  beforeEach(() => {
+    window.location.hash = "";
+    localStorage.clear();
+  });
+
+  it("groups them under headers that open and close, latest provider first", async () => {
+    setup();
+    render(<App />);
+    const pinnedCodex = { ...sessions[3], pinned: true, activity_at: ago(0) };
+    await waitFor(() => expect(screen.getByTestId("provider-group-claude-code")).toBeInTheDocument());
+    MockEventSource.last.emit("session_update", pinnedCodex);
+    await waitFor(() => expect(screen.getByTestId("provider-group-codex")).toBeInTheDocument());
+    const order = screen.getAllByTestId(/^provider-group-/).map((g) => g.dataset.testid);
+    expect(order).toEqual(["provider-group-codex", "provider-group-claude-code"]);
+    expect(screen.getByTestId("provider-group-claude-code")).toHaveTextContent("2 · 1 al lavoro");
+    expect(screen.getByTestId("session-row-new")).toHaveClass("prov-claude-code");
+
+    fireEvent.click(screen.getByTestId("provider-toggle-claude-code"));
+    expect(screen.queryByTestId("session-row-new")).toBeNull();
+    expect(screen.getByTestId("provider-toggle-claude-code")).toHaveAttribute("aria-expanded", "false");
+    expect(JSON.parse(localStorage.getItem("placet.collapsedProviders"))).toEqual(["claude-code"]);
+    fireEvent.click(screen.getByTestId("provider-toggle-claude-code"));
+    expect(screen.getByTestId("session-row-new")).toBeInTheDocument();
+  });
+});

@@ -19,7 +19,7 @@ import {
 import Markdown from "./Markdown";
 import RequestCard from "./RequestCard";
 import { actionLabel, groupEntries, timeOf } from "./chatEntries";
-import { providerOf, sessionName, sessionPlace, sessionStatus } from "./sessionInfo";
+import { providerClass, providerOf, sessionName, sessionPlace, sessionStatus } from "./sessionInfo";
 import { useTranscript } from "./useTranscript";
 import { holdsQueueUnseen, isUncertain } from "./aspects";
 
@@ -264,7 +264,7 @@ export default function SessionView({
   const state = session ? sessionStatus(session) : null;
 
   return (
-    <div className="session-view" data-testid="session-view">
+    <div className={`session-view${session ? ` ${providerClass(session)}` : ""}`} data-testid="session-view">
       <div className="session-view-header">
         <button type="button" className="icon-button" aria-label="Indietro" onClick={onBack}>
           <ArrowLeft size={18} />

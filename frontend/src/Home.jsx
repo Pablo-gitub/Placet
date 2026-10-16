@@ -1,10 +1,11 @@
 import React, { useState } from "react";
-import { CheckCircle, Circle, MessageCircleQuestion, Plus } from "lucide-react";
+import { CheckCircle, ChevronDown, ChevronRight, Circle, MessageCircleQuestion, Plus } from "lucide-react";
 import RequestCard from "./RequestCard";
 import AddSessionsDialog from "./AddSessionsDialog";
 import {
   activityOf,
   byActivity,
+  providerClass,
   providerOf,
   sessionName,
   sessionPlace,
@@ -17,7 +18,7 @@ function SessionRow({ session, questions, onOpen }) {
   return (
     <button
       type="button"
-      className="card session-row-card"
+      className={`card session-row-card ${providerClass(session)}`}
       data-testid={`session-row-${session.id}`}
       onClick={() => onOpen(session.id)}
     >
@@ -41,6 +42,47 @@ function SessionRow({ session, questions, onOpen }) {
   );
 }
 
+const COLLAPSED_KEY = "placet.collapsedProviders";
+
+function loadCollapsed() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(COLLAPSED_KEY) || "[]"));
+  } catch {
+    return new Set();
+  }
+}
+
+/**
+ * The followed sessions of one provider, under a header that opens and
+ * closes; providers come in order of their latest activity.
+ */
+function ProviderGroup({ provider, sessions, questionsOf, collapsed, onToggle, onOpen }) {
+  const busy = sessions.filter((s) => sessionStatus(s).key === "busy").length;
+  const questions = sessions.reduce((n, s) => n + questionsOf(s.id), 0);
+  return (
+    <div className={`provider-group prov-${provider.key}`} data-testid={`provider-group-${provider.key}`}>
+      <button
+        type="button"
+        className="provider-group-header"
+        aria-expanded={!collapsed}
+        data-testid={`provider-toggle-${provider.key}`}
+        onClick={() => onToggle(provider.key)}
+      >
+        {collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+        <span className="provider-dot" />
+        <strong>{provider.label}</strong>
+        <span className="provider-group-count">
+          {sessions.length}
+          {busy > 0 && ` · ${busy} al lavoro`}
+        </span>
+        {questions > 0 && <span className="badge-count">{questions}</span>}
+      </button>
+      {!collapsed &&
+        sessions.map((s) => <SessionRow key={s.id} session={s} questions={questionsOf(s.id)} onOpen={onOpen} />)}
+    </div>
+  );
+}
+
 /** Questions waiting for the user, then the sessions they follow (RF-40, RF-41). */
 export default function Home({
   requests,
@@ -52,9 +94,30 @@ export default function Home({
   onTogglePin,
 }) {
   const [adding, setAdding] = useState(false);
+  const [collapsed, setCollapsed] = useState(loadCollapsed);
+  const toggleProvider = (key) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      try {
+        localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]));
+      } catch {
+        // private mode: the choice lasts until the page is reloaded
+      }
+      return next;
+    });
   const pending = requests.filter((r) => r.status === "PENDING");
   const pinned = sessions.filter((s) => s.pinned).sort(byActivity);
   const questionsOf = (id) => pending.filter((r) => r.sender_session_id === id).length;
+  // pinned is sorted by activity: a provider's first session is its latest.
+  const groups = [];
+  for (const s of pinned) {
+    const provider = providerOf(s);
+    let group = groups.find((g) => g.provider.key === provider.key);
+    if (!group) groups.push((group = { provider, sessions: [] }));
+    group.sessions.push(s);
+  }
 
   return (
     <div data-testid="home-section">
@@ -89,8 +152,16 @@ export default function Home({
             Aggiungi le sessioni che vuoi seguire da qui.
           </div>
         )}
-        {pinned.map((s) => (
-          <SessionRow key={s.id} session={s} questions={questionsOf(s.id)} onOpen={onOpenSession} />
+        {groups.map((g) => (
+          <ProviderGroup
+            key={g.provider.key}
+            provider={g.provider}
+            sessions={g.sessions}
+            questionsOf={questionsOf}
+            collapsed={collapsed.has(g.provider.key)}
+            onToggle={toggleProvider}
+            onOpen={onOpenSession}
+          />
         ))}
         <button
           type="button"

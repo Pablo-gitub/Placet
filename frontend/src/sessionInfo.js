@@ -44,10 +44,22 @@ export function sessionPlace(session) {
   return [sessionProject(session), sessionClient(session)].filter(Boolean).join(" · ");
 }
 
+/** A session's title; untitled ones get their project and opening time, to tell them apart. */
 export function sessionName(session) {
   if (session.title) return session.title;
-  if (session.cwd) return session.cwd.split("/").filter(Boolean).pop();
+  const opened = session.started_at
+    ? new Date(session.started_at).toLocaleString("it-IT", {
+        day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+      })
+    : null;
+  const project = sessionProject(session);
+  if (project) return opened ? `${project} · aperta ${opened}` : project;
   return session.id.slice(0, 8);
+}
+
+/** The CSS class that gives a session its provider's colours. */
+export function providerClass(session) {
+  return `prov-${providerOf(session).key}`;
 }
 
 export function sessionStatus(session) {
