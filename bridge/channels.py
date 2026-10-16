@@ -179,6 +179,24 @@ class AntigravityChannel:
             f"(Antigravity {self.version})."
         )
 
+    def titles(self, ids) -> Dict[str, str]:
+        """The titles ("summary") Antigravity gave these conversations, from any running server."""
+        wanted, titles = set(ids), {}
+        for pid, token, version in self._discover():
+            self.version = version
+            for port in self._ports_of(pid):
+                try:
+                    resp = self._call(f"http://127.0.0.1:{port}", token, "GetAllCascadeTrajectories", {})
+                except httpx.HTTPError:
+                    continue
+                if resp.status_code != 200:
+                    continue
+                for cascade_id, summary in (resp.json().get("trajectorySummaries") or {}).items():
+                    title = str((summary or {}).get("summary") or "").strip()
+                    if cascade_id in wanted and title:
+                        titles[cascade_id] = title
+        return titles
+
     @staticmethod
     def _config(trajectory: dict) -> dict:
         """The configuration of the last user turn: model, tools, rules.

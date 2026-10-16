@@ -1106,6 +1106,30 @@ class Database:
             )
             conn.execute("DELETE FROM session_events_seen WHERE at < ?;", (horizon,))
 
+    def untitled_bridge_sessions(self) -> List[SessionModel]:
+        """Open Codex and Antigravity sessions: their hooks carry no title, the bridge reads it."""
+        placeholders = ", ".join("?" for _ in BRIDGE_PROVIDERS)
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM sessions WHERE ended_at IS NULL AND excluded_at IS NULL"
+                f" AND provider IN ({placeholders}) ORDER BY last_seen_at DESC LIMIT 200",
+                BRIDGE_PROVIDERS,
+            ).fetchall()
+            return [self._row_to_session(r, WAITER_TTL_SECONDS) for r in rows]
+
+    def set_session_titles(self, titles: Dict[str, str]) -> List[str]:
+        """Titles the bridge read from the providers' apps; returns the sessions changed."""
+        changed = []
+        with self._get_connection() as conn:
+            for session_id, title in titles.items():
+                cursor = conn.execute(
+                    "UPDATE sessions SET title = ? WHERE id = ? AND title IS NOT ?",
+                    (title[:200], session_id, title[:200]),
+                )
+                if cursor.rowcount:
+                    changed.append(session_id)
+        return changed
+
     def set_session_pinned(self, session_id: str, pinned: bool) -> bool:
         """Adds a session to the PWA home, or removes it; False if unknown."""
         now = datetime.now(timezone.utc).isoformat() if pinned else None

@@ -50,6 +50,8 @@ class Work:
     uncertain: List[dict] = field(default_factory=list)
     # Folders of known sessions, to look for `.placet-off` (RF-45).
     folders: List[str] = field(default_factory=list)
+    # Codex and Antigravity sessions whose titles the bridge reads: {"id", "provider"}.
+    titles: List[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -78,6 +80,7 @@ class BridgeStore(Protocol):
     def mark_seen(self, request_id: int) -> None: ...
     # Which of the folders have a `.placet-off`.
     def report_folders(self, checked: List[str], excluded: List[str]) -> None: ...
+    def report_titles(self, titles: Dict[str, str]) -> None: ...
 
 
 def _session_spec(spec) -> SessionSpec:
@@ -118,6 +121,7 @@ class LocalStore:
                 if (s := self.db.get_session(r.recipient_session_id)) is not None
             ],
             folders=self.db.known_folders(),
+            titles=[{"id": s.id, "provider": s.provider} for s in self.db.untitled_bridge_sessions()],
         )
 
     def take_session_mail(self, session_id: str) -> Optional[SessionMail]:
@@ -149,6 +153,9 @@ class LocalStore:
 
     def report_folders(self, checked: List[str], excluded: List[str]) -> None:
         self.db.set_excluded_folders(checked, excluded, actor=BRIDGE_ACTOR)
+
+    def report_titles(self, titles: Dict[str, str]) -> None:
+        self.db.set_session_titles(titles)
 
     def claim_delivery(self, request_id: int) -> bool:
         return self.db.mark_delivered(request_id, actor=BRIDGE_ACTOR, via="tmux")
@@ -196,6 +203,7 @@ class HttpStore:
             sessions=list(data.get("sessions", [])),
             uncertain=list(data.get("uncertain", [])),
             folders=list(data.get("folders", [])),
+            titles=list(data.get("titles", [])),
         )
 
     def take_session_mail(self, session_id: str) -> Optional[SessionMail]:
@@ -221,6 +229,10 @@ class HttpStore:
 
     def mark_seen(self, request_id: int) -> None:
         self._call_ok("POST", f"/api/bridge/requests/{request_id}/seen")
+
+    def report_titles(self, titles: Dict[str, str]) -> None:
+        resp = self.client.post("/api/bridge/titles", json={"titles": titles})
+        resp.raise_for_status()
 
     def report_folders(self, checked: List[str], excluded: List[str]) -> None:
         resp = self.client.post("/api/bridge/folders", json={"checked": checked, "excluded": excluded})

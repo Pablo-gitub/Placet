@@ -76,6 +76,10 @@ class SessionEventPayload(BaseModel):
     last_message: Optional[str] = None
 
 
+class TitlesReport(BaseModel):
+    titles: Dict[str, str] = Field(default_factory=dict, max_length=500)
+
+
 class FoldersReport(BaseModel):
     checked: List[str] = Field(default_factory=list, max_length=1000)
     excluded: List[str] = Field(default_factory=list, max_length=1000)
@@ -1000,7 +1004,18 @@ def create_app(
             "uncertain": uncertain_to_reconcile(),
             # Folders of known sessions: the bridge looks for `.placet-off`.
             "folders": db.known_folders(),
+            # Codex and Antigravity sessions: the bridge reads their titles.
+            "titles": [{"id": s.id, "provider": s.provider} for s in db.untitled_bridge_sessions()],
         }
+
+    @app.post("/api/bridge/titles")
+    async def bridge_titles(payload: TitlesReport, who: Principal = Depends(principal)):
+        """Session titles the bridge read from the providers' apps."""
+        require_bridge(who)
+        changed = db.set_session_titles(payload.titles)
+        for session_id in changed:
+            notify_session(session_id)
+        return {"changed": changed}
 
     @app.post("/api/bridge/folders")
     async def bridge_folders(payload: FoldersReport, who: Principal = Depends(principal)):

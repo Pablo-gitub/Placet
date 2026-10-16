@@ -2,7 +2,7 @@ import time
 import logging
 import subprocess
 import threading
-from typing import List, Optional, Set
+from typing import Dict, List, Optional, Set
 
 from backend.app.config import PlacetConfig
 from backend.app.database import Database
@@ -12,6 +12,7 @@ from bridge.channels import ChannelError, ChannelUncertain, default_channels
 from bridge.stores import BridgeStore, LocalStore, Work
 from bridge.tmux_controller import SessionSpec, TmuxController
 from bridge.transcripts import TranscriptError, read_transcript
+from bridge.titles import codex_titles
 from hooks.placet_common import active
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,8 @@ RECENT_INPUT_SECONDS = 15.0
 RECONCILE_EVERY_SECONDS = 20.0
 # How often the folders of known sessions are checked for `.placet-off`.
 FOLDERS_EVERY_SECONDS = 15.0
+# How often Codex and Antigravity titles are read (they change on rename).
+TITLES_EVERY_SECONDS = 30.0
 
 
 
@@ -47,6 +50,7 @@ class BridgeDaemon:
         self._reconciled_at: dict = {}
         self._folders_at = -FOLDERS_EVERY_SECONDS
         self._excluded: Optional[Set[str]] = None
+        self._titles_at = -TITLES_EVERY_SECONDS
 
     def format_injection_envelope(self, req: RequestModel, ack_mode: str = "mcp") -> str:
         return envelopes.injection(req, ack_mode=ack_mode, channel="tmux")
@@ -226,11 +230,31 @@ class BridgeDaemon:
         self._excluded = excluded
         return excluded
 
+    def refresh_titles(self, sessions: List[dict]) -> Dict[str, str]:
+        """Reads the titles of Codex and Antigravity sessions and reports them."""
+        now = time.monotonic()
+        if not sessions or now - self._titles_at < TITLES_EVERY_SECONDS:
+            return {}
+        self._titles_at = now
+        titles: Dict[str, str] = {}
+        titles.update(codex_titles(s["id"] for s in sessions if s.get("provider") == "codex"))
+        agy = [s["id"] for s in sessions if s.get("provider") == "antigravity"]
+        channel = self.channels.get("antigravity")
+        if agy and hasattr(channel, "titles"):
+            try:
+                titles.update(channel.titles(agy))
+            except Exception as e:
+                logger.debug(f"Antigravity titles: {e}")
+        if titles:
+            self.store.report_titles(titles)
+        return titles
+
     def run_loop_step(self) -> int:
         # At most one injection per session per tick, outcomes first: they
         # unblock work that is already waiting.
         work: Work = self.store.work()
         self.check_folders(work.folders)
+        self.refresh_titles(work.titles)
         busy_sessions: Set[str] = set()
         busy_agents = set(work.busy_agents)
         delivered = self.process_pending_results(busy_sessions, work.results, busy_agents)
