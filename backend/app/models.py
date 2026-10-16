@@ -41,10 +41,16 @@ OPEN_STATUSES = frozenset({
 RESULT_GRACE_SECONDS = 10.0
 RESULT_MAX_AGE_SECONDS = 6 * 3600
 
-# Injection acknowledgement: without an ack within this time the injection
-# is retried, up to the maximum attempts, then the request fails.
+# Injection acknowledgement: without an ack within this time a tmux injection
+# is retried, up to the maximum attempts, then the request fails. A message
+# taken by a session's waiter or queued by the bridge is not re-sent: its
+# delivery becomes uncertain and the user decides (RF-29).
 ACK_TIMEOUT_SECONDS = 90.0
 MAX_DELIVERY_ATTEMPTS = 3
+# One request at a time per session (RF-29b): a delivered request whose turn
+# was never seen starting stops blocking the next one after this long (the
+# session's hooks may be missing).
+EXECUTION_START_GRACE_SECONDS = 120.0
 # An agent that declared itself busy is trusted for at most this long (a
 # crashed CLI never sends "idle").
 AGENT_BUSY_TTL_SECONDS = 30 * 60
@@ -180,6 +186,17 @@ class RequestModel(BaseModel):
     # the one chosen to receive it, if any.
     sender_session_id: Optional[str] = None
     recipient_session_id: Optional[str] = None
+    # Three independent aspects of an agent request (RF-29), with their proofs:
+    # delivery:  waiting, in_progress, accepted, uncertain, failed, cancelled
+    # execution: unobserved, started, completed, interrupted
+    # reply:     none, explicit, implicit, ambiguous
+    delivery: str = "waiting"
+    delivery_at: Optional[datetime] = None
+    delivery_channel: Optional[str] = None
+    attempt_id: Optional[str] = None
+    execution: str = "unobserved"
+    execution_at: Optional[datetime] = None
+    reply: str = "none"
 
 
 # Providers whose sessions the bridge wakes from outside (RF-24): Codex with

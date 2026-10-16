@@ -21,6 +21,7 @@ import RequestCard from "./RequestCard";
 import { actionLabel, groupEntries, timeOf } from "./chatEntries";
 import { providerOf, sessionName, sessionPlace, sessionStatus } from "./sessionInfo";
 import { useTranscript } from "./useTranscript";
+import { isUncertain } from "./aspects";
 
 const ACTION_ICONS = {
   command: Terminal,
@@ -147,12 +148,30 @@ const OUTGOING_STATES = {
   EXPIRED: "Non consegnato: scaduto",
 };
 
-function Outgoing({ req }) {
+function Outgoing({ req, onDelivery }) {
+  const uncertain = isUncertain(req);
   const failed = req.status === "DELIVERY_FAILED" || req.status === "EXPIRED";
   return (
-    <div className={`msg msg-user outgoing${failed ? " failed" : ""}`} data-testid={`outgoing-${req.id}`}>
+    <div
+      className={`msg msg-user outgoing${failed ? " failed" : ""}${uncertain ? " uncertain" : ""}`}
+      data-testid={`outgoing-${req.id}`}
+    >
       <div className="bubble">{req.prompt}</div>
-      <time>{OUTGOING_STATES[req.status]}</time>
+      <time>
+        {uncertain ? "Consegna incerta: forse è già arrivato, ma non c'è conferma" : OUTGOING_STATES[req.status]}
+      </time>
+      {onDelivery && (uncertain || req.status === "APPROVED") && (
+        <div className="outgoing-actions">
+          {uncertain && (
+            <button type="button" data-testid={`retry-${req.id}`} onClick={() => onDelivery(req.id, "retry")}>
+              Riprova
+            </button>
+          )}
+          <button type="button" data-testid={`cancel-${req.id}`} onClick={() => onDelivery(req.id, "cancel")}>
+            Annulla
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -165,6 +184,7 @@ export default function SessionView({
   onBack,
   onDecide,
   onSend,
+  onDelivery,
   submittingId,
   focusId,
 }) {
@@ -268,7 +288,7 @@ export default function SessionView({
           </>
         )}
         {outgoing.map((req) => (
-          <Outgoing key={req.id} req={req} />
+          <Outgoing key={req.id} req={req} onDelivery={onDelivery} />
         ))}
         {questions.map((req) => (
           <RequestCard

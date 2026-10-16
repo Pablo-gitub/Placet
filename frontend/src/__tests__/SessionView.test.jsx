@@ -179,3 +179,26 @@ describe("writing to a session", () => {
     await waitFor(() => expect(screen.getByTestId("chat-user")).toHaveTextContent("dal telefono"));
   });
 });
+
+describe("uncertain deliveries", () => {
+  const message = (id, status, delivery) => ({
+    id, sender_id: "human", recipient_id: "claude", question_type: "message", prompt: `messaggio ${id}`,
+    options: [], status, delivery, created_at: "2026-10-16T10:00:00Z", recipient_session_id: "s1",
+  });
+
+  it("offers Riprova and Annulla on an uncertain delivery, Annulla on a waiting one", async () => {
+    mockFetch([[transcriptOf("s1"), latest]]);
+    const onDelivery = vi.fn();
+    renderView({ onDelivery, requests: [message(1, "DELIVERING", "uncertain"), message(2, "APPROVED", "waiting"),
+      message(3, "DELIVERING", "in_progress")] });
+    await waitFor(() => expect(screen.getByText("ciao")).toBeInTheDocument());
+    expect(screen.getByTestId("outgoing-1")).toHaveTextContent("Consegna incerta");
+    expect(screen.getByTestId("outgoing-1")).toHaveClass("uncertain");
+    fireEvent.click(screen.getByTestId("retry-1"));
+    expect(onDelivery).toHaveBeenCalledWith(1, "retry");
+    expect(screen.queryByTestId("retry-2")).toBeNull();
+    fireEvent.click(screen.getByTestId("cancel-2"));
+    expect(onDelivery).toHaveBeenCalledWith(2, "cancel");
+    expect(screen.queryByTestId("cancel-3")).toBeNull();
+  });
+});

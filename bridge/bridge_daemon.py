@@ -8,7 +8,7 @@ from backend.app.config import PlacetConfig
 from backend.app.database import Database
 from backend.app import envelopes
 from backend.app.models import RequestModel
-from bridge.channels import ChannelError, default_channels
+from bridge.channels import ChannelError, ChannelUncertain, default_channels
 from bridge.stores import BridgeStore, LocalStore, Work
 from bridge.tmux_controller import SessionSpec, TmuxController
 from bridge.transcripts import TranscriptError, read_transcript
@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 # Do not inject into a session where someone pressed a key this recently:
 # the text would mix with what the user is typing.
 RECENT_INPUT_SECONDS = 15.0
+# How often the conversation of a session is read to settle an uncertain delivery.
+RECONCILE_EVERY_SECONDS = 20.0
 
 
 
@@ -39,6 +41,7 @@ class BridgeDaemon:
         self.channels = channels if channels is not None else default_channels()
         # forwards the hooks' local event queue to the backend
         self.spool = spool
+        self._reconciled_at: dict = {}
 
     def format_injection_envelope(self, req: RequestModel, ack_mode: str = "mcp") -> str:
         return envelopes.injection(req, ack_mode=ack_mode, channel="tmux")
@@ -159,6 +162,12 @@ class BridgeDaemon:
                 continue
             try:
                 channel.send(target["id"], mail.text)
+            except ChannelUncertain as e:
+                # It may be in the conversation already: never sent twice by itself.
+                logger.warning(f"Delivery of request #{mail.request_id} to {target['id']} is uncertain: {e}")
+                if mail.kind == "injection":
+                    self.store.mark_uncertain(mail.request_id)
+                continue
             except (ChannelError, OSError, subprocess.SubprocessError) as e:
                 logger.error(f"Could not wake session {target['id']} ({target.get('provider')}): {e}")
                 if mail.kind == "injection":
@@ -172,6 +181,31 @@ class BridgeDaemon:
             delivered += 1
         return delivered
 
+    def reconcile_uncertain(self, uncertain: List[dict]) -> int:
+        """
+        Looks for uncertain deliveries in the recipient's conversation: a
+        message found there was delivered (RF-29). Returns how many settled.
+        """
+        settled = 0
+        now = time.monotonic()
+        for item in uncertain:
+            request_id = item["request_id"]
+            if now - self._reconciled_at.get(request_id, -RECONCILE_EVERY_SECONDS) < RECONCILE_EVERY_SECONDS:
+                continue
+            self._reconciled_at[request_id] = now
+            try:
+                page = read_transcript(item.get("provider"), item["session_id"],
+                                       agent_id=item.get("agent_id"), limit=80)
+            except TranscriptError as e:
+                logger.debug(f"Cannot read {item['session_id']} to reconcile #{request_id}: {e}")
+                continue
+            if any(m.get("request_id") == request_id for m in page.get("messages", [])):
+                self.store.mark_seen(request_id)
+                self._reconciled_at.pop(request_id, None)
+                logger.info(f"Request #{request_id} found in session {item['session_id']}: delivered.")
+                settled += 1
+        return settled
+
     def run_loop_step(self) -> int:
         # At most one injection per session per tick, outcomes first: they
         # unblock work that is already waiting.
@@ -180,7 +214,9 @@ class BridgeDaemon:
         busy_agents = set(work.busy_agents)
         delivered = self.process_pending_results(busy_sessions, work.results, busy_agents)
         delivered += self.process_pending_injections(busy_sessions, work.injections, busy_agents)
-        return delivered + self.process_session_mail(work.sessions)
+        delivered += self.process_session_mail(work.sessions)
+        self.reconcile_uncertain(work.uncertain)
+        return delivered
 
     # --- Jobs someone is waiting for (conversation pages) ---------------------
 

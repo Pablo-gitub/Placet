@@ -60,11 +60,18 @@ def _action(name: str, kind: str, detail: Optional[str], at: Optional[str]) -> d
 _USER_MESSAGE = re.compile(r"^\s*\[Placet Request #\d+ dall'utente\]:\s*(.*?)(?:\nÈ un messaggio che l'utente ti scrive.*)?$", re.S)
 
 
+_REQUEST_ID = re.compile(r"^\s*\[Placet Request #(\d+)\b")
+
+
 def _placet_or_user(text: str, at: Optional[str]) -> dict:
+    """A user turn; one Placet delivered carries its request_id (the proof of delivery)."""
+    found = _REQUEST_ID.match(text)
+    request_id = int(found.group(1)) if found else None
     mine = _USER_MESSAGE.match(text)
     if mine:
-        return _entry("user", _clip(mine.group(1)), at, via="placet")
-    return _entry("placet" if text.lstrip().startswith("[Placet") else "user", _clip(text), at)
+        return _entry("user", _clip(mine.group(1)), at, via="placet", request_id=request_id)
+    return _entry("placet" if found or text.lstrip().startswith("[Placet") else "user", _clip(text), at,
+                  request_id=request_id)
 
 
 # --- Claude Code ----------------------------------------------------------------

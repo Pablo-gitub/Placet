@@ -23,7 +23,15 @@ logger = logging.getLogger(__name__)
 
 
 class ChannelError(Exception):
-    pass
+    """The message was not queued: it can wait for another attempt."""
+
+
+class ChannelUncertain(ChannelError):
+    """
+    The command ran but its outcome is unknown (a timeout after sending):
+    the message may be in the conversation already, so it is not re-sent
+    automatically (RF-29).
+    """
 
 
 # --- Codex ------------------------------------------------------------------------
@@ -55,10 +63,13 @@ class CodexChannel:
         )
 
     def send(self, session_id: str, text: str) -> None:
-        res = self._run(
-            [self.binary(), "queue", "--thread", session_id, "--message", text],
-            capture_output=True, text=True, timeout=60,
-        )
+        try:
+            res = self._run(
+                [self.binary(), "queue", "--thread", session_id, "--message", text],
+                capture_output=True, text=True, timeout=60,
+            )
+        except subprocess.TimeoutExpired:
+            raise ChannelUncertain("codex queue did not answer within 60 s") from None
         if res.returncode != 0:
             raise ChannelError(f"codex queue failed ({res.returncode}): {(res.stderr or res.stdout).strip()[:300]}")
 
@@ -189,6 +200,8 @@ class AntigravityChannel:
         }
         try:
             resp = self._call(base, token, "SendUserCascadeMessage", body)
+        except (httpx.ReadTimeout, httpx.WriteTimeout) as e:
+            raise ChannelUncertain(f"Antigravity did not answer: {e}") from None
         except httpx.HTTPError as e:
             raise ChannelError(f"Antigravity language server unreachable: {e}") from None
         if resp.status_code != 200:

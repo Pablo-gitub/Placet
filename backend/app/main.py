@@ -183,6 +183,9 @@ def create_app(
         for req_id in failed:
             notify_change(req_id)
             alert(req_id, "consegna fallita")
+        for req_id in db.unconfirmed_to_uncertain(ACK_TIMEOUT_SECONDS):
+            notify_change(req_id)
+            alert(req_id, "consegna incerta: riprova o annulla")
         for req_id in db.stall_executing(execution_timeout):
             notify_change(req_id)
             stalled = db.get_request(req_id)
@@ -564,9 +567,32 @@ def create_app(
         return {"status": "CANCELLED", "id": request_id}
 
 
+    @app.post("/api/requests/{request_id}/delivery/retry", response_model=RequestModel)
+    async def retry_delivery(request_id: int, who: Principal = Depends(principal)):
+        """The user sends an uncertain delivery again (it may arrive twice)."""
+        require_human(who)
+        get_or_404(request_id)
+        if not db.retry_delivery(request_id, actor=who.actor):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                                detail="La consegna non è più incerta.")
+        notify_change(request_id)
+        return get_or_404(request_id)
+
+    @app.post("/api/requests/{request_id}/delivery/cancel", response_model=RequestModel)
+    async def cancel_delivery(request_id: int, who: Principal = Depends(principal)):
+        """The user withdraws a message still waiting, or whose delivery is uncertain."""
+        require_human(who)
+        get_or_404(request_id)
+        if not db.cancel_delivery(request_id, actor=who.actor):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                                detail="Il messaggio è già stato consegnato.")
+        notify_change(request_id)
+        return get_or_404(request_id)
+
     # --- Agent acknowledgements and turn state ------------------------------
 
     def ack_request(who: Principal, request_id: int, via: str) -> RequestModel:
+        """The recipient received the prompt (hook at turn start, or placet_ack)."""
         req = get_or_404(request_id)
         require_party(who, req)
         if who.id != req.recipient_id:
@@ -681,18 +707,31 @@ def create_app(
                 try:
                     ack_request(who, payload.request_id, via="hook")
                     turn_request_id = payload.request_id
+                    db.set_execution(turn_request_id, "started", actor=f"{who.actor}:hook")
                 except HTTPException as e:
                     result["ack_error"] = e.detail
+            elif session.state == "busy" and session.turn_request_id is not None:
+                # Another message joined the turn a Placet request started
+                # (typed in the app, or queued): the turn still belongs to the
+                # request, but its last answer may not be the reply to it.
+                turn_request_id = session.turn_request_id
+                db.mark_turn_mixed(turn_request_id)
             db.set_session_state(session_id, "busy", turn_request_id)
             result["turn_request_id"] = turn_request_id
         elif payload.event == "stop":
             db.set_session_state(session_id, "idle")
+            if session.turn_request_id is not None:
+                db.set_execution(session.turn_request_id, "completed", actor=f"{who.actor}:hook")
+                notify_change(session.turn_request_id)
             replied = implicit_reply(who, session.turn_request_id, payload.last_message)
             if replied is not None:
                 result["implicit_reply_for"] = replied
         elif payload.event == "tool" and payload.request_id is not None:
             result["linked"] = db.link_sender_session(payload.request_id, session_id, who.id)
         elif payload.event == "end":
+            if session.turn_request_id is not None and session.state == "busy":
+                db.set_execution(session.turn_request_id, "interrupted", actor=f"{who.actor}:hook")
+                notify_change(session.turn_request_id)
             db.end_session(session_id)
 
         if payload.event_id:
@@ -907,7 +946,18 @@ def create_app(
                 {"id": s.id, "agent_id": s.agent_id, "provider": s.provider}
                 for s in db.bridge_sessions_with_mail()
             ],
+            # Uncertain deliveries: the bridge looks for them in the conversation.
+            "uncertain": uncertain_to_reconcile(),
         }
+
+    def uncertain_to_reconcile() -> List[Dict[str, object]]:
+        out = []
+        for req in db.uncertain_deliveries():
+            session = db.get_session(req.recipient_session_id)
+            if session is not None:
+                out.append({"request_id": req.id, "session_id": session.id,
+                            "agent_id": session.agent_id, "provider": session.provider})
+        return out
 
     @app.post("/api/bridge/sessions/{session_id}/take")
     async def bridge_take_session_message(session_id: str, who: Principal = Depends(principal)):
@@ -966,6 +1016,29 @@ def create_app(
             )
         notify_change(request_id)
         return updated
+
+    @app.post("/api/bridge/requests/{request_id}/uncertain")
+    async def bridge_uncertain(request_id: int, who: Principal = Depends(principal)):
+        """The send ran but its outcome is unknown (e.g. a timeout): never re-sent by itself."""
+        require_bridge(who)
+        get_or_404(request_id)
+        changed = db.mark_delivery_uncertain(request_id, actor=who.actor, reason="channel timeout")
+        if changed:
+            notify_change(request_id)
+            alert(request_id, "consegna incerta: riprova o annulla")
+        return {"id": request_id, "uncertain": changed}
+
+    @app.post("/api/bridge/requests/{request_id}/seen", response_model=RequestModel)
+    async def bridge_seen(request_id: int, who: Principal = Depends(principal)):
+        """The message was found in the recipient's conversation: it was delivered."""
+        require_bridge(who)
+        req = get_or_404(request_id)
+        if req.status != RequestStatus.DELIVERING:
+            return req
+        updated = db.confirm_injection(request_id, actor=who.actor, via="transcript")
+        if updated is not None:
+            notify_change(request_id)
+        return updated or get_or_404(request_id)
 
     @app.post("/api/bridge/requests/{request_id}/delivered")
     async def bridge_claim_delivery(request_id: int, who: Principal = Depends(principal)):

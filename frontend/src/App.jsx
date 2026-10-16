@@ -27,6 +27,32 @@ export default function App() {
   const [connected, setConnected] = useState(false);
   const [submittingId, setSubmittingId] = useState(null);
   const [feedback, setFeedback] = useState(null);
+  const inSession = route.view === "session";
+
+  useEffect(() => {
+    if (!inSession) return;
+    // iOS reduces the visual viewport for the keyboard without necessarily
+    // resizing the layout viewport (including dvh). Follow both its size and
+    // offset so Safari's focus scrolling cannot hide the back button.
+    const viewport = window.visualViewport;
+    const updateViewport = () => {
+      document.documentElement.style.setProperty("--chat-height", `${viewport?.height ?? window.innerHeight}px`);
+      document.documentElement.style.setProperty("--chat-top", `${viewport?.offsetTop ?? 0}px`);
+    };
+    document.body.classList.add("chat-open");
+    updateViewport();
+    viewport?.addEventListener("resize", updateViewport);
+    viewport?.addEventListener("scroll", updateViewport);
+    window.addEventListener("resize", updateViewport);
+    return () => {
+      document.body.classList.remove("chat-open");
+      document.documentElement.style.removeProperty("--chat-height");
+      document.documentElement.style.removeProperty("--chat-top");
+      viewport?.removeEventListener("resize", updateViewport);
+      viewport?.removeEventListener("scroll", updateViewport);
+      window.removeEventListener("resize", updateViewport);
+    };
+  }, [inSession]);
   // A notification link (#request-N) waits here until its request is loaded;
   // then the view moves there and scrolls to it.
   const jump = useRef(requestIdFromHash(window.location.hash));
@@ -203,6 +229,25 @@ export default function App() {
     }
   };
 
+  /** Riprova / Annulla on a message whose delivery is uncertain or still waiting (RF-29). */
+  const deliveryAction = async (requestId, action) => {
+    if (action === "retry" && !window.confirm("Il messaggio potrebbe essere già arrivato: inviarlo di nuovo?")) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/requests/${requestId}/delivery/${action}`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showFeedback(data.detail || `Operazione non riuscita (${res.status})`, true);
+        return;
+      }
+      setRequests((prev) => upsert(prev, data));
+      showFeedback(action === "retry" ? "Nuovo tentativo di consegna." : "Messaggio annullato.");
+    } catch {
+      showFeedback("Errore di connessione.", true);
+    }
+  };
+
   const openSession = (id) => navigate(`#/sessione/${id}`);
   const pendingCount = requests.filter((r) => r.status === "PENDING").length;
 
@@ -280,6 +325,7 @@ export default function App() {
             onBack={() => navigate("#/")}
             onDecide={handleDecision}
             onSend={sendMessage}
+            onDelivery={deliveryAction}
             submittingId={submittingId}
             focusId={focusId}
           />

@@ -45,6 +45,9 @@ class Work:
     # Sessions the bridge wakes in their app (Codex, Antigravity) with a
     # message waiting: {"id", "agent_id", "provider"}.
     sessions: List[dict] = field(default_factory=list)
+    # Uncertain deliveries to look for in the recipient's conversation:
+    # {"request_id", "session_id", "agent_id", "provider"}.
+    uncertain: List[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -68,6 +71,9 @@ class BridgeStore(Protocol):
     # Sessions woken in their app: take the next message, then confirm the
     # injection or give the message back if it could not be queued.
     def take_session_mail(self, session_id: str) -> Optional[SessionMail]: ...
+    # The send ran but its outcome is unknown; later found in the conversation.
+    def mark_uncertain(self, request_id: int) -> None: ...
+    def mark_seen(self, request_id: int) -> None: ...
 
 
 def _session_spec(spec) -> SessionSpec:
@@ -102,6 +108,11 @@ class LocalStore:
                 {"id": s.id, "agent_id": s.agent_id, "provider": s.provider}
                 for s in self.db.bridge_sessions_with_mail()
             ],
+            uncertain=[
+                {"request_id": r.id, "session_id": s.id, "agent_id": s.agent_id, "provider": s.provider}
+                for r in self.db.uncertain_deliveries()
+                if (s := self.db.get_session(r.recipient_session_id)) is not None
+            ],
         )
 
     def take_session_mail(self, session_id: str) -> Optional[SessionMail]:
@@ -124,6 +135,12 @@ class LocalStore:
 
     def confirm_injection(self, request_id: int) -> bool:
         return self.db.confirm_injection(request_id, actor=BRIDGE_ACTOR, via="bridge") is not None
+
+    def mark_uncertain(self, request_id: int) -> None:
+        self.db.mark_delivery_uncertain(request_id, actor=BRIDGE_ACTOR, reason="channel timeout")
+
+    def mark_seen(self, request_id: int) -> None:
+        self.db.confirm_injection(request_id, actor=BRIDGE_ACTOR, via="transcript")
 
     def claim_delivery(self, request_id: int) -> bool:
         return self.db.mark_delivered(request_id, actor=BRIDGE_ACTOR, via="tmux")
@@ -169,6 +186,7 @@ class HttpStore:
             results=[RequestModel(**r) for r in data["results"]],
             busy_agents=list(data.get("busy_agents", [])),
             sessions=list(data.get("sessions", [])),
+            uncertain=list(data.get("uncertain", [])),
         )
 
     def take_session_mail(self, session_id: str) -> Optional[SessionMail]:
@@ -188,6 +206,12 @@ class HttpStore:
 
     def claim_injection(self, request_id: int) -> bool:
         return self._call_ok("POST", f"/api/bridge/requests/{request_id}/claim")
+
+    def mark_uncertain(self, request_id: int) -> None:
+        self._call_ok("POST", f"/api/bridge/requests/{request_id}/uncertain")
+
+    def mark_seen(self, request_id: int) -> None:
+        self._call_ok("POST", f"/api/bridge/requests/{request_id}/seen")
 
     def release_injection(self, request_id: int) -> None:
         self._call_ok("DELETE", f"/api/bridge/requests/{request_id}/claim")

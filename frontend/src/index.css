@@ -749,17 +749,30 @@ fieldset.options-list {
 
 /* --- Session conversation ---------------------------------------------------------- */
 
-/* The body already pads for the notch and the home indicator: the session
-   view fills exactly what is left, so the composer stays on screen. */
+/* Only the transcript scrolls. Keep both navigation and composer inside the
+   visible viewport, including when the iPhone keyboard is open. */
+body.chat-open { overflow: hidden; }
 .app-container.in-session {
-  height: calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
-  height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  position: fixed;
+  top: var(--chat-top, 0px);
+  left: 0;
+  right: 0;
+  width: 100%;
+  height: var(--chat-height, 100dvh);
   min-height: 0;
-  padding-bottom: 0.5rem;
+  overflow: hidden;
+  padding-top: calc(0.5rem + env(safe-area-inset-top));
+  padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
 }
+.app-container.in-session > header,
+.app-container.in-session > .feedback-banner,
+.session-view-header,
+.composer { flex-shrink: 0; }
 .app-container.in-session header { padding-bottom: 0.6rem; margin-bottom: 0.6rem; }
 .app-container.in-session main { flex: 1; min-height: 0; display: flex; }
-.session-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.session-view { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
 .session-view-header {
   display: flex;
   align-items: center;
@@ -773,6 +786,7 @@ fieldset.options-list {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior-y: contain;
   padding: 0.75rem 0 1rem;
   -webkit-overflow-scrolling: touch;
 }
@@ -897,11 +911,18 @@ fieldset.options-list {
   background: var(--bg-primary);
   color: var(--text-main);
   font: inherit;
-  font-size: 0.95rem;
+  font-size: 1rem;
 }
 .composer textarea:focus { outline: none; border-color: var(--primary); }
 .send-button { width: 2.4rem; height: 2.4rem; background: var(--primary); border-color: var(--primary); color: white; }
 .send-button:disabled { opacity: 0.4; }
 .msg-user.outgoing .bubble { opacity: 0.7; }
+.msg-user.outgoing.uncertain .bubble { opacity: 1; outline: 1px dashed #f59e0b; }
+.outgoing-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.3rem; }
+.outgoing-actions button {
+  background: none; border: 1px solid var(--border-color); color: var(--text-main);
+  border-radius: 999px; padding: 0.2rem 0.75rem; font-size: 0.8rem; cursor: pointer;
+}
+.aspects { font-size: 0.8rem; color: var(--text-muted); margin: 0 0 0.6rem; }
 .msg-user.failed .bubble { background: var(--danger); }
 .msg-user.failed time { color: #f87171; }

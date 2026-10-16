@@ -3,6 +3,7 @@ import { ArrowRight } from "lucide-react";
 import { Origin } from "./RequestCard";
 import Timeline from "./Timeline";
 import Markdown from "./Markdown";
+import { DELIVERY, EXECUTION, REPLY } from "./aspects";
 
 const STATUS_LABELS = {
   APPROVED: "Approvata",
@@ -52,6 +53,12 @@ export default function History({ requests, sessions, focusId, onOpenSession }) 
               </span>
             </div>
             <Origin req={req} sessions={sessions} onOpenSession={onOpenSession} />
+            {req.recipient_id !== "human" && req.delivery && (
+              <p className="aspects" data-testid={`aspects-${req.id}`}>
+                Consegna {DELIVERY[req.delivery] || req.delivery} · Esecuzione{" "}
+                {EXECUTION[req.execution] || req.execution} · Risposta {REPLY[req.reply] || req.reply}
+              </p>
+            )}
             {req.context && (
               <section className="request-section">
                 <h3 className="section-label">Contesto</h3>

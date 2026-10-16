@@ -129,7 +129,7 @@ Trasformano gli eventi del client in fatti per Placet (`POST /api/sessions/{id}/
 - Il bridge (unico consumatore, con lock) sorveglia la cartella con inotify e una scansione completa all'avvio e periodica; inoltra in ordine per sessione con il token dell'agente; cancella il file solo dopo la conferma del backend, che risponde solo dopo aver salvato ed è idempotente sull'`event_id`. 429, 5xx, 401/403 ed errori di rete: ritenta con backoff. Evento malformato o rifiutato in modo definitivo: spostato in `spool/failed/` senza bloccare gli altri. Limite di spazio (50 MB: oltre, i nuovi eventi sono scartati; avviso nella PWA da fare); temporanei abbandonati da più di un'ora ripuliti. Il backend ricorda gli `event_id` applicati per 14 giorni.
 - Fuori dalla coda: il waiter di Claude (long-polling) e il futuro "Subito", che legge un file locale lasciato dal bridge.
 
-### 3.7 Consegna, esecuzione, risposta *(da implementare, RF-29)*
+### 3.7 Consegna, esecuzione, risposta *(RF-29, RF-29b)*
 - Tre aspetti indipendenti per richiesta, con le prove e i loro orari (non una catena obbligatoria: possono arrivare fuori ordine):
   - **consegna**: in attesa → in corso (tentativo con `attempt_id`) → accettata (comando riuscito) / **incerta** / fallita / annullata; il messaggio *visto* nella conversazione è una prova in più;
   - **esecuzione**: non osservata → iniziata (turno aperto da quel messaggio) → completata / interrotta;
@@ -137,6 +137,12 @@ Trasformano gli eventi del client in fatti per Placet (`POST /api/sessions/{id}/
 - Il messaggio porta un identificatore osservabile (`[Placet Request #N`, più l'`attempt_id`) che il bridge cerca nel file della conversazione per riconciliare un esito incerto.
 - Una richiesta alla volta per sessione, fino alla conclusione. Scadenza breve per la conferma di consegna (poi riconciliazione, non reinvio), scadenza lunga solo informativa per l'esecuzione. Un'incerta non sblocca la successiva: decide l'utente (Riprova / Annulla).
 - `placet_reply` non chiude da solo la richiesta: completamento del turno e risposta sono distinti.
+- Implementazione: colonne `delivery_state`, `delivery_at`, `delivery_channel` (tmux, waiter, bridge), `attempt_id`, `execution_state`, `execution_at`, `reply_state`, `turn_mixed` su `requests`; lo `status` resta il riassunto per gli agenti e lo strumento MCP.
+  - Le prove: presa dal waiter o dal bridge → in corso; hook di inizio turno, `placet_ack`, risposta o messaggio trovato nella conversazione → accettata; hook di inizio turno → esecuzione iniziata; fine turno → completata; fine sessione a turno aperto → interrotta.
+  - Timeout del canale (`codex queue` oltre 60 s, Antigravity senza risposta) o nessuna conferma entro 90 s per waiter e bridge → **incerta**, con notifica; solo tmux conserva i 3 tentativi automatici. Il bridge rilegge la conversazione ogni 20 s cercando `[Placet Request #N`; per ora l'`attempt_id` non è nel testo, quindi qualunque tentativo trovato conta come consegna.
+  - Un altro messaggio che entra nel turno di una richiesta (prompt senza `request_id` a turno aperto) segna il turno come misto: la risposta implicita diventa **ambigua**.
+  - Una richiesta alla volta: la sessione non riceve la successiva finché la precedente è in consegna (anche incerta) o il suo turno è aperto; una consegnata il cui turno non si vede iniziare smette di bloccare dopo 120 s (sessioni senza hook).
+  - PWA: Riprova (con conferma, perché può arrivare due volte) e Annulla sul messaggio incerto, Annulla su quello in attesa; nello storico la riga dei tre aspetti. API: `POST /api/requests/{id}/delivery/retry|cancel` (utente), `POST /api/bridge/requests/{id}/uncertain|seen` (bridge).
 
 ### 3.8 Esclusione `.placet-off` *(in parte da implementare, RF-45)*
 Gli hook non scrivono eventi; il bridge scarta gli eventi in coda di sessioni escluse, non legge le loro conversazioni e non consegna; le consegne in sospeso diventano annullate ("progetto escluso"); la PWA nasconde sessioni e richieste del progetto (restano nel database per l'audit).

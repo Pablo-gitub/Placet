@@ -4,9 +4,11 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Tuple
 
+import uuid
 from pathlib import Path
 from backend.app.models import (
     BRIDGE_PROVIDERS,
+    EXECUTION_START_GRACE_SECONDS,
     OPEN_STATUSES,
     RequestCreate,
     RequestEvent,
@@ -29,6 +31,37 @@ _DECISION_TRANSITIONS = {
 
 # Statuses in which the recipient may still reply.
 _REPLYABLE = (RequestStatus.APPROVED, RequestStatus.DELIVERING, RequestStatus.EXECUTING)
+
+# A delivery that has not reached the session yet: cancelled with its request.
+_UNSETTLED_DELIVERY = "delivery_state IN ('waiting', 'in_progress', 'uncertain')"
+_CANCEL_DELIVERY_SQL = (
+    f", delivery_state = CASE WHEN delivery_state IS NULL OR {_UNSETTLED_DELIVERY}"
+    " THEN 'cancelled' ELSE delivery_state END"
+)
+
+_BACKFILL_ASPECTS_SQL = """
+    UPDATE requests SET
+      delivery_state = CASE
+        WHEN status = 'DELIVERING' THEN 'in_progress'
+        WHEN status = 'DELIVERY_FAILED' THEN 'failed'
+        WHEN executing_since IS NOT NULL THEN 'accepted'
+        WHEN status IN ('REJECTED', 'CANCELLED', 'EXPIRED') THEN 'cancelled'
+        ELSE 'waiting' END,
+      delivery_at = executing_since,
+      execution_state = CASE
+        WHEN status IN ('EXECUTING', 'STALLED') THEN 'started'
+        WHEN status = 'COMPLETED' AND executing_since IS NOT NULL THEN 'completed'
+        ELSE 'unobserved' END,
+      reply_state = CASE
+        WHEN EXISTS (SELECT 1 FROM responses r WHERE r.request_id = requests.id AND r.implicit = 1)
+          THEN 'implicit'
+        WHEN EXISTS (SELECT 1 FROM responses r WHERE r.request_id = requests.id) THEN 'explicit'
+        ELSE 'none' END
+"""
+
+
+def _new_attempt() -> str:
+    return uuid.uuid4().hex[:8]
 
 
 def _ts(value: Optional[str]) -> Optional[datetime]:
@@ -163,6 +196,15 @@ class Database:
             for col in ("activity_at", "pinned_at"):
                 if col not in session_cols:
                     cursor.execute(f"ALTER TABLE sessions ADD COLUMN {col} TEXT;")
+            # The three aspects of a request (RF-29); older rows are backfilled
+            # from their status once.
+            if "delivery_state" not in cols:
+                for col in ("delivery_state", "delivery_at", "delivery_channel", "attempt_id",
+                            "execution_state", "execution_at", "reply_state"):
+                    if col not in cols:
+                        cursor.execute(f"ALTER TABLE requests ADD COLUMN {col} TEXT;")
+                cursor.execute("ALTER TABLE requests ADD COLUMN turn_mixed INTEGER NOT NULL DEFAULT 0;")
+                cursor.execute(_BACKFILL_ASPECTS_SQL)
             cursor.execute("PRAGMA table_info(responses);")
             if "implicit" not in [r["name"] for r in cursor.fetchall()]:
                 cursor.execute("ALTER TABLE responses ADD COLUMN implicit INTEGER NOT NULL DEFAULT 0;")
@@ -293,6 +335,13 @@ class Database:
             recipient_session_id=row["recipient_session_id"],
             prompt_source=row["prompt_source"],
             response=resp_model,
+            delivery=row["delivery_state"] or "waiting",
+            delivery_at=_ts(row["delivery_at"]),
+            delivery_channel=row["delivery_channel"],
+            attempt_id=row["attempt_id"],
+            execution=row["execution_state"] or "unobserved",
+            execution_at=_ts(row["execution_at"]),
+            reply=row["reply_state"] or "none",
         )
 
     def list_requests(
@@ -411,10 +460,15 @@ class Database:
             cursor = conn.cursor()
             cursor.execute(
                 f"""
-                UPDATE requests SET status = ?, completed_at = ?, updated_at = ?
+                UPDATE requests SET status = ?, completed_at = ?, updated_at = ?,
+                  -- a reply while delivering proves the prompt arrived
+                  delivery_state = CASE WHEN status = 'DELIVERING' THEN 'accepted' ELSE delivery_state END,
+                  delivery_at = CASE WHEN status = 'DELIVERING' THEN ? ELSE delivery_at END,
+                  reply_state = CASE WHEN ? = 0 THEN 'explicit'
+                                     WHEN turn_mixed = 1 THEN 'ambiguous' ELSE 'implicit' END
                 WHERE id = ? AND status IN ({",".join("?" for _ in sources)})
                 """,
-                [RequestStatus.COMPLETED.value, now, now, request_id, *sources],
+                [RequestStatus.COMPLETED.value, now, now, now, int(implicit), request_id, *sources],
             )
             if cursor.rowcount == 0:
                 return None
@@ -457,7 +511,9 @@ class Database:
             cursor = conn.cursor()
             if not self._transition(
                 cursor, request_id, RequestStatus.APPROVED, RequestStatus.DELIVERING, now,
-                ", delivering_since = ?, delivery_attempts = delivery_attempts + 1", [now],
+                ", delivering_since = ?, delivery_attempts = delivery_attempts + 1,"
+                " delivery_state = 'in_progress', delivery_channel = 'tmux', attempt_id = ?",
+                [now, _new_attempt()],
             ):
                 return None
             cursor.execute("SELECT delivery_attempts FROM requests WHERE id = ?", (request_id,))
@@ -473,7 +529,8 @@ class Database:
             cursor = conn.cursor()
             if not self._transition(
                 cursor, request_id, RequestStatus.DELIVERING, RequestStatus.APPROVED, now,
-                ", delivering_since = NULL, delivery_attempts = MAX(delivery_attempts - 1, 0)",
+                ", delivering_since = NULL, delivery_attempts = MAX(delivery_attempts - 1, 0),"
+                " delivery_state = 'waiting', attempt_id = NULL",
             ):
                 return False
             self._log(cursor, request_id, actor, "injection_released", at=now)
@@ -481,17 +538,102 @@ class Database:
 
     def confirm_injection(self, request_id: int, actor: str, via: str) -> Optional[RequestModel]:
         """DELIVERING -> EXECUTING: the agent (or, without acks, the bridge)
-        confirmed the prompt arrived."""
+        confirmed the prompt arrived; this also settles an uncertain delivery."""
         now = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
             cursor = conn.cursor()
             if not self._transition(
                 cursor, request_id, RequestStatus.DELIVERING, RequestStatus.EXECUTING, now,
-                ", executing_since = ?", [now],
+                ", executing_since = ?, delivery_state = 'accepted', delivery_at = ?", [now, now],
             ):
                 return None
             self._log(cursor, request_id, actor, "acked", {"via": via}, at=now)
         return self.get_request(request_id)
+
+    def mark_delivery_uncertain(self, request_id: int, actor: str, reason: str) -> bool:
+        """The send's outcome is unknown: it stays DELIVERING, never re-sent by itself."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE requests SET delivery_state = 'uncertain', updated_at = ?"
+                " WHERE id = ? AND status = ? AND delivery_state = 'in_progress'",
+                (now, request_id, RequestStatus.DELIVERING.value),
+            )
+            if cursor.rowcount == 0:
+                return False
+            self._log(cursor, request_id, actor, "delivery_uncertain", {"reason": reason}, at=now)
+            return True
+
+    def retry_delivery(self, request_id: int, actor: str) -> bool:
+        """The user asks to send an uncertain delivery again: a new attempt."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE requests SET status = ?, updated_at = ?, delivering_since = NULL,"
+                " delivery_state = 'waiting', attempt_id = NULL"
+                " WHERE id = ? AND status = ? AND delivery_state = 'uncertain'",
+                (RequestStatus.APPROVED.value, now, request_id, RequestStatus.DELIVERING.value),
+            )
+            if cursor.rowcount == 0:
+                return False
+            self._log(cursor, request_id, actor, "delivery_retried", at=now)
+            return True
+
+    def cancel_delivery(self, request_id: int, actor: str) -> bool:
+        """The user withdraws a message still waiting or in an uncertain delivery."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE requests SET status = ?, updated_at = ?, delivery_state = 'cancelled'"
+                " WHERE id = ? AND ((status = ? AND delivery_state = 'uncertain') OR status = ?)",
+                (RequestStatus.CANCELLED.value, now, request_id,
+                 RequestStatus.DELIVERING.value, RequestStatus.APPROVED.value),
+            )
+            if cursor.rowcount == 0:
+                return False
+            self._log(cursor, request_id, actor, "cancelled", {"delivery": True}, at=now)
+            return True
+
+    def uncertain_deliveries(self) -> List[RequestModel]:
+        """Uncertain deliveries to a known session, to look for in its conversation."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id FROM requests WHERE status = ? AND delivery_state = 'uncertain'"
+                " AND recipient_session_id IS NOT NULL ORDER BY id",
+                (RequestStatus.DELIVERING.value,),
+            )
+            ids = [r["id"] for r in cursor.fetchall()]
+        return [r for r in (self.get_request(i) for i in ids) if r is not None]
+
+    def set_execution(self, request_id: int, state: str, actor: str) -> bool:
+        """Records what the recipient's turn did with a request (RF-29)."""
+        allowed_from = {
+            "started": ("unobserved",),
+            "completed": ("unobserved", "started"),
+            "interrupted": ("unobserved", "started"),
+        }[state]
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"UPDATE requests SET execution_state = ?, execution_at = ?"
+                f" WHERE id = ? AND COALESCE(execution_state, 'unobserved')"
+                f" IN ({','.join('?' for _ in allowed_from)})",
+                (state, now, request_id, *allowed_from),
+            )
+            if cursor.rowcount == 0:
+                return False
+            self._log(cursor, request_id, actor, f"execution_{state}", at=now)
+            return True
+
+    def mark_turn_mixed(self, request_id: int) -> None:
+        """Another message entered the turn: its implicit reply is ambiguous."""
+        with self._get_connection() as conn:
+            conn.execute("UPDATE requests SET turn_mixed = 1 WHERE id = ?", (request_id,))
 
     def requeue_unacked(
         self, ack_timeout_seconds: float, max_attempts: int
@@ -507,22 +649,41 @@ class Database:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT id, delivery_attempts FROM requests WHERE status = ? AND delivering_since <= ?",
+                "SELECT id, delivery_attempts FROM requests WHERE status = ? AND delivering_since <= ?"
+                " AND COALESCE(delivery_channel, 'tmux') = 'tmux'",
                 (RequestStatus.DELIVERING.value, cutoff),
             )
             for row in cursor.fetchall():
                 if row["delivery_attempts"] >= max_attempts:
                     if self._transition(cursor, row["id"], RequestStatus.DELIVERING,
-                                        RequestStatus.DELIVERY_FAILED, now):
+                                        RequestStatus.DELIVERY_FAILED, now,
+                                        ", delivery_state = 'failed'"):
                         self._log(cursor, row["id"], "system", "injection_failed",
                                   {"attempts": row["delivery_attempts"]}, at=now)
                         failed.append(row["id"])
                 elif self._transition(cursor, row["id"], RequestStatus.DELIVERING,
-                                      RequestStatus.APPROVED, now, ", delivering_since = NULL"):
+                                      RequestStatus.APPROVED, now,
+                                      ", delivering_since = NULL, delivery_state = 'waiting'"):
                     self._log(cursor, row["id"], "system", "injection_requeued",
                               {"attempts": row["delivery_attempts"]}, at=now)
                     requeued.append(row["id"])
         return requeued, failed
+
+    def unconfirmed_to_uncertain(self, ack_timeout_seconds: float) -> List[int]:
+        """
+        Messages a waiter took or the bridge queued with no confirmation in
+        time: their delivery becomes uncertain, never re-sent by itself.
+        """
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=ack_timeout_seconds)).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id FROM requests WHERE status = ? AND delivering_since <= ?"
+                " AND delivery_state = 'in_progress' AND COALESCE(delivery_channel, 'tmux') != 'tmux'",
+                (RequestStatus.DELIVERING.value, cutoff),
+            )
+            ids = [r["id"] for r in cursor.fetchall()]
+        return [i for i in ids if self.mark_delivery_uncertain(i, "system", "no confirmation")]
 
     def stall_executing(
         self, timeout_for: Callable[[str], float]
@@ -626,8 +787,8 @@ class Database:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                """
-                UPDATE requests SET status = ?, updated_at = ?, delivered_at = ?
+                f"""
+                UPDATE requests SET status = ?, updated_at = ?, delivered_at = ?{_CANCEL_DELIVERY_SQL}
                 WHERE id = ? AND status = ?
                 """,
                 (
@@ -656,7 +817,7 @@ class Database:
             # ISO-8601 UTC timestamps with the same offset compare correctly as text.
             cursor.execute(
                 f"""
-                UPDATE requests SET status = ?, updated_at = ?
+                UPDATE requests SET status = ?, updated_at = ?{_CANCEL_DELIVERY_SQL}
                 WHERE status IN ({placeholders}) AND expires_at IS NOT NULL AND expires_at <= ?
                 RETURNING id
                 """,
@@ -920,6 +1081,28 @@ class Database:
         ORDER BY (recipient_session_id IS NULL) ASC, id ASC
     """
 
+    def request_in_flight(self, session_id: str) -> Optional[int]:
+        """
+        The request this session is still dealing with, if any (RF-29b): one
+        being delivered (an uncertain one too), or one delivered whose turn
+        has not ended. The next waits until it concludes.
+        """
+        grace = (datetime.now(timezone.utc) - timedelta(seconds=EXECUTION_START_GRACE_SECONDS)).isoformat()
+        with self._get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT id FROM requests WHERE recipient_session_id = ? AND (
+                  status = ?
+                  OR (status = ? AND execution_state = 'started')
+                  OR (status = ? AND COALESCE(execution_state, 'unobserved') = 'unobserved'
+                      AND delivery_at > ?)
+                ) ORDER BY id LIMIT 1
+                """,
+                (session_id, RequestStatus.DELIVERING.value, RequestStatus.EXECUTING.value,
+                 RequestStatus.EXECUTING.value, grace),
+            ).fetchone()
+            return row["id"] if row else None
+
     def inbox_has_message(self, session: SessionModel) -> bool:
         """Whether take_inbox_message would hand something out now (read only)."""
         if session.state != "idle" or session.ended_at is not None:
@@ -932,7 +1115,7 @@ class Database:
                 self._INJECTIONS_SQL,
                 (RequestStatus.APPROVED.value, session.agent_id, session.id, session.id),
             )
-            if cursor.fetchone() is not None:
+            if cursor.fetchone() is not None and self.request_in_flight(session.id) is None:
                 return True
         return any(
             (req := self.get_request(i)) is not None and is_settled(req) for i in outcome_ids
@@ -972,6 +1155,8 @@ class Database:
             if req is not None and is_settled(req) and self.mark_delivered(req_id, actor=actor, via=via):
                 return "outcome", self.get_request(req_id)
 
+        if self.request_in_flight(session.id) is not None:
+            return None
         now = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -986,8 +1171,9 @@ class Database:
                 if not self._transition(
                     cursor, req_id, RequestStatus.APPROVED, RequestStatus.DELIVERING, now,
                     ", delivering_since = ?, delivery_attempts = delivery_attempts + 1,"
-                    " recipient_session_id = ?",
-                    [now, session.id],
+                    " recipient_session_id = ?, delivery_state = 'in_progress', delivery_channel = ?,"
+                    " attempt_id = ?",
+                    [now, session.id, "bridge" if via == "bridge" else "waiter", _new_attempt()],
                 ):
                     continue
                 cursor.execute("SELECT delivery_attempts FROM requests WHERE id = ?", (req_id,))
