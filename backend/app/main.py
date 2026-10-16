@@ -76,6 +76,14 @@ class SessionEventPayload(BaseModel):
     last_message: Optional[str] = None
 
 
+class FoldersReport(BaseModel):
+    checked: List[str] = Field(default_factory=list, max_length=1000)
+    excluded: List[str] = Field(default_factory=list, max_length=1000)
+
+
+EXCLUDED_DETAIL = "Questo progetto è escluso da Placet (file .placet-off)."
+
+
 class QueueRelease(BaseModel):
     reason: Literal["finished", "queue_next"]
 
@@ -97,6 +105,7 @@ TRANSCRIPT_ERRORS = {
     "not_found": (404, "La conversazione non si trova su questo PC."),
     "unsupported": (422, "Lettura della conversazione non supportata per questo provider."),
     "invalid": (400, "Sessione non valida."),
+    "excluded": (409, "Questo progetto è escluso da Placet (file .placet-off)."),
 }
 TRANSCRIPT_MAX_LIMIT = 200
 BRIDGE_JOBS_WAIT_SECONDS = 30
@@ -324,6 +333,11 @@ def create_app(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"Session {session_id} is not an open session of {agent_id}.",
             )
+        if session.excluded:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"Session {session_id} belongs to a project excluded from Placet (.placet-off).",
+            )
 
     def require_party(who: Principal, req: RequestModel) -> None:
         """The human sees everything; an agent only its own requests."""
@@ -445,7 +459,7 @@ def create_app(
     ):
         require_human(who)
         expire_and_notify()
-        return db.list_requests(status=status, limit=limit)
+        return db.list_requests(status=status, limit=limit, hide_excluded=True)
 
     @app.get("/api/requests/{request_id}", response_model=RequestModel)
     async def get_request(
@@ -824,7 +838,7 @@ def create_app(
         """Sessions of all agents: for the PWA and for agents choosing a target."""
         if who.kind == "bridge":
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not for the bridge.")
-        return db.list_sessions(agent_id=agent_id, include_ended=include_ended)
+        return db.list_sessions(agent_id=agent_id, include_ended=include_ended, include_excluded=False)
 
     @app.post("/api/sessions/{session_id}/messages", response_model=RequestModel,
               status_code=status.HTTP_201_CREATED)
@@ -840,6 +854,8 @@ def create_app(
         session = db.get_session(session_id)
         if session is None:
             raise HTTPException(status_code=404, detail="Session not found")
+        if session.excluded:
+            raise HTTPException(status_code=409, detail=EXCLUDED_DETAIL)
         if session.ended_at is not None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="La sessione è chiusa.")
         if config.get_agent(session.agent_id) is None:
@@ -916,6 +932,8 @@ def create_app(
         session = db.get_session(session_id)
         if session is None:
             raise HTTPException(status_code=404, detail="Session not found")
+        if session.excluded:
+            raise HTTPException(status_code=409, detail=EXCLUDED_DETAIL)
         params = {
             "session_id": session.id, "provider": session.provider, "agent_id": session.agent_id,
             "before": before, "after": after, "limit": limit,
@@ -925,7 +943,8 @@ def create_app(
             from bridge.transcripts import read_transcript
             return read_transcript(**params)
 
-        return await bridge_call("transcript", params, local, TRANSCRIPT_ERRORS)
+        # The bridge checks the folder again: it may know of a .placet-off first.
+        return await bridge_call("transcript", {**params, "cwd": session.cwd}, local, TRANSCRIPT_ERRORS)
 
     # --- Local bridge (tmux injection and outcome delivery) -----------------
 
@@ -979,7 +998,20 @@ def create_app(
             ],
             # Uncertain deliveries: the bridge looks for them in the conversation.
             "uncertain": uncertain_to_reconcile(),
+            # Folders of known sessions: the bridge looks for `.placet-off`.
+            "folders": db.known_folders(),
         }
+
+    @app.post("/api/bridge/folders")
+    async def bridge_folders(payload: FoldersReport, who: Principal = Depends(principal)):
+        """Which folders have a `.placet-off` (RF-45), as the bridge found them."""
+        require_bridge(who)
+        changed, cancelled = db.set_excluded_folders(payload.checked, payload.excluded, actor=who.actor)
+        for session_id in changed:
+            notify_session(session_id)
+        for req_id in cancelled:
+            notify_change(req_id)
+        return {"changed": changed, "cancelled": cancelled}
 
     def uncertain_to_reconcile() -> List[Dict[str, object]]:
         out = []
@@ -1091,6 +1123,13 @@ def create_app(
         db.clear_delivered(request_id, actor=who.actor)
         return {"id": request_id, "delivered": False}
 
+    def request_excluded(req: RequestModel) -> bool:
+        for session_id in (req.sender_session_id, req.recipient_session_id):
+            session = db.get_session(session_id) if session_id else None
+            if session is not None and session.excluded:
+                return True
+        return False
+
     @app.get("/api/events")
     async def sse_events(who: Principal = Depends(principal)):
         require_human(who)
@@ -1107,7 +1146,7 @@ def create_app(
                             yield {"event": "session_update", "data": session.model_dump_json()}
                         continue
                     req = db.get_request(key)
-                    if req:
+                    if req and not request_excluded(req):
                         yield {
                             "event": "request_update",
                             "data": req.model_dump_json(),

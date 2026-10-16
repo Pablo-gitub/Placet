@@ -78,6 +78,11 @@ export default function App() {
     else window.location.hash = target;
   }, []);
 
+  const sessionsRef = useRef(sessions);
+  useEffect(() => {
+    sessionsRef.current = sessions;
+  }, [sessions]);
+
   const fetchRequests = useCallback(async () => {
     try {
       const res = await fetch("/api/requests");
@@ -115,6 +120,15 @@ export default function App() {
       evtSource.addEventListener("session_update", (event) => {
         try {
           const updated = JSON.parse(event.data);
+          if (updated.excluded) {
+            // A project with .placet-off (RF-45): hide it and what belongs to it.
+            setSessions((prev) => prev.filter((s) => s.id !== updated.id));
+            setRequests((prev) =>
+              prev.filter((r) => r.sender_session_id !== updated.id && r.recipient_session_id !== updated.id)
+            );
+            return;
+          }
+          if (!sessionsRef.current.some((s) => s.id === updated.id)) fetchRequests(); // new, or back from an exclusion
           setSessions((prev) => upsert(prev, updated));
         } catch (err) {
           console.error("Error parsing SSE event:", err);

@@ -238,6 +238,9 @@ class SessionModel(BaseModel):
     pinned: bool = False
     # Computed: a background waiter is listening, so Placet can wake it.
     reachable: bool = False
+    # Its project has a `.placet-off` (RF-45): hidden, nothing delivered; the
+    # data stays for the audit.
+    excluded: bool = False
 
 
 class RequestEvent(BaseModel):

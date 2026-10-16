@@ -217,3 +217,18 @@ describe("writing from the PWA", () => {
     await waitFor(() => expect(screen.getByTestId("feedback-banner")).toHaveTextContent("La sessione è chiusa."));
   });
 });
+
+describe("excluded projects", () => {
+  beforeEach(() => {
+    window.location.hash = "";
+  });
+
+  it("hides a session and its questions as soon as its project is excluded", async () => {
+    setup();
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId("request-card-3")).toBeInTheDocument());
+    MockEventSource.last.emit("session_update", { ...sessions[3], excluded: true });
+    await waitFor(() => expect(screen.queryByTestId("request-card-3")).toBeNull());
+    expect(screen.getByTestId("request-card-1")).toBeInTheDocument();
+  });
+});

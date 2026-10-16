@@ -12,6 +12,7 @@ from bridge.channels import ChannelError, ChannelUncertain, default_channels
 from bridge.stores import BridgeStore, LocalStore, Work
 from bridge.tmux_controller import SessionSpec, TmuxController
 from bridge.transcripts import TranscriptError, read_transcript
+from hooks.placet_common import active
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,8 @@ logger = logging.getLogger(__name__)
 RECENT_INPUT_SECONDS = 15.0
 # How often the conversation of a session is read to settle an uncertain delivery.
 RECONCILE_EVERY_SECONDS = 20.0
+# How often the folders of known sessions are checked for `.placet-off`.
+FOLDERS_EVERY_SECONDS = 15.0
 
 
 
@@ -42,6 +45,8 @@ class BridgeDaemon:
         # forwards the hooks' local event queue to the backend
         self.spool = spool
         self._reconciled_at: dict = {}
+        self._folders_at = -FOLDERS_EVERY_SECONDS
+        self._excluded: Optional[Set[str]] = None
 
     def format_injection_envelope(self, req: RequestModel, ack_mode: str = "mcp") -> str:
         return envelopes.injection(req, ack_mode=ack_mode, channel="tmux")
@@ -206,10 +211,26 @@ class BridgeDaemon:
                 settled += 1
         return settled
 
+    def check_folders(self, folders: List[str]) -> Set[str]:
+        """
+        Looks for `.placet-off` in the folders of known sessions (RF-45) and
+        tells the backend, which hides them and stops their deliveries. The
+        backend runs as another user and cannot look itself.
+        """
+        now = time.monotonic()
+        if self._excluded is not None and now - self._folders_at < FOLDERS_EVERY_SECONDS:
+            return self._excluded
+        self._folders_at = now
+        excluded = {cwd for cwd in folders if not active(cwd)}
+        self.store.report_folders(sorted(set(folders)), sorted(excluded))
+        self._excluded = excluded
+        return excluded
+
     def run_loop_step(self) -> int:
         # At most one injection per session per tick, outcomes first: they
         # unblock work that is already waiting.
         work: Work = self.store.work()
+        self.check_folders(work.folders)
         busy_sessions: Set[str] = set()
         busy_agents = set(work.busy_agents)
         delivered = self.process_pending_results(busy_sessions, work.results, busy_agents)
@@ -225,6 +246,8 @@ class BridgeDaemon:
         kind = job.get("kind")
         try:
             if kind == "transcript":
+                if not active(job.get("cwd")):
+                    return {"ok": False, "error": "excluded", "message": "Project excluded (.placet-off)."}
                 page = read_transcript(
                     job.get("provider"), job.get("session_id", ""), agent_id=job.get("agent_id"),
                     before=job.get("before"), after=job.get("after"),

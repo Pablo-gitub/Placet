@@ -147,8 +147,11 @@ Trasformano gli eventi del client in fatti per Placet (`POST /api/sessions/{id}/
   - Richieste precedenti a questa versione: non trattengono nessuna coda.
   - PWA: Riprova (con conferma, perché può arrivare due volte) e Annulla sul messaggio incerto, Annulla su quello in attesa; nello storico la riga dei tre aspetti. API: `POST /api/requests/{id}/delivery/retry|cancel` (utente), `POST /api/bridge/requests/{id}/uncertain|seen` (bridge).
 
-### 3.8 Esclusione `.placet-off` *(in parte da implementare, RF-45)*
+### 3.8 Esclusione `.placet-off` *(RF-45)*
 Gli hook non scrivono eventi; il bridge scarta gli eventi in coda di sessioni escluse, non legge le loro conversazioni e non consegna; le consegne in sospeso diventano annullate ("progetto escluso"); la PWA nasconde sessioni e richieste del progetto (restano nel database per l'audit).
+- Il backend gira come utente `placet` e non vede la home: è il bridge che cerca `.placet-off` (nella cartella o in una che la contiene) per le cartelle delle sessioni note (`folders` in `/api/bridge/work`), al massimo ogni 15 s, e le riporta con `POST /api/bridge/folders`. Il backend segna le sessioni (`excluded_at`), annulla i messaggi non ancora consegnati e, togliendo il file, le fa ricomparire.
+- Sessione esclusa: fuori da `/api/sessions` e dall'SSE, le sue richieste fuori da `/api/requests`; scrivere, leggere la conversazione o indirizzarle una richiesta → 409/422 "progetto escluso". Il bridge rifiuta comunque di leggere la conversazione di una cartella esclusa, anche prima che il backend lo sappia.
+- Una richiesta già consegnata resta com'è: Placet non può fermare l'agente.
 
 ---
 

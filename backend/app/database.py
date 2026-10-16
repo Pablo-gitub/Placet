@@ -60,6 +60,13 @@ _BACKFILL_ASPECTS_SQL = """
 """
 
 
+# Requests that do not belong to a session of an excluded project (RF-45).
+_NOT_EXCLUDED_SQL = (
+    "NOT EXISTS (SELECT 1 FROM sessions x WHERE x.excluded_at IS NOT NULL"
+    " AND x.id IN (r.sender_session_id, r.recipient_session_id))"
+)
+
+
 def _new_attempt() -> str:
     return uuid.uuid4().hex[:8]
 
@@ -193,7 +200,8 @@ class Database:
             session_cols = [r["name"] for r in cursor.fetchall()]
             # activity_at: last turn start or end (the waiter's polls do not count);
             # pinned_at: the user added the session to the PWA home.
-            for col in ("activity_at", "pinned_at"):
+            # excluded_at: the bridge found a `.placet-off` for its folder (RF-45).
+            for col in ("activity_at", "pinned_at", "excluded_at"):
                 if col not in session_cols:
                     cursor.execute(f"ALTER TABLE sessions ADD COLUMN {col} TEXT;")
             # The three aspects of a request (RF-29); older rows are backfilled
@@ -361,13 +369,17 @@ class Database:
         status: Optional[RequestStatus] = None,
         limit: int = 50,
         oldest_first: bool = False,
+        hide_excluded: bool = False,
     ) -> List[RequestModel]:
         """
         Newest first by default (what a UI wants); the bridge asks for
         oldest_first to process its queue in arrival order.
         """
         order = "ASC" if oldest_first else "DESC"
-        where = "WHERE r.status = ?" if status else ""
+        conditions = ["r.status = ?"] if status else []
+        if hide_excluded:
+            conditions.append(_NOT_EXCLUDED_SQL)
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         params = ([status.value] if status else []) + [limit]
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -980,7 +992,8 @@ class Database:
             ended_at=_ts(row["ended_at"]),
             activity_at=_ts(row["activity_at"]) or datetime.fromisoformat(row["started_at"]),
             pinned=row["pinned_at"] is not None,
-            reachable=reachable,
+            reachable=reachable and row["excluded_at"] is None,
+            excluded=row["excluded_at"] is not None,
         )
 
     def upsert_session(
@@ -1042,8 +1055,11 @@ class Database:
         agent_id: Optional[str] = None,
         include_ended: bool = False,
         waiter_ttl_seconds: float = WAITER_TTL_SECONDS,
+        include_excluded: bool = True,
     ) -> List[SessionModel]:
         where, params = [], []
+        if not include_excluded:
+            where.append("excluded_at IS NULL")
         if agent_id is not None:
             where.append("agent_id = ?")
             params.append(agent_id)
@@ -1152,6 +1168,60 @@ class Database:
         ORDER BY (recipient_session_id IS NULL) ASC, id ASC
     """
 
+    def known_folders(self, limit: int = 500) -> List[str]:
+        """The folders of known sessions, for the bridge to look for `.placet-off`."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT cwd, MAX(last_seen_at) AS seen FROM sessions WHERE cwd IS NOT NULL"
+                " GROUP BY cwd ORDER BY seen DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            return [r["cwd"] for r in rows]
+
+    def set_excluded_folders(
+        self, checked: Sequence[str], excluded: Sequence[str], actor: str = "bridge"
+    ) -> Tuple[List[str], List[int]]:
+        """
+        Applies what the bridge found: sessions in an excluded folder are
+        hidden and get nothing delivered, their messages not yet delivered
+        are cancelled ("progetto escluso"); a folder no longer excluded comes
+        back. Returns (sessions changed, requests cancelled).
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        excluded_set = set(excluded)
+        changed, cancelled = [], []
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            for cwd in set(checked):
+                if cwd in excluded_set:
+                    cursor.execute(
+                        "UPDATE sessions SET excluded_at = ? WHERE cwd = ? AND excluded_at IS NULL RETURNING id",
+                        (now, cwd),
+                    )
+                else:
+                    cursor.execute(
+                        "UPDATE sessions SET excluded_at = NULL WHERE cwd = ? AND excluded_at IS NOT NULL"
+                        " RETURNING id",
+                        (cwd,),
+                    )
+                ids = [r["id"] for r in cursor.fetchall()]
+                changed.extend(ids)
+                if cwd not in excluded_set or not ids:
+                    continue
+                marks = ",".join("?" for _ in ids)
+                cursor.execute(
+                    f"UPDATE requests SET status = ?, updated_at = ?, delivery_state = 'cancelled'"
+                    f" WHERE recipient_session_id IN ({marks}) AND (status = ?"
+                    f" OR (status = ? AND delivery_state IN ('in_progress', 'uncertain')))"
+                    f" RETURNING id",
+                    (RequestStatus.CANCELLED.value, now, *ids,
+                     RequestStatus.APPROVED.value, RequestStatus.DELIVERING.value),
+                )
+                for r in cursor.fetchall():
+                    self._log(cursor, r["id"], actor, "cancelled", {"reason": "progetto escluso"}, at=now)
+                    cancelled.append(r["id"])
+        return changed, sorted(cancelled)
+
     def request_in_flight(self, session_id: str) -> Optional[int]:
         """
         The request this session is still dealing with, if any (RF-29b): one
@@ -1174,7 +1244,7 @@ class Database:
 
     def inbox_has_message(self, session: SessionModel) -> bool:
         """Whether take_inbox_message would hand something out now (read only)."""
-        if session.state != "idle" or session.ended_at is not None:
+        if session.state != "idle" or session.ended_at is not None or session.excluded:
             return False
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -1212,7 +1282,7 @@ class Database:
         ("outcome" | "injection", request) or None. `actor` and `via` say who
         takes it for the session (its waiter, or the bridge).
         """
-        if session.state != "idle" or session.ended_at is not None:
+        if session.state != "idle" or session.ended_at is not None or session.excluded:
             return None
         actor = actor or f"agent:{session.agent_id}"
         with self._get_connection() as conn:

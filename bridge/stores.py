@@ -48,6 +48,8 @@ class Work:
     # Uncertain deliveries to look for in the recipient's conversation:
     # {"request_id", "session_id", "agent_id", "provider"}.
     uncertain: List[dict] = field(default_factory=list)
+    # Folders of known sessions, to look for `.placet-off` (RF-45).
+    folders: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -74,6 +76,8 @@ class BridgeStore(Protocol):
     # The send ran but its outcome is unknown; later found in the conversation.
     def mark_uncertain(self, request_id: int) -> None: ...
     def mark_seen(self, request_id: int) -> None: ...
+    # Which of the folders have a `.placet-off`.
+    def report_folders(self, checked: List[str], excluded: List[str]) -> None: ...
 
 
 def _session_spec(spec) -> SessionSpec:
@@ -113,6 +117,7 @@ class LocalStore:
                 for r in self.db.uncertain_deliveries()
                 if (s := self.db.get_session(r.recipient_session_id)) is not None
             ],
+            folders=self.db.known_folders(),
         )
 
     def take_session_mail(self, session_id: str) -> Optional[SessionMail]:
@@ -141,6 +146,9 @@ class LocalStore:
 
     def mark_seen(self, request_id: int) -> None:
         self.db.confirm_injection(request_id, actor=BRIDGE_ACTOR, via="transcript")
+
+    def report_folders(self, checked: List[str], excluded: List[str]) -> None:
+        self.db.set_excluded_folders(checked, excluded, actor=BRIDGE_ACTOR)
 
     def claim_delivery(self, request_id: int) -> bool:
         return self.db.mark_delivered(request_id, actor=BRIDGE_ACTOR, via="tmux")
@@ -187,6 +195,7 @@ class HttpStore:
             busy_agents=list(data.get("busy_agents", [])),
             sessions=list(data.get("sessions", [])),
             uncertain=list(data.get("uncertain", [])),
+            folders=list(data.get("folders", [])),
         )
 
     def take_session_mail(self, session_id: str) -> Optional[SessionMail]:
@@ -212,6 +221,10 @@ class HttpStore:
 
     def mark_seen(self, request_id: int) -> None:
         self._call_ok("POST", f"/api/bridge/requests/{request_id}/seen")
+
+    def report_folders(self, checked: List[str], excluded: List[str]) -> None:
+        resp = self.client.post("/api/bridge/folders", json={"checked": checked, "excluded": excluded})
+        resp.raise_for_status()
 
     def release_injection(self, request_id: int) -> None:
         self._call_ok("DELETE", f"/api/bridge/requests/{request_id}/claim")
