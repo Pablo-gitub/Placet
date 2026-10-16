@@ -359,10 +359,12 @@ export default function SessionView({
       </div>
       {onSend && (
         <Composer
+          key={sessionId}
           session={session}
-          onSend={async (text) => {
+          sessions={sessions}
+          onSend={async (text, mentions) => {
             following.current = true;
-            return onSend(sessionId, text);
+            return mentions?.length ? onSend(sessionId, text, mentions) : onSend(sessionId, text);
           }}
         />
       )}

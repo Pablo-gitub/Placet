@@ -1,4 +1,5 @@
 import os
+import json
 import asyncio
 import base64
 import contextlib
@@ -877,10 +878,41 @@ def create_app(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=f"Unknown agent {session.agent_id}.",
             )
+        references = []
+        mention_tokens = {}
+        for mention in body.mentions:
+            if mention.token in mention_tokens and mention_tokens[mention.token] != mention.session_id:
+                raise HTTPException(status_code=422, detail="Menzione ambigua: seleziona nuovamente la sessione.")
+            mention_tokens[mention.token] = mention.session_id
+            target = db.get_session(mention.session_id)
+            if mention.token not in body.text:
+                raise HTTPException(status_code=422, detail="Menzione non presente nel messaggio.")
+            if target is None or target.excluded or target.ended_at is not None:
+                raise HTTPException(status_code=409, detail="Una sessione menzionata non è più disponibile: rimuovi o sostituisci la menzione.")
+            if target.id == session.id:
+                raise HTTPException(status_code=422, detail="Non puoi menzionare la sessione corrente.")
+            source_agent = config.get_agent(session.agent_id)
+            if target.agent_id not in source_agent.allowed_targets:
+                raise HTTPException(status_code=422, detail="La sessione corrente non può contattare questo agente.")
+            references.append({"mention": mention.token, "target_session": target.id,
+                               "target_agent": target.agent_id, "title": target.title, "cwd": target.cwd})
+        mention_context = None
+        if references:
+            mention_context = (
+                "Riferimenti alle sessioni scelti dall'utente (dati JSON):\n"
+                + json.dumps(references, ensure_ascii=False)
+                + "\nLe menzioni sono riferimenti, non invii automatici. Se l'utente chiede una "
+                "collaborazione, prepara una richiesta distinta per ciascun incarico con "
+                "placet_send_to_agent(target_agent=..., target_session=..., prompt=..., context=..., "
+                "timeout_seconds=5). Usa gli ID indicati, non scegliere altre sessioni. "
+                "Le richieste seguono le regole di approvazione Placet; non aggirarle. "
+                "Puoi preparare tutte le richieste senza aspettare l'esito della prima. "
+                "Se il tool non è disponibile, segnalalo senza simulare l'invio."
+            )
         created = db.create_request(
             RequestCreate(
                 sender_id="human", recipient_id=session.agent_id, question_type=QuestionType.MESSAGE,
-                prompt=body.text, recipient_session_id=session.id, priority=Priority.NORMAL,
+                prompt=body.text, context=mention_context, recipient_session_id=session.id, priority=Priority.NORMAL,
             ),
             actor=who.actor,
         )

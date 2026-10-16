@@ -1124,3 +1124,13 @@ body.chat-open { overflow: hidden; }
 }
 .attachment-viewer-bar span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attachment-viewer-bar .icon-button { color: var(--text-main); }
+
+/* Session references stay inside the composer, including with the mobile keyboard open. */
+.mention-picker { max-height: min(14rem, 25dvh); overflow-y: auto; overscroll-behavior: contain;
+  border: 1px solid var(--border-color); border-radius: 8px; margin-bottom: .5rem; }
+.mention-picker button { display: flex; flex-direction: column; gap: .2rem; width: 100%;
+  text-align: left; padding: .65rem; background: var(--bg-card); color: var(--text-main);
+  border: 0; border-bottom: 1px solid var(--border-color); overflow-wrap: anywhere; }
+.mention-picker button[aria-selected="true"] { background: var(--prov-soft, var(--bg-card-hover)); }
+.mention-picker button:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.mention-picker span { font-size: .75rem; color: var(--text-muted); }

@@ -225,12 +225,12 @@ export default function App() {
   };
 
   /** The user writes to a session (RF-34); true when the message is accepted. */
-  const sendMessage = async (sessionId, text) => {
+  const sendMessage = async (sessionId, text, mentions = []) => {
     try {
       const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify(mentions.length ? { text, mentions } : { text }),
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));

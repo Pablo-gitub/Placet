@@ -212,9 +212,15 @@ class RequestModel(BaseModel):
 BRIDGE_PROVIDERS = ("codex", "antigravity")
 
 
+class SessionMention(BaseModel):
+    session_id: str = Field(min_length=1, max_length=256)
+    token: str = Field(min_length=2, max_length=600)
+
+
 class SessionMessage(BaseModel):
     """A message the user writes to a session (RF-34)."""
     text: str = Field(min_length=1, max_length=20000)
+    mentions: List[SessionMention] = Field(default_factory=list, max_length=20)
 
 
 class SessionModel(BaseModel):

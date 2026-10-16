@@ -161,3 +161,51 @@ async def test_messages_to_closed_bridge_sessions_wait(setup):
 
 def test_message_type_is_listed():
     assert QuestionType("message") == QuestionType.MESSAGE
+
+
+@pytest.mark.asyncio
+async def test_mentions_resolve_sessions_without_creating_agent_requests(setup):
+    app, db = setup
+    # This test allows the source to consult both agents, as the real registry does.
+    app_config_agent = CONFIG.agents["claude"]
+    previous = app_config_agent.allowed_targets[:]
+    app_config_agent.allowed_targets = ["human", "codex", "gemini"]
+    try:
+        await start(app, "claude", "c1", "claude-code")
+        await start(app, "codex", "cx1", "codex")
+        await start(app, "gemini", "ag1", "antigravity")
+        async with human_client(app) as human:
+            response = await human.post("/api/sessions/c1/messages", json={
+                "text": "Chiedi a @Codex la revisione e a @Gemini i test",
+                "mentions": [{"token": "@Codex", "session_id": "cx1"},
+                             {"token": "@Gemini", "session_id": "ag1"}],
+            })
+        assert response.status_code == 201
+        request = db.get_request(response.json()["id"])
+        from backend.app.envelopes import injection
+        for channel in ("hook", "app", "tmux"):
+            message = injection(request, channel=channel)
+            assert '"target_session": "cx1"' in message
+            assert '"target_session": "ag1"' in message
+            assert "placet_send_to_agent" in message
+        assert db.bridge_sessions_with_mail() == []
+        assert request.recipient_session_id == "c1"
+    finally:
+        app_config_agent.allowed_targets = previous
+
+
+@pytest.mark.asyncio
+async def test_invalid_mentions_do_not_enqueue_a_message(setup):
+    app, db = setup
+    await start(app, "claude", "c1", "claude-code")
+    await start(app, "codex", "cx1", "codex")
+    async with human_client(app) as human:
+        for mention, expected in [
+            ({"token": "@missing", "session_id": "cx1"}, 422),
+            ({"token": "@x", "session_id": "unknown"}, 409),
+            ({"token": "@x", "session_id": "c1"}, 422),
+            ({"token": "@x", "session_id": "cx1"}, 422),  # forbidden route
+        ]:
+            response = await human.post("/api/sessions/c1/messages", json={"text": "chiedi a @x", "mentions": [mention]})
+            assert response.status_code == expected
+    assert db.inbox_has_message(db.get_session("c1")) is False

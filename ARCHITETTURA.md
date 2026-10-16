@@ -283,3 +283,21 @@ agents:
 6. **API non documentate:** isolate negli adattatori, con controllo di versione e ripiego (RS-07).
 7. **Limite noto:** gli agenti condividono lo stesso utente Linux e possono leggere i token l'uno dell'altro. I token distinguono gli agenti nell'audit, non li separano.
 8. **Minimo privilegio (RS-04):** gli agenti non hanno chiavi per azioni pubbliche o distruttive; propongono e attendono il placet.
+
+### Menzioni di sessioni dalla chat PWA
+
+Nel composer, `@` apre un selettore delle altre sessioni aperte, ricercabili per
+provider, agente, progetto, titolo e ID. Si possono inserire più riferimenti nello
+stesso messaggio. Ogni menzione conserva il proprio `session_id` oltre al testo
+visibile; cancellando il testo della menzione il riferimento non viene inviato.
+Il messaggio continua a essere diretto alla sessione corrente, non ai menzionati.
+
+`POST /api/sessions/{id}/messages` accetta `mentions: [{session_id, token}]`.
+Il backend verifica la presenza del token, la disponibilità e non esclusione della
+sessione, l'assenza di autoriferimenti e la route consentita dal registro. I
+riferimenti risolti vengono conservati nel contesto della richiesta e inclusi
+nell'iniezione, con le istruzioni per usare `placet_send_to_agent` con l'ID esatto.
+Una menzione non crea richieste automaticamente: è l'agente a formulare gli
+incarichi, ciascuno con il normale flusso di approvazione e consegna Placet. Se il
+tool non è disponibile, l'agente deve segnalarlo. La selezione non garantisce che
+il modello esegua la delega: la conferma effettiva resta la richiesta Placet.
