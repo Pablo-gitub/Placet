@@ -949,6 +949,8 @@ class Database:
                 """
                 SELECT id FROM requests
                 WHERE delivered_at IS NULL AND status != ?
+                  -- the user's own messages: the outcome is in the conversation
+                  AND sender_id != 'human'
                   AND updated_at IS NOT NULL AND updated_at <= ? AND updated_at > ?
                 ORDER BY updated_at ASC
                 LIMIT ?

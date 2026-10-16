@@ -300,3 +300,15 @@ def test_older_requests_do_not_hold_a_queue(tmp_path):
             " recipient_session_id) VALUES ('human', 'codex', 'message', 'x', 'COMPLETED', '2026-01-01', 'cx1')")
     Database(str(path)).init_db()
     assert Database(str(path)).request_in_flight("cx1") is None
+
+
+@pytest.mark.asyncio
+async def test_the_users_messages_have_no_outcome_to_deliver(setup):  # noqa: F811
+    app, db = setup
+    await start(app, "claude", "c1", "claude-code")
+    req_id = (await write(app, "c1")).json()["id"]
+    await take(app)
+    await event(app, "claude", "c1", event="prompt", request_id=req_id)
+    await event(app, "claude", "c1", event="stop", last_message="ok")
+    now = datetime.now(timezone.utc)
+    assert db.list_undelivered_results(now + timedelta(hours=1), now - timedelta(hours=1)) == []
