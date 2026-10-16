@@ -32,7 +32,9 @@ from backend.app.models import (
     Priority,
     QuestionType,
     RequestDecision,
+    SessionMessage,
     SessionModel,
+    BRIDGE_PROVIDERS,
     INBOX_WAIT_SECONDS,
     RESULT_GRACE_SECONDS,
     RESULT_MAX_AGE_SECONDS,
@@ -181,7 +183,10 @@ def create_app(
             alert(req_id, "consegna fallita")
         for req_id in db.stall_executing(execution_timeout):
             notify_change(req_id)
-            alert(req_id, "nessuna risposta, richiesta bloccata")
+            stalled = db.get_request(req_id)
+            # The user's own messages need no reply: the answer is in the chat.
+            if stalled is not None and stalled.question_type != QuestionType.MESSAGE:
+                alert(req_id, "nessuna risposta, richiesta bloccata")
 
     async def expiry_sweeper():
         while True:
@@ -342,6 +347,11 @@ def create_app(
                 detail=f"Route from {req.sender_id} to {req.recipient_id} not allowed by AGENTS.md rules.",
             )
 
+        if req.question_type == QuestionType.MESSAGE:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Only the user writes messages to a session.",
+            )
         if req.recipient_id == "human":
             if req.question_type == QuestionType.PROMPT_REVIEW:
                 # Older clients sent open questions to the human as prompt_review.
@@ -740,6 +750,38 @@ def create_app(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not for the bridge.")
         return db.list_sessions(agent_id=agent_id, include_ended=include_ended)
 
+    @app.post("/api/sessions/{session_id}/messages", response_model=RequestModel,
+              status_code=status.HTTP_201_CREATED)
+    async def write_to_session(
+        session_id: str, body: SessionMessage, who: Principal = Depends(principal)
+    ):
+        """
+        The user writes to a session from the PWA (RF-34). No approval: the
+        message is delivered like an approved prompt, through the session's
+        channel, and the agent's answer is the turn it opens.
+        """
+        require_human(who)
+        session = db.get_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        if session.ended_at is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="La sessione è chiusa.")
+        if config.get_agent(session.agent_id) is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"Unknown agent {session.agent_id}.",
+            )
+        created = db.create_request(
+            RequestCreate(
+                sender_id="human", recipient_id=session.agent_id, question_type=QuestionType.MESSAGE,
+                prompt=body.text, recipient_session_id=session.id, priority=Priority.NORMAL,
+            ),
+            actor=who.actor,
+        )
+        approved = db.update_request_decision(created.id, RequestStatus.APPROVED, actor=who.actor)
+        notify_change(created.id)
+        return approved
+
     @app.put("/api/sessions/{session_id}/pin", response_model=SessionModel)
     async def pin_session(session_id: str, body: PinPayload, who: Principal = Depends(principal)):
         """Adds a session to the PWA home or removes it (RF-41)."""
@@ -841,7 +883,32 @@ def create_app(
             "injections": injections,
             "results": results,
             "busy_agents": sorted(set(db.busy_agents(AGENT_BUSY_TTL_SECONDS)) | set(busy)),
+            # Sessions the bridge wakes itself (Codex, Antigravity) with mail.
+            "sessions": [
+                {"id": s.id, "agent_id": s.agent_id, "provider": s.provider}
+                for s in db.bridge_sessions_with_mail()
+            ],
         }
+
+    @app.post("/api/bridge/sessions/{session_id}/take")
+    async def bridge_take_session_message(session_id: str, who: Principal = Depends(principal)):
+        """
+        Takes the next message for a session the bridge wakes (Codex,
+        Antigravity), with the text to queue into its app; 204 if none.
+        """
+        require_bridge(who)
+        session = db.get_session(session_id)
+        if session is None or session.provider not in BRIDGE_PROVIDERS:
+            raise HTTPException(status_code=404, detail="Session not found")
+        taken = db.take_inbox_message(session, actor=who.actor, via="bridge")
+        if taken is None:
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+        kind, req = taken
+        notify_change(req.id)
+        text = envelopes.outcome(req, channel="app") if kind == "outcome" else envelopes.injection(
+            req, ack_mode="none", channel="app"
+        )
+        return {"kind": kind, "request_id": req.id, "text": text}
 
     @app.post("/api/bridge/requests/{request_id}/claim", response_model=RequestModel)
     async def bridge_claim_injection(request_id: int, who: Principal = Depends(principal)):

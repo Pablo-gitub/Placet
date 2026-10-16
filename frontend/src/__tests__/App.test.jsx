@@ -184,3 +184,36 @@ describe("Placet PWA", () => {
     await waitFor(() => expect(screen.getByTestId("session-row-old")).toHaveTextContent("Chiusa"));
   });
 });
+
+describe("writing from the PWA", () => {
+  beforeEach(() => {
+    window.location.hash = "";
+  });
+
+  it("posts the message to the session", async () => {
+    const created = {
+      id: 50, sender_id: "human", recipient_id: "codex", question_type: "message", prompt: "procedi pure",
+      options: [], status: "APPROVED", created_at: ago(0), recipient_session_id: "cx1",
+    };
+    const fetchMock = setup([[(url, o) => url === "/api/sessions/cx1/messages" && o.method === "POST", created]]);
+    window.location.hash = "#/sessione/cx1";
+    render(<App />);
+    await waitFor(() => expect(screen.getByText("prepara il deploy")).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId("composer-input"), { target: { value: "procedi pure" } });
+    fireEvent.click(screen.getByTestId("composer-send"));
+    await waitFor(() => expect(screen.getByTestId("outgoing-50")).toBeInTheDocument());
+    const call = fetchMock.mock.calls.find(([url]) => url === "/api/sessions/cx1/messages");
+    expect(JSON.parse(call[1].body)).toEqual({ text: "procedi pure" });
+  });
+
+  it("says why a message was refused", async () => {
+    setup([[(url, o) => url === "/api/sessions/cx1/messages" && o.method === "POST",
+      () => Promise.resolve({ ok: false, status: 409, json: () => Promise.resolve({ detail: "La sessione è chiusa." }) })]]);
+    window.location.hash = "#/sessione/cx1";
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId("composer-input")).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId("composer-input"), { target: { value: "x" } });
+    fireEvent.click(screen.getByTestId("composer-send"));
+    await waitFor(() => expect(screen.getByTestId("feedback-banner")).toHaveTextContent("La sessione è chiusa."));
+  });
+});

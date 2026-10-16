@@ -69,6 +69,7 @@ cd ..
 | `PLACET_AGENTS_FILE` | Percorso di `AGENTS.md` (in produzione `/etc/placet/AGENTS.md`) |
 | `PLACET_BRIDGE_TOKEN` | Token del bridge, ammesso solo sugli endpoint `/api/bridge/*` |
 | `PLACET_API_URL` | Per bridge e server MCP: indirizzo del backend (default `http://127.0.0.1:8000`) |
+| `PLACET_CODEX_BIN` | Per il bridge: il `codex` con il comando `queue` (default: quello dell'app, `/usr/lib/chatgpt/resources/codex`, poi quello nel `PATH`) |
 | `PLACET_TRANSCRIPTS_LOCAL` | `1` = il backend legge da sé le conversazioni delle sessioni invece di chiederle al bridge. Solo per lo sviluppo in un unico processo (`run_all.py` la imposta); mai in produzione, dove il backend non ha accesso ai file dell'utente |
 | `PLACET_BASE_URL` | Indirizzo della PWA visto dall'iPhone (es. `https://muletto.tail1234.ts.net`), usato nei link delle notifiche |
 | `PLACET_NTFY_URL`, `PLACET_NTFY_TOPIC`, `PLACET_NTFY_TOKEN` | Server ntfy, topic e token di accesso. Senza URL, topic e `PLACET_BASE_URL` le notifiche sono disattivate |
@@ -168,30 +169,16 @@ Le sessioni Claude Code, sia dell'app desktop (tab Code) sia della CLI, si colle
 - **Risveglio:** un ascoltatore in background (`hooks/placet_waiter.py`, hook `asyncRewake`) resta in attesa sulla casella di posta della sessione e la risveglia quando arriva un esito o un prompt da un altro agente. Mentre la sessione è al lavoro, i messaggi restano in coda.
 - **Visibilità:** l'app desktop non mostra il testo del risveglio, quindi Placet chiede all'agente di riportare per prima cosa chi gli scrive e cosa chiede.
 
-Per attivarlo in tutte le sessioni, aggiungi a `~/.claude/settings.json`:
-```json
-{
-  "hooks": {
-    "SessionStart": [{"hooks": [
-      {"type": "command", "command": "python3 /opt/placet/hooks/claude_code.py --agent claude", "timeout": 5},
-      {"type": "command", "command": "python3 /opt/placet/hooks/placet_waiter.py --agent claude", "async": true, "asyncRewake": true}
-    ]}],
-    "UserPromptSubmit": [{"hooks": [
-      {"type": "command", "command": "python3 /opt/placet/hooks/claude_code.py --agent claude", "timeout": 5}
-    ]}],
-    "PostToolUse": [{"matcher": "mcp__placet__.*", "hooks": [
-      {"type": "command", "command": "python3 /opt/placet/hooks/claude_code.py --agent claude", "timeout": 5}
-    ]}],
-    "Stop": [{"hooks": [
-      {"type": "command", "command": "python3 /opt/placet/hooks/claude_code.py --agent claude", "timeout": 5},
-      {"type": "command", "command": "python3 /opt/placet/hooks/placet_waiter.py --agent claude", "async": true, "asyncRewake": true}
-    ]}],
-    "SessionEnd": [{"hooks": [
-      {"type": "command", "command": "python3 /opt/placet/hooks/claude_code.py --agent claude", "timeout": 5}
-    ]}]
-  }
-}
+Per attivarlo in tutte le sessioni di tutti i provider (Claude, Codex, Antigravity) usa l'installatore. Tocca solo le voci di Placet, fa una copia di ogni file prima di cambiarlo e si può rilanciare senza effetti:
+```bash
+python3 /opt/placet/hooks/install.py
 ```
+- **Claude Code** (`~/.claude/settings.json`): registrazione, stato dei turni, risposta implicita e il waiter che sveglia la sessione.
+- **Codex** (`~/.codex/hooks.json`): stesso script (`claude_code.py --provider codex`), perché Codex passa agli hook gli stessi campi di Claude. Codex non ha hook asincroni: le sessioni le sveglia il bridge con `codex queue`. Gli hook vanno approvati una volta: apri `codex` in un terminale e accettali con `/hooks`.
+- **Antigravity 2.0** (`~/.gemini/config/hooks.json`): `antigravity.py`. Alla fine del turno l'ultima risposta viene letta dal file della conversazione. Le sessioni le sveglia il bridge con l'API interna dell'app.
+
+Con `--dry-run` mostra cosa cambierebbe, con `--uninstall` toglie solo le voci di Placet, con `--providers claude,codex` sceglie i provider.
+
 Servono anche gli strumenti MCP di Placet in tutte le sessioni:
 ```bash
 claude mcp add placet --scope user -e PYTHONPATH=/opt/placet -e PLACET_API_URL=http://127.0.0.1:8000 -e PLACET_AGENT_ID=claude -e PLACET_API_TOKEN=<PLACET_TOKEN_CLAUDE> -- /opt/placet/.venv/bin/python -m mcp_server.server
@@ -199,6 +186,13 @@ claude mcp add placet --scope user -e PYTHONPATH=/opt/placet -e PLACET_API_URL=h
 Per tenere fuori da Placet le sessioni di un progetto, crea un file vuoto `.placet-off` nella sua cartella.
 
 Il canale tmux (sotto) resta disponibile, per le CLI senza hook e per le sessioni tmux senza ascoltatore attivo.
+
+**Scrivere a una sessione dal telefono.** Nella conversazione di una sessione, in fondo, c'è il campo per scriverle. Il messaggio non chiede approvazione. Arriva con il canale della sessione:
+- **Claude:** il waiter;
+- **Codex:** `codex queue`, con il `codex` incluso nell'app (dalla 0.159; altrimenti indica il percorso con `PLACET_CODEX_BIN`);
+- **Antigravity:** l'API del language server dell'app. È un'API non documentata: se un aggiornamento la cambia, il bridge lo scrive nel log con la versione dell'app e il messaggio resta in attesa.
+
+Se la sessione sta lavorando, il messaggio aspetta la fine del turno. Nella conversazione compare come tuo, con "dal telefono".
 
 ### 1b. Hook di Claude Code: stato, conferma di ricezione, risposta implicita
 

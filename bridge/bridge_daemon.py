@@ -1,5 +1,6 @@
 import time
 import logging
+import subprocess
 import threading
 from typing import List, Optional, Set
 
@@ -7,6 +8,7 @@ from backend.app.config import PlacetConfig
 from backend.app.database import Database
 from backend.app import envelopes
 from backend.app.models import RequestModel
+from bridge.channels import ChannelError, default_channels
 from bridge.stores import BridgeStore, LocalStore, Work
 from bridge.tmux_controller import SessionSpec, TmuxController
 from bridge.transcripts import TranscriptError, read_transcript
@@ -26,11 +28,14 @@ class BridgeDaemon:
         config: Optional[PlacetConfig] = None,
         tmux: Optional[TmuxController] = None,
         store: Optional[BridgeStore] = None,
+        channels: Optional[dict] = None,
     ):
         # Direct database access (db/config) is the single-process dev mode;
         # in production pass an HttpStore.
         self.store = store or LocalStore(db, config)
         self.tmux = tmux or TmuxController()
+        # provider -> channel that queues a message into the provider's app
+        self.channels = channels if channels is not None else default_channels()
 
     def format_injection_envelope(self, req: RequestModel, ack_mode: str = "mcp") -> str:
         return envelopes.injection(req, ack_mode=ack_mode, channel="tmux")
@@ -134,6 +139,36 @@ class BridgeDaemon:
             processed += 1
         return processed
 
+    def process_session_mail(self, sessions: List[dict]) -> int:
+        """
+        Wakes Codex and Antigravity sessions in their app (RF-24): takes the
+        next message of each session and queues it into the conversation.
+        An injection counts as received once queued (the app shows it like a
+        user message); if queuing fails the message goes back to wait.
+        """
+        delivered = 0
+        for target in sessions:
+            channel = self.channels.get(target.get("provider"))
+            if channel is None:
+                continue
+            mail = self.store.take_session_mail(target["id"])
+            if mail is None:
+                continue
+            try:
+                channel.send(target["id"], mail.text)
+            except (ChannelError, OSError, subprocess.SubprocessError) as e:
+                logger.error(f"Could not wake session {target['id']} ({target.get('provider')}): {e}")
+                if mail.kind == "injection":
+                    self.store.release_injection(mail.request_id)
+                else:
+                    self.store.release_delivery(mail.request_id)
+                continue
+            if mail.kind == "injection":
+                self.store.confirm_injection(mail.request_id)
+            logger.info(f"Queued request #{mail.request_id} ({mail.kind}) into session {target['id']}.")
+            delivered += 1
+        return delivered
+
     def run_loop_step(self) -> int:
         # At most one injection per session per tick, outcomes first: they
         # unblock work that is already waiting.
@@ -141,7 +176,8 @@ class BridgeDaemon:
         busy_sessions: Set[str] = set()
         busy_agents = set(work.busy_agents)
         delivered = self.process_pending_results(busy_sessions, work.results, busy_agents)
-        return delivered + self.process_pending_injections(busy_sessions, work.injections, busy_agents)
+        delivered += self.process_pending_injections(busy_sessions, work.injections, busy_agents)
+        return delivered + self.process_session_mail(work.sessions)
 
     # --- Jobs someone is waiting for (conversation pages) ---------------------
 

@@ -2,14 +2,16 @@
 Texts Placet writes into an agent session: a prompt from another agent
 (injection) or the outcome of a request the session made (outcome).
 
-Two channels deliver them:
+Three channels deliver them:
 - tmux: typed into the terminal, so the user sees the text as a prompt;
 - hook: handed to Claude Code by a background hook that wakes the session.
   The app does not show that text (it reaches the model as a system
   reminder framed as a "Stop hook blocking error"), so the agent is asked to
-  quote it first: the user must see why the agent started working.
+  quote it first: the user must see why the agent started working;
+- app: queued by the bridge into the provider's app (Codex, Antigravity),
+  where it appears as a user message.
 """
-from backend.app.models import RequestModel, RequestStatus
+from backend.app.models import QuestionType, RequestModel, RequestStatus
 
 OUTCOME_NOTES = {
     RequestStatus.DELIVERY_FAILED: "Il prompt non è stato confermato dall'agente destinatario dopo più tentativi.",
@@ -24,7 +26,17 @@ HOOK_PREFACE = (
 )
 
 
+USER_MESSAGE_NOTE = (
+    "È un messaggio che l'utente ti scrive dal telefono tramite Placet: rispondigli "
+    "direttamente, come a un suo messaggio (non serve placet_reply)."
+)
+
+
 def injection(req: RequestModel, ack_mode: str = "mcp", channel: str = "tmux") -> str:
+    if req.question_type == QuestionType.MESSAGE:
+        # The user's own message (RF-34): no reply tool, the answer is the turn.
+        text = f"[Placet Request #{req.id} dall'utente]: {req.prompt}\n{USER_MESSAGE_NOTE}"
+        return f"{text}\n{HOOK_PREFACE}" if channel == "hook" else text
     # Only the prompt: the context explains the request to the human and is
     # not part of what the recipient receives.
     prompt_to_send = req.edited_prompt if req.edited_prompt is not None else req.prompt

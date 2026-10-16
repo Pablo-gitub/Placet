@@ -59,18 +59,18 @@ Tre flussi:
 - *(da implementare)* `send(target, type_id, prompt)` e l'elenco delle relazioni della sessione (RFC-08); attesa minima lato server per le domande all'umano (RF-09).
 
 ### 2.3 Hook dei provider (`hooks/`)
-Trasformano gli eventi del client in fatti per Placet (`POST /api/sessions/{id}/events`: `start`, `prompt`, `tool`, `stop`, `end`). Non stampano nulla e non bloccano mai il client.
+Trasformano gli eventi del client in fatti per Placet (`POST /api/sessions/{id}/events`: `start`, `prompt`, `tool`, `stop`, `end`). Non bloccano mai il client. Si installano per tutte le sessioni con `hooks/install.py`, che tocca solo le voci di Placet (RF-42).
 
 | Provider | File | Eventi usati | Note |
 |---|---|---|---|
 | Claude Code (app e CLI) | `~/.claude/settings.json` (globale) | SessionStart, UserPromptSubmit, PostToolUse `mcp__placet__.*`, Stop, SessionEnd | Stop contiene `last_assistant_message`. Hook asincroni con `asyncRewake` (waiter) |
-| Codex | `<progetto>/.codex/hooks.json` | SessionStart, UserPromptSubmit, PostToolUse, Stop | Solo sincroni ("async hooks are not supported yet"); gli hook di progetto vanno approvati con `/hooks` *(da implementare)* |
-| Antigravity 2.0 | `<progetto>/.agents/hooks.json` o `~/.gemini/config/hooks.json` | SessionStart, PreInvocation, PostToolUse, PostInvocation, Stop | JSON camelCase con `conversationId`, `transcriptPath`, `modelName`; solo sincroni; Stop senza ultima risposta (si legge dal transcript) *(da implementare)* |
+| Codex | `~/.codex/hooks.json` | SessionStart, UserPromptSubmit, PostToolUse, Stop, SessionEnd | Stessi campi di Claude: stesso script (`claude_code.py --provider codex`). Solo sincroni ("async hooks are not supported yet"); vanno approvati una volta con `/hooks` |
+| Antigravity 2.0 | `~/.gemini/config/hooks.json` | SessionStart, PreInvocation (la prima del turno = inizio), Stop | `antigravity.py`. JSON camelCase con `conversationId`, `transcriptPath`, `modelName`; solo sincroni, devono stampare `{}`; lo Stop non ha l'ultima risposta: la legge dal file della conversazione |
 
 ### 2.4 Bridge (`bridge/`)
 - Gira come **servizio utente systemd** dell'utente proprietario delle sessioni; parla col backend solo via `/api/bridge/*` con un token che non permette di decidere né leggere richieste.
 - Oggi: consegna nelle sessioni tmux (`send-keys` dopo verifica di inattività: marcatori di occupato, `idle_patterns`, schermo stabile, testo attenuato scartato, nessun input recente).
-- *(da implementare)* diventa un insieme di **adattatori per provider**, ciascuno con quattro capacità:
+- **Adattatori per provider** (`bridge/channels.py`, `bridge/transcripts.py`). Per Codex e Antigravity il backend elenca nel lavoro del bridge le sessioni con un messaggio in attesa; il bridge lo prende (`POST /api/bridge/sessions/{id}/take`), lo accoda nell'app e lo conferma (`…/injected`), oppure lo restituisce se l'accodamento fallisce. Capacità per provider:
 
 | Capacità | Claude | Codex | Antigravity 2.0 |
 |---|---|---|---|
@@ -87,7 +87,8 @@ Trasformano gli eventi del client in fatti per Placet (`POST /api/sessions/{id}/
 - **Home** (`Home.jsx`): domande in corso, poi le sessioni aggiunte ordinate per attività (`activity_at`: inizio o fine dell'ultimo turno, non i controlli del waiter), con provider, stato e numero di domande. "Aggiungi / vedi tutte" (`AddSessionsDialog.jsx`): un provider alla volta, spunta = sessione seguita (`PUT /api/sessions/{id}/pin`).
 - **Conversazione** (`SessionView.jsx`, `useTranscript.js`): pagine da `/api/sessions/{id}/transcript`; si apre in fondo, scorrendo in alto carica le precedenti mantenendo la posizione; a ogni cambio di turno (`session_update` via SSE) chiede solo le voci nuove (`after`). Le azioni consecutive diventano un gruppo richiudibile; le domande aperte della sessione stanno in fondo alla conversazione.
 - **Storico** (`History.jsx`) con la timeline di ogni richiesta.
-- *(da implementare)*: scrittura alle sessioni (blocco 3), barra dei consumi, grafo ed editor dei progetti.
+- **Scrivere a una sessione** (`Composer.jsx`): il messaggio parte con `POST /api/sessions/{id}/messages`; finché non è consegnato resta in fondo come "In attesa" / "In consegna" (o "Non consegnato").
+- *(da implementare)*: invio "Subito", barra dei consumi, grafo ed editor dei progetti.
 
 ---
 
@@ -101,13 +102,13 @@ Trasformano gli eventi del client in fatti per Placet (`POST /api/sessions/{id}/
 3. Quando arriva un messaggio lo stampa su stderr ed esce con codice 2: Claude Code sveglia la sessione con quel testo (nell'app compare come "Stop hook feedback").
 4. *(da implementare)* Il waiter può morire durante un'attesa (osservato): il bridge controlla `waiter_seen_at` e, se manca, la sessione risulta irraggiungibile; serve un modo per ripristinarlo (es. controllo all'hook UserPromptSubmit, o waiter gestito dal bridge).
 
-### 3.2 Codex — `codex queue` *(da implementare)*
+### 3.2 Codex — `codex queue`
 - Il bridge consegna con il `codex` incluso nell'app desktop (`/usr/lib/chatgpt/resources/codex`); il messaggio entra come messaggio utente e avvia un turno, visibile in tempo reale nell'app.
 - La risposta: `placet_reply` dell'agente, oppure l'ultimo `task_complete.last_agent_message` del rollout (risposta implicita).
 - Nessun processo in attesa per sessione.
 
-### 3.3 Antigravity 2.0 — API del language server *(da implementare)*
-- Indirizzo e token: processo `language_server` dell'app (porta HTTP locale, `--csrf_token` nella riga di comando).
+### 3.3 Antigravity 2.0 — API del language server
+- Indirizzo e token: processo `language_server` dell'app (`--csrf_token` e `--override_ide_version` nella riga di comando, porte lette da `/proc`); il server giusto è quello che restituisce la conversazione, e viene ricordato.
 - `POST /exa.language_server_pb.LanguageServerService/SendUserCascadeMessage` (Connect, JSON, header `x-codeium-csrf-token`) con `cascadeId`, `items: [{text}]`, `deliveryStrategy: MESSAGE_DELIVERY_STRATEGY_WHEN_IDLE` e **`cascadeConfig`** copiata dall'ultimo `USER_INPUT` della conversazione (`GetCascadeTrajectory`). Senza `cascadeConfig` il turno fallisce.
 - API non documentata: adattatore isolato, controllo di versione dell'app, ripiego su `agy` in tmux (RS-07).
 
@@ -118,6 +119,7 @@ Trasformano gli eventi del client in fatti per Placet (`POST /api/sessions/{id}/
 ### 3.5 Preambolo della consegna
 - L'agente destinatario riceve solo il prompt, preceduto da `[Placet Request #N da <mittente>]`.
 - Nel canale hook di Claude il preambolo chiede all'agente di riportare quello che ha ricevuto, perché l'app desktop non mostra il testo del risveglio.
+- I messaggi dell'utente dalla PWA (`question_type: message`) arrivano come `[Placet Request #N dall'utente]: <testo>` con una nota: niente `placet_reply`, la risposta è il turno stesso. Nella PWA appaiono come messaggi dell'utente.
 - *(da implementare)* l'origine deve essere verificabile (l'agente può controllare la richiesta con uno strumento Placet): una sessione che riceve un prompt inatteso tende, giustamente, a trattarlo come prompt injection.
 
 ---

@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Tupl
 
 from pathlib import Path
 from backend.app.models import (
+    BRIDGE_PROVIDERS,
     OPEN_STATUSES,
     RequestCreate,
     RequestEvent,
@@ -716,10 +717,12 @@ class Database:
     @staticmethod
     def _row_to_session(row: sqlite3.Row, waiter_ttl_seconds: float) -> SessionModel:
         waiter = _ts(row["waiter_seen_at"])
-        reachable = (
-            row["ended_at"] is None
-            and waiter is not None
-            and (datetime.now(timezone.utc) - waiter).total_seconds() < waiter_ttl_seconds
+        # A session can be woken when its waiter listens (Claude Code), or
+        # when the bridge wakes it from outside (Codex, Antigravity).
+        reachable = row["ended_at"] is None and (
+            row["provider"] in BRIDGE_PROVIDERS
+            or (waiter is not None
+                and (datetime.now(timezone.utc) - waiter).total_seconds() < waiter_ttl_seconds)
         )
         return SessionModel(
             id=row["id"],
@@ -876,45 +879,77 @@ class Database:
 
     # --- Session inbox (hook delivery channel) -------------------------------
 
-    def take_inbox_message(self, session: SessionModel) -> Optional[Tuple[str, RequestModel]]:
+    _OUTCOMES_SQL = """
+        SELECT id FROM requests
+        WHERE sender_session_id = ? AND delivered_at IS NULL AND status != ?
+        ORDER BY updated_at ASC
+    """
+    _INJECTIONS_SQL = """
+        SELECT id FROM requests
+        WHERE status = ? AND recipient_id = ?
+          AND (recipient_session_id = ? OR recipient_session_id IS NULL)
+          -- a session never receives its own request (agent -> same agent)
+          AND (sender_session_id IS NULL OR sender_session_id != ?)
+        ORDER BY (recipient_session_id IS NULL) ASC, id ASC
+    """
+
+    def inbox_has_message(self, session: SessionModel) -> bool:
+        """Whether take_inbox_message would hand something out now (read only)."""
+        if session.state != "idle" or session.ended_at is not None:
+            return False
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(self._OUTCOMES_SQL, (session.id, RequestStatus.PENDING.value))
+            outcome_ids = [r["id"] for r in cursor.fetchall()]
+            cursor.execute(
+                self._INJECTIONS_SQL,
+                (RequestStatus.APPROVED.value, session.agent_id, session.id, session.id),
+            )
+            if cursor.fetchone() is not None:
+                return True
+        return any(
+            (req := self.get_request(i)) is not None and is_settled(req) for i in outcome_ids
+        )
+
+    def bridge_sessions_with_mail(self) -> List[SessionModel]:
+        """Open sessions the bridge wakes (Codex, Antigravity) with a message waiting."""
+        placeholders = ", ".join("?" for _ in BRIDGE_PROVIDERS)
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"SELECT * FROM sessions WHERE ended_at IS NULL AND provider IN ({placeholders})",
+                BRIDGE_PROVIDERS,
+            )
+            sessions = [self._row_to_session(r, WAITER_TTL_SECONDS) for r in cursor.fetchall()]
+        return [s for s in sessions if self.inbox_has_message(s)]
+
+    def take_inbox_message(
+        self, session: SessionModel, actor: Optional[str] = None, via: str = "hook"
+    ) -> Optional[Tuple[str, RequestModel]]:
         """
         Atomically takes the next message for an idle session: first an
         outcome of a request it made, then a prompt addressed to it (or to its
         agent, if not addressed to a specific session). Returns
-        ("outcome" | "injection", request) or None.
+        ("outcome" | "injection", request) or None. `actor` and `via` say who
+        takes it for the session (its waiter, or the bridge).
         """
         if session.state != "idle" or session.ended_at is not None:
             return None
+        actor = actor or f"agent:{session.agent_id}"
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT id FROM requests
-                WHERE sender_session_id = ? AND delivered_at IS NULL AND status != ?
-                ORDER BY updated_at ASC
-                """,
-                (session.id, RequestStatus.PENDING.value),
-            )
+            cursor.execute(self._OUTCOMES_SQL, (session.id, RequestStatus.PENDING.value))
             outcome_ids = [r["id"] for r in cursor.fetchall()]
         for req_id in outcome_ids:
             req = self.get_request(req_id)
-            if req is not None and is_settled(req) and self.mark_delivered(
-                req_id, actor=f"agent:{session.agent_id}", via="hook"
-            ):
+            if req is not None and is_settled(req) and self.mark_delivered(req_id, actor=actor, via=via):
                 return "outcome", self.get_request(req_id)
 
         now = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                """
-                SELECT id FROM requests
-                WHERE status = ? AND recipient_id = ?
-                  AND (recipient_session_id = ? OR recipient_session_id IS NULL)
-                  -- a session never receives its own request (agent -> same agent)
-                  AND (sender_session_id IS NULL OR sender_session_id != ?)
-                ORDER BY (recipient_session_id IS NULL) ASC, id ASC
-                """,
+                self._INJECTIONS_SQL,
                 (RequestStatus.APPROVED.value, session.agent_id, session.id, session.id),
             )
             candidates = [r["id"] for r in cursor.fetchall()]
@@ -930,8 +965,8 @@ class Database:
                     continue
                 cursor.execute("SELECT delivery_attempts FROM requests WHERE id = ?", (req_id,))
                 attempt = cursor.fetchone()["delivery_attempts"]
-                self._log(cursor, req_id, f"agent:{session.agent_id}", "injection_claimed",
-                          {"attempt": attempt, "via": "hook", "session": session.id}, at=now)
+                self._log(cursor, req_id, actor, "injection_claimed",
+                          {"attempt": attempt, "via": via, "session": session.id}, at=now)
                 break
             else:
                 return None

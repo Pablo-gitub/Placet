@@ -1,4 +1,5 @@
 import React, { useLayoutEffect, useRef, useState } from "react";
+import Composer from "./Composer";
 import {
   ArrowLeft,
   Bot,
@@ -99,7 +100,10 @@ function ChatEntry({ entry }) {
       return (
         <div className="msg msg-user" data-testid="chat-user">
           <div className="bubble">{entry.text}</div>
-          <time>{timeOf(entry.at)}</time>
+          <time>
+            {timeOf(entry.at)}
+            {entry.via === "placet" && " · dal telefono"}
+          </time>
         </div>
       );
     case "assistant":
@@ -135,6 +139,24 @@ function ChatEntry({ entry }) {
 }
 
 /** A session's conversation with its open questions at the bottom (RF-30, RF-33). */
+// The user's messages not yet in the conversation: waiting, or failed.
+const OUTGOING_STATES = {
+  APPROVED: "In attesa che la sessione sia libera",
+  DELIVERING: "In consegna…",
+  DELIVERY_FAILED: "Non consegnato",
+  EXPIRED: "Non consegnato: scaduto",
+};
+
+function Outgoing({ req }) {
+  const failed = req.status === "DELIVERY_FAILED" || req.status === "EXPIRED";
+  return (
+    <div className={`msg msg-user outgoing${failed ? " failed" : ""}`} data-testid={`outgoing-${req.id}`}>
+      <div className="bubble">{req.prompt}</div>
+      <time>{OUTGOING_STATES[req.status]}</time>
+    </div>
+  );
+}
+
 export default function SessionView({
   sessionId,
   session,
@@ -142,6 +164,7 @@ export default function SessionView({
   sessions,
   onBack,
   onDecide,
+  onSend,
   submittingId,
   focusId,
 }) {
@@ -154,6 +177,9 @@ export default function SessionView({
   const following = useRef(true);
   const anchor = useRef(null);
   const questions = requests.filter((r) => r.status === "PENDING" && r.sender_session_id === sessionId);
+  const outgoing = requests
+    .filter((r) => r.question_type === "message" && r.recipient_session_id === sessionId && r.status in OUTGOING_STATES)
+    .sort((a, b) => a.id - b.id);
 
   // Keep the view where the reader is: at the bottom while following, on the
   // same message after older ones are added above.
@@ -166,7 +192,7 @@ export default function SessionView({
     } else if (following.current) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [entries, questions.length]);
+  }, [entries, questions.length, outgoing.length]);
 
   const onScroll = () => {
     const el = scrollRef.current;
@@ -241,6 +267,9 @@ export default function SessionView({
             )}
           </>
         )}
+        {outgoing.map((req) => (
+          <Outgoing key={req.id} req={req} />
+        ))}
         {questions.map((req) => (
           <RequestCard
             key={req.id}
@@ -252,6 +281,15 @@ export default function SessionView({
           />
         ))}
       </div>
+      {onSend && (
+        <Composer
+          session={session}
+          onSend={async (text) => {
+            following.current = true;
+            return onSend(sessionId, text);
+          }}
+        />
+      )}
     </div>
   );
 }

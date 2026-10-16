@@ -9,13 +9,18 @@ from typing import Optional, Tuple
 CONFIG_DIR = Path.home() / ".config" / "placet"
 
 
-def agent_id(argv) -> str:
-    """--agent <id> on the command line, else PLACET_HOOK_AGENT."""
-    if "--agent" in argv:
-        i = argv.index("--agent")
+def option(argv, name: str) -> Optional[str]:
+    """The value after `name` on the command line, if any."""
+    if name in argv:
+        i = argv.index(name)
         if i + 1 < len(argv):
             return argv[i + 1]
-    return os.environ.get("PLACET_HOOK_AGENT", "")
+    return None
+
+
+def agent_id(argv) -> str:
+    """--agent <id> on the command line, else PLACET_HOOK_AGENT."""
+    return option(argv, "--agent") or os.environ.get("PLACET_HOOK_AGENT", "")
 
 
 def token_for(agent: str) -> str:

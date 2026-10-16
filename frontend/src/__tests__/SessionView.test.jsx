@@ -119,3 +119,63 @@ describe("SessionView", () => {
     expect(onDecide).toHaveBeenCalledWith(9, { status: "APPROVED", selected_options: [] });
   });
 });
+
+describe("writing to a session", () => {
+  const message = (id, status) => ({
+    id, sender_id: "human", recipient_id: "claude", question_type: "message", prompt: `messaggio ${id}`,
+    options: [], status, created_at: "2026-10-16T10:00:00Z", recipient_session_id: "s1",
+  });
+
+  it("sends the text and shows the messages still on their way", async () => {
+    mockFetch([[transcriptOf("s1"), latest]]);
+    const onSend = vi.fn(() => Promise.resolve(true));
+    renderView({
+      onSend,
+      requests: [message(1, "APPROVED"), message(2, "DELIVERING"), message(3, "EXECUTING"),
+        message(4, "DELIVERY_FAILED"), { ...message(5, "APPROVED"), recipient_session_id: "s2" }],
+    });
+    await waitFor(() => expect(screen.getByText("ciao")).toBeInTheDocument());
+    expect(screen.getByTestId("outgoing-1")).toHaveTextContent("In attesa che la sessione sia libera");
+    expect(screen.getByTestId("outgoing-2")).toHaveTextContent("In consegna");
+    expect(screen.queryByTestId("outgoing-3")).toBeNull(); // delivered: it is in the conversation
+    expect(screen.getByTestId("outgoing-4")).toHaveClass("failed");
+    expect(screen.queryByTestId("outgoing-5")).toBeNull(); // another session
+
+    const input = screen.getByTestId("composer-input");
+    expect(screen.getByTestId("composer-send")).toBeDisabled();
+    fireEvent.change(input, { target: { value: "  a che punto sei?  " } });
+    fireEvent.click(screen.getByTestId("composer-send"));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("s1", "a che punto sei?"));
+    await waitFor(() => expect(input.value).toBe(""));
+  });
+
+  it("keeps the text when sending fails", async () => {
+    mockFetch([[transcriptOf("s1"), latest]]);
+    renderView({ onSend: () => Promise.resolve(false) });
+    const input = screen.getByTestId("composer-input");
+    fireEvent.change(input, { target: { value: "importante" } });
+    fireEvent.click(screen.getByTestId("composer-send"));
+    await waitFor(() => expect(screen.getByTestId("composer-send")).not.toBeDisabled());
+    expect(input.value).toBe("importante");
+  });
+
+  it("explains when the session is closed, busy or unreachable", async () => {
+    mockFetch([[transcriptOf("s1"), latest]]);
+    const { rerender } = renderView({ onSend: vi.fn(), session: { ...session, ended_at: "2026-10-16T11:00:00Z" } });
+    expect(screen.getByTestId("composer-input")).toBeDisabled();
+    expect(screen.getByTestId("composer")).toHaveTextContent("chiusa");
+    rerender(<SessionView sessionId="s1" session={{ ...session, reachable: false }} requests={[]} sessions={[]}
+      onBack={vi.fn()} onDecide={vi.fn()} onSend={vi.fn()} />);
+    expect(screen.getByTestId("composer-unreachable")).toBeInTheDocument();
+    rerender(<SessionView sessionId="s1" session={{ ...session, state: "busy" }} requests={[]} sessions={[]}
+      onBack={vi.fn()} onDecide={vi.fn()} onSend={vi.fn()} />);
+    expect(screen.getByTestId("composer")).toHaveTextContent("a fine turno");
+  });
+
+  it("marks the user's messages that came through Placet", async () => {
+    mockFetch([[transcriptOf("s1"), { ...latest, messages: [
+      { role: "user", text: "dal telefono!", at: null, cursor: "1:0", via: "placet" }] }]]);
+    renderView();
+    await waitFor(() => expect(screen.getByTestId("chat-user")).toHaveTextContent("dal telefono"));
+  });
+});

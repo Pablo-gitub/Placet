@@ -79,11 +79,11 @@ Placet è un **punto unico di supervisione umana e bus di cooperazione per agent
 | ID | Requisito | Stato |
 |---|---|---|
 | RF-20 | Long-polling con fallback asincrono: lo strumento attende; se scade restituisce `PENDING` e `request_id` | [Implementato] |
-| RF-21 | **Chi aspetta una risposta viene sempre svegliato** quando arriva, con il canale del suo provider (RF-24). Non si conta sul fatto che l'agente stia ancora aspettando | [Deciso] — generalizza RF-22 |
-| RF-22 | Al completamento il risultato viene consegnato alla sessione chiamante | [Implementato] per Claude; [Deciso] per Codex e Antigravity |
+| RF-21 | **Chi aspetta una risposta viene sempre svegliato** quando arriva, con il canale del suo provider (RF-24). Non si conta sul fatto che l'agente stia ancora aspettando | [Implementato] per Claude (waiter), Codex e Antigravity (bridge); — generalizza RF-22 |
+| RF-22 | Al completamento il risultato viene consegnato alla sessione chiamante | [Implementato] |
 | RF-23 | Le richieste sopravvivono a riavvii di agenti, bridge e backend (SQLite) | [Implementato] |
-| RF-24 | **Canale per provider**: Claude con hook + waiter asincrono; Codex con `codex queue`; Antigravity con l'API del suo language server; CLI in tmux con `send-keys` come ripiego. Dettagli in ARCHITETTURA §3 | [Deciso] |
-| RF-25 | La consegna è confermata (ack) e la risposta raccolta anche senza `placet_reply` (risposta implicita dall'ultimo messaggio del turno) | [Implementato] per Claude; [Deciso] per gli altri |
+| RF-24 | **Canale per provider**: Claude con hook + waiter asincrono; Codex con `codex queue`; Antigravity con l'API del suo language server; CLI in tmux con `send-keys` come ripiego. Dettagli in ARCHITETTURA §3 | [Implementato] |
+| RF-25 | La consegna è confermata (ack) e la risposta raccolta anche senza `placet_reply` (risposta implicita dall'ultimo messaggio del turno) | [Implementato] (Claude e Codex dallo Stop hook, Antigravity dal file della conversazione) |
 | RF-26 | Il processo che consegna non dipende da una sessione aperta: gira nel bridge come servizio, e un waiter morto viene rilevato e sostituito | [Deciso] |
 | RF-27 | Placet si accorge se una sessione **non ha il server MCP collegato** e lo segnala (sessione e PWA) | [Deciso] |
 
@@ -94,8 +94,8 @@ Placet è un **punto unico di supervisione umana e bus di cooperazione per agent
 | RF-31 | Lettura **a richiesta tramite il bridge**: nessuna copia delle conversazioni sul backend | [Implementato] (Claude, Codex, Antigravity) |
 | RF-32 | **Privacy**: si mostrano i messaggi dell'utente e le risposte testuali dell'agente; le azioni diventano una riga ("ha eseguito `cmd`"); risultati dei tool e ragionamento interno non si mostrano. Le compattazioni appaiono come separatore | [Implementato] |
 | RF-33 | Si risponde alla domanda **dentro la conversazione** | [Implementato] |
-| RF-34 | Si può **scrivere a una sessione** anche senza domande in corso; il messaggio la risveglia come se lo avessi scritto al PC, e nella PWA appare come messaggio tuo | [Deciso] |
-| RF-35 | Se la sessione sta lavorando: **In coda** (a fine turno) o **Subito** (inserito nel turno in corso dopo la prossima azione). Un'impostazione dà il default, modificabile per ogni messaggio | [Deciso] |
+| RF-34 | Si può **scrivere a una sessione** anche senza domande in corso; il messaggio la risveglia come se lo avessi scritto al PC, e nella PWA appare come messaggio tuo | [Implementato] |
+| RF-35 | Se la sessione sta lavorando: **In coda** (a fine turno) o **Subito** (inserito nel turno in corso dopo la prossima azione). Un'impostazione dà il default, modificabile per ogni messaggio | [Implementato] "In coda"; "Subito" [Deciso] (blocco 4) |
 | RF-36 | Dal telefono si possono **lanciare skill** (verificato anche sul desktop). Digitando `/` compaiono le skill e i comandi del provider, con la skill evidenziata | [Deciso] (elenco con `/` utile, non indispensabile) |
 | RF-37 | PC spento: avviso "PC non raggiungibile" | [Implementato] ("Il PC non risponde", con Riprova) |
 
@@ -105,7 +105,7 @@ Placet è un **punto unico di supervisione umana e bus di cooperazione per agent
 | RF-10 | Interfaccia come **PWA installata sulla Home dell'iPhone**, servita su Tailscale | [Implementato] |
 | RF-40 | **Home**: in cima le domande in corso; sotto le **sessioni aggiunte**, ordinate per attività (chi ha appena finito il turno in cima) | [Implementato] |
 | RF-41 | **Aggiungi / vedi tutte**: scegli il provider, vedi le sue sessioni aperte, spunti quelle da aggiungere; le altre non compaiono in home | [Implementato] per sessione; per nodo con la fase 3 |
-| RF-42 | Anche le sessioni che **non hanno mai usato Placet** si registrano, grazie agli hook installati globalmente | [Deciso] |
+| RF-42 | Anche le sessioni che **non hanno mai usato Placet** si registrano, grazie agli hook installati globalmente | [Implementato] (`hooks/install.py`) |
 | RF-43 | Due tipi di notifica: **domanda** (priorità alta, suono) e **turno finito** (silenziosa, solo per le sessioni aggiunte). Titolo con provider e nome della sessione; il tocco apre la sessione | [Deciso] |
 | RF-11 | Notifiche ntfy self-hosted in tailnet, con solo l'azione "Apri": si decide dalla PWA vedendo il testo completo | [Implementato] nel codice; ntfy da installare |
 | RF-12 | Nella PWA si può modificare il prompt prima di approvarlo; il mittente viene informato della modifica | [Implementato] |
@@ -140,7 +140,7 @@ Placet è un **punto unico di supervisione umana e bus di cooperazione per agent
 | RS-04 | **Chi propone non esegue:** gli agenti non hanno credenziali per azioni pubbliche o distruttive | [Deciso] |
 | RS-05 | **Scrivere a una sessione o crearne una equivale a comandare il PC da remoto**: consentito solo all'identità Tailscale autorizzata | [Deciso] |
 | RS-06 | Il bridge legge solo i file di conversazione dei provider (es. `~/.claude/projects`, `~/.codex/sessions`, `~/.gemini/antigravity/brain`) e solo per sessioni registrate; mai un percorso passato dal backend | [Implementato] |
-| RS-07 | Le API **non documentate** (es. language server di Antigravity) stanno dietro un adattatore isolato, con controllo di versione e ripiego (tmux + CLI) | [Deciso] |
+| RS-07 | Le API **non documentate** (es. language server di Antigravity) stanno dietro un adattatore isolato, con controllo di versione e ripiego (tmux + CLI) | [Implementato] (`bridge/channels.py`) |
 | RS-08 | Le relazioni `automatic` sono da usare per scambi a basso rischio; tutto resta visibile nello storico | [Deciso] |
 
 ---

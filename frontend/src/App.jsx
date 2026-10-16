@@ -181,6 +181,28 @@ export default function App() {
     }
   };
 
+  /** The user writes to a session (RF-34); true when the message is accepted. */
+  const sendMessage = async (sessionId, text) => {
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        showFeedback(errData.detail || `Messaggio non inviato (${res.status})`, true);
+        return false;
+      }
+      const created = await res.json();
+      setRequests((prev) => upsert(prev, created));
+      return true;
+    } catch {
+      showFeedback("Errore di connessione: messaggio non inviato.", true);
+      return false;
+    }
+  };
+
   const openSession = (id) => navigate(`#/sessione/${id}`);
   const pendingCount = requests.filter((r) => r.status === "PENDING").length;
 
@@ -257,6 +279,7 @@ export default function App() {
             sessions={sessions}
             onBack={() => navigate("#/")}
             onDecide={handleDecision}
+            onSend={sendMessage}
             submittingId={submittingId}
             focusId={focusId}
           />

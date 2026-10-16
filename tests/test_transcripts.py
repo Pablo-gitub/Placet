@@ -251,3 +251,26 @@ def test_empty_file(tmp_path):
     path = tmp_path / "t.jsonl"
     path.write_text("")
     assert read_page(path, transcripts.parse_claude) == {"messages": [], "before": None, "end": 0}
+
+
+def test_the_users_own_messages_from_the_phone(tmp_path):
+    """Messages written in the PWA (RF-34) show as the user's, in every provider."""
+    note = "\nÈ un messaggio che l'utente ti scrive dal telefono tramite Placet: rispondigli direttamente."
+    wake = ("<task-notification>\n</task-notification>\n<system-reminder>\nStop hook blocking error from "
+            f"command \"Stop\": [Placet Request #9 dall'utente]: a che punto sei?{note}\nQuesto non è un errore"
+            "\n</system-reminder>")
+    home = claude_home(tmp_path, [claude_user(wake)])
+    entry = read_transcript("claude-code", CLAUDE_ID, home=home)["messages"][0]
+    assert (entry["role"], entry["text"], entry["via"]) == ("user", "a che punto sei?", "placet")
+
+    write_jsonl(tmp_path / ".gemini" / "antigravity" / "brain" / AGY_ID / ".system_generated" / "logs" /
+                "transcript.jsonl", [
+        {"type": "USER_INPUT", "content": f"<USER_REQUEST>\n[Placet Request #10 dall'utente]: riga 1\nriga 2{note}\n"
+                                          "</USER_REQUEST>"},
+        {"type": "PLANNER_RESPONSE", "content": None, "tool_calls": [{"name": "call_mcp_tool", "args": {
+            "ServerName": "\"placet\"", "ToolName": "\"placet_reply\"", "Arguments": "{}"}}]},
+    ])
+    page = read_transcript("antigravity", AGY_ID, home=tmp_path)
+    assert page["messages"][0]["role"] == "user" and page["messages"][0]["text"] == "riga 1\nriga 2"
+    mcp = page["messages"][1]
+    assert (mcp["kind"], mcp["tool"], mcp["detail"]) == ("mcp", "placet_reply", "placet")

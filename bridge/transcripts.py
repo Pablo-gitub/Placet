@@ -55,7 +55,15 @@ def _action(name: str, kind: str, detail: Optional[str], at: Optional[str]) -> d
     return _entry("action", at=at, tool=name, kind=kind, detail=detail)
 
 
+# A message the user wrote from the PWA (RF-34), as delivered by Placet:
+# "[Placet Request #N dall'utente]: <text>" plus a note for the agent.
+_USER_MESSAGE = re.compile(r"^\s*\[Placet Request #\d+ dall'utente\]:\s*(.*?)(?:\nÈ un messaggio che l'utente ti scrive.*)?$", re.S)
+
+
 def _placet_or_user(text: str, at: Optional[str]) -> dict:
+    mine = _USER_MESSAGE.match(text)
+    if mine:
+        return _entry("user", _clip(mine.group(1)), at, via="placet")
     return _entry("placet" if text.lstrip().startswith("[Placet") else "user", _clip(text), at)
 
 
@@ -86,7 +94,7 @@ def _claude_user_text(text: str, at: Optional[str]) -> List[dict]:
     if stripped.startswith("<task-notification>"):
         # A Placet wake-up delivered by the background waiter (asyncRewake).
         match = _STOP_HOOK.search(text)
-        return [_entry("placet", _clip(match.group(1)), at)] if match else []
+        return [_placet_or_user(match.group(1), at)] if match else []
     if stripped.startswith("<command-name>"):
         name = re.search(r"<command-name>(.*?)</command-name>", text, re.S)
         args = re.search(r"<command-args>(.*?)</command-args>", text, re.S)
@@ -226,6 +234,9 @@ def parse_antigravity(obj: dict) -> List[dict]:
         for call in obj.get("tool_calls") or []:
             name = call.get("name", "")
             args = {k: _antigravity_arg(v) for k, v in (call.get("args") or {}).items()}
+            if name == "call_mcp_tool":
+                out.append(_action(args.get("ToolName") or name, "mcp", args.get("ServerName"), at))
+                continue
             tool_kind, key = _ANTIGRAVITY_TOOLS.get(name, ("other", None))
             detail = args.get(key) if key else None
             out.append(_action(name, tool_kind, detail or args.get("toolSummary"), at))

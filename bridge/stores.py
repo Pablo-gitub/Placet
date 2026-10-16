@@ -16,6 +16,7 @@ from typing import Dict, List, Optional, Protocol
 
 import httpx
 
+from backend.app import envelopes
 from backend.app.config import PlacetConfig, load_agents_config
 from backend.app.database import Database
 from backend.app.models import (
@@ -41,6 +42,16 @@ class Work:
     results: List[RequestModel] = field(default_factory=list)
     # Agents whose hooks declared a turn in progress.
     busy_agents: List[str] = field(default_factory=list)
+    # Sessions the bridge wakes in their app (Codex, Antigravity) with a
+    # message waiting: {"id", "agent_id", "provider"}.
+    sessions: List[dict] = field(default_factory=list)
+
+
+@dataclass
+class SessionMail:
+    kind: str          # "injection" or "outcome"
+    request_id: int
+    text: str
 
 
 class BridgeStore(Protocol):
@@ -54,6 +65,9 @@ class BridgeStore(Protocol):
     def claim_delivery(self, request_id: int) -> bool: ...
     def release_delivery(self, request_id: int) -> None: ...
     def session_for(self, agent_id: str) -> Optional[SessionSpec]: ...
+    # Sessions woken in their app: take the next message, then confirm the
+    # injection or give the message back if it could not be queued.
+    def take_session_mail(self, session_id: str) -> Optional[SessionMail]: ...
 
 
 def _session_spec(spec) -> SessionSpec:
@@ -84,7 +98,23 @@ class LocalStore:
             injections=injections,
             results=results,
             busy_agents=sorted(set(self.db.busy_agents(AGENT_BUSY_TTL_SECONDS)) | set(busy)),
+            sessions=[
+                {"id": s.id, "agent_id": s.agent_id, "provider": s.provider}
+                for s in self.db.bridge_sessions_with_mail()
+            ],
         )
+
+    def take_session_mail(self, session_id: str) -> Optional[SessionMail]:
+        session = self.db.get_session(session_id)
+        if session is None:
+            return None
+        taken = self.db.take_inbox_message(session, actor=BRIDGE_ACTOR, via="bridge")
+        if taken is None:
+            return None
+        kind, req = taken
+        text = (envelopes.outcome(req, channel="app") if kind == "outcome"
+                else envelopes.injection(req, ack_mode="none", channel="app"))
+        return SessionMail(kind, req.id, text)
 
     def claim_injection(self, request_id: int) -> bool:
         return self.db.claim_injection(request_id, actor=BRIDGE_ACTOR) is not None
@@ -138,7 +168,16 @@ class HttpStore:
             injections=[RequestModel(**r) for r in data["injections"]],
             results=[RequestModel(**r) for r in data["results"]],
             busy_agents=list(data.get("busy_agents", [])),
+            sessions=list(data.get("sessions", [])),
         )
+
+    def take_session_mail(self, session_id: str) -> Optional[SessionMail]:
+        resp = self.client.post(f"/api/bridge/sessions/{session_id}/take")
+        if resp.status_code in (204, 404):
+            return None
+        resp.raise_for_status()
+        data = resp.json()
+        return SessionMail(data["kind"], data["request_id"], data["text"])
 
     def _call_ok(self, method: str, path: str) -> bool:
         resp = self.client.request(method, path)

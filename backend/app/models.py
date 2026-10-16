@@ -63,6 +63,7 @@ class QuestionType(str, Enum):
     MULTI_CHOICE = "multi_choice"      # any options, plus optional "Altro"
     PROMPT_REVIEW = "prompt_review"    # agent-to-agent prompt the human may edit
     CONFIRMATION = "confirmation"      # yes/no question to the human, optional note
+    MESSAGE = "message"                # the user writes to a session from the PWA (RF-34)
 
 
 class Priority(str, Enum):
@@ -179,6 +180,17 @@ class RequestModel(BaseModel):
     # the one chosen to receive it, if any.
     sender_session_id: Optional[str] = None
     recipient_session_id: Optional[str] = None
+
+
+# Providers whose sessions the bridge wakes from outside (RF-24): Codex with
+# `codex queue`, Antigravity through its app's language server. Claude Code
+# sessions are woken by their own background waiter instead.
+BRIDGE_PROVIDERS = ("codex", "antigravity")
+
+
+class SessionMessage(BaseModel):
+    """A message the user writes to a session (RF-34)."""
+    text: str = Field(min_length=1, max_length=20000)
 
 
 class SessionModel(BaseModel):

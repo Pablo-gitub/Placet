@@ -873,3 +873,32 @@ fieldset.options-list {
   font-size: 0.85rem;
 }
 .request-origin .link-button { margin-left: 0.5rem; font-size: 0.75rem; padding: 0; }
+
+/* --- Writing to a session ------------------------------------------------------------ */
+
+.composer {
+  border-top: 1px solid var(--border-color);
+  padding: 0.6rem 0 calc(0.2rem + env(safe-area-inset-bottom));
+}
+.composer-note { font-size: 0.72rem; color: var(--text-muted); margin-bottom: 0.4rem; }
+.composer-row { display: flex; align-items: flex-end; gap: 0.5rem; }
+.composer textarea {
+  flex: 1;
+  min-height: 2.4rem;
+  max-height: 8rem;
+  resize: none;
+  field-sizing: content;
+  padding: 0.55rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-main);
+  font: inherit;
+  font-size: 0.95rem;
+}
+.composer textarea:focus { outline: none; border-color: var(--primary); }
+.send-button { width: 2.4rem; height: 2.4rem; background: var(--primary); border-color: var(--primary); color: white; }
+.send-button:disabled { opacity: 0.4; }
+.msg-user.outgoing .bubble { opacity: 0.7; }
+.msg-user.failed .bubble { background: var(--danger); }
+.msg-user.failed time { color: #f87171; }

@@ -16,6 +16,9 @@ the screen.
 - SessionEnd: the session is gone.
 
 Usage: python3 claude_code.py --agent claude (or PLACET_HOOK_AGENT=claude).
+Codex hooks receive the same fields (session_id, transcript_path, prompt,
+last_assistant_message, tool_name, ...): the same script serves them with
+`--agent codex --provider codex`.
 A `.placet-off` file in the project keeps its sessions out of Placet.
 
 It never prints anything (UserPromptSubmit stdout would be added to the
@@ -32,7 +35,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import placet_common  # noqa: E402
 
 PLACET_REQUEST = re.compile(r"\[Placet Request #(\d+)\b")
-PLACET_TOOLS = re.compile(r"^mcp__placet__placet_(ask_human|send_to_agent)$")
+# Claude Code names MCP tools mcp__<server>__<tool>; other clients may not.
+PLACET_TOOLS = re.compile(r"(^|__|\.|/)placet_(ask_human|send_to_agent)$")
 MAX_MESSAGE_CHARS = 20000
 
 
@@ -75,12 +79,12 @@ def _request_id_from_tool_response(response, depth: int = 0):
     return None
 
 
-def build_event(event: dict):
+def build_event(event: dict, provider: str = "claude-code"):
     """The /api/sessions/{id}/events payload for a hook event, or None."""
     name = event.get("hook_event_name")
     common = {
-        "provider": "claude-code",
-        "entrypoint": os.environ.get("CLAUDE_CODE_ENTRYPOINT"),
+        "provider": provider,
+        "entrypoint": os.environ.get("CLAUDE_CODE_ENTRYPOINT") if provider == "claude-code" else provider,
         "cwd": event.get("cwd"),
         "title": event.get("session_title"),
         # On every event: a session may predate its first SessionStart hook.
@@ -94,7 +98,7 @@ def build_event(event: dict):
         if match:
             payload["request_id"] = int(match.group(1))
         return payload
-    if name == "PostToolUse" and PLACET_TOOLS.match(event.get("tool_name") or ""):
+    if name == "PostToolUse" and PLACET_TOOLS.search(event.get("tool_name") or ""):
         request_id = _request_id_from_tool_response(event.get("tool_response"))
         return {"event": "tool", "request_id": request_id, **common} if request_id else None
     if name == "Stop":
@@ -117,7 +121,7 @@ def main() -> None:
     except ValueError:
         return
     session_id = event.get("session_id")
-    payload = build_event(event)
+    payload = build_event(event, provider=placet_common.option(sys.argv, "--provider") or "claude-code")
     token = placet_common.token_for(agent)
     if not session_id or payload is None or not token or placet_common.opted_out(event.get("cwd")):
         return
