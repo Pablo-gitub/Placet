@@ -302,3 +302,38 @@ Una menzione non crea richieste automaticamente: è l'agente a formulare gli
 incarichi, ciascuno con il normale flusso di approvazione e consegna Placet. Se il
 tool non è disponibile, l'agente deve segnalarlo. La selezione non garantisce che
 il modello esegua la delega: la conferma effettiva resta la richiesta Placet.
+
+### Allegati dal telefono alla sessione
+
+La graffetta del composer seleziona immagini JPEG/PNG/WebP e PDF (fino a 4 file,
+10 MiB per file e 20 MiB totali). Si possono inviare senza testo: in tal caso
+Placet chiede alla sessione di leggere gli allegati. Le immagini hanno una
+miniatura e tutti i file si possono rimuovere prima dell'invio.
+
+La PWA invia i file in base64 a `POST /api/sessions/{id}/messages`, nel campo
+`attachments: [{name, data}]`, insieme a testo ed eventuali menzioni. Il corpo
+HTTP ha un limite di 29 MiB prima del parsing, anche senza Content-Length.
+Il backend valida i byte e inoltra un job `upload` al bridge, che ricontrolla
+contenuto, dimensioni e `.placet-off`. Il backend non conserva i byte su disco.
+Solo dopo il salvataggio di tutti i file viene creata la richiesta approvata.
+Una sessione chiusa o esclusa durante il trasferimento non riceve il messaggio.
+
+Il bridge salva con permessi privati in
+`~/.cache/placet/uploads/<hash-sessione>/<hash-contenuto>.<tipo>`: nomi e ID
+provenienti dal telefono non diventano percorsi. Trasferimenti ripetuti riusano
+i file identici. La cartella ha un limite complessivo di 256 MiB; in questa
+versione la pulizia è manuale e non si eliminano automaticamente file che
+potrebbero servire a richieste ancora accodate. Trasferimenti interrotti dopo
+il salvataggio possono lasciare file non associati a richieste.
+
+Nella richiesta si conservano nomi e metadati, inclusi i percorsi locali nel
+contesto consegnato alla sessione. L'agente deve aprire questi file con i suoi
+strumenti: non si simula un allegato nativo del provider. L'accesso effettivo
+dipende anche dalle autorizzazioni del provider alla cartella degli upload.
+
+Se il bridge è offline o non risponde, il messaggio non viene accodato. La PWA
+mantiene testo e file nel composer per riprovare nella stessa pagina: non è
+ancora una bozza persistente a ricaricamenti, cambi chat o chiusure della PWA.
+La conferma HTTP persa dopo la creazione del messaggio resta soggetta alla
+stessa incertezza dei messaggi di testo: la deduplicazione dei file non rende
+idempotente la creazione della richiesta.

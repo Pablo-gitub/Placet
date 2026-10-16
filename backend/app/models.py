@@ -217,10 +217,22 @@ class SessionMention(BaseModel):
     token: str = Field(min_length=2, max_length=600)
 
 
+class SessionUpload(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    data: str = Field(min_length=1, max_length=13981016)
+
+
 class SessionMessage(BaseModel):
     """A message the user writes to a session (RF-34)."""
-    text: str = Field(min_length=1, max_length=20000)
+    text: str = Field(default="", max_length=20000)
+    attachments: List[SessionUpload] = Field(default_factory=list, max_length=4)
     mentions: List[SessionMention] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def has_content(self):
+        if not self.text.strip() and not self.attachments:
+            raise ValueError("Scrivi un messaggio o scegli un allegato.")
+        return self
 
 
 class SessionModel(BaseModel):

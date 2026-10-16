@@ -1,11 +1,55 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { providerOf, sessionName, sessionProject, sessionStatus } from "./sessionInfo";
-import { SendHorizontal } from "lucide-react";
+import { Paperclip, SendHorizontal, X } from "lucide-react";
+
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
+const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
+
+function FilePreview({ file, onRemove, disabled }) {
+  const image = useRef(null);
+  useEffect(() => {
+    if (!file.type.startsWith("image/") || !URL.createObjectURL) return;
+    const source = URL.createObjectURL(file);
+    if (image.current) image.current.src = source;
+    return () => URL.revokeObjectURL(source);
+  }, [file]);
+  return <li className="composer-file">
+    {file.type.startsWith("image/") && <img ref={image} alt="" />}
+    <span>{file.name}<small>{file.size < 1024 * 1024 ? `${Math.max(1, Math.ceil(file.size / 1024))} KB` : `${(file.size / 1024 / 1024).toFixed(1)} MB`}</small></span>
+    <button type="button" className="icon-button" aria-label={`Rimuovi ${file.name}`} disabled={disabled} onClick={onRemove}><X size={16} /></button>
+  </li>;
+}
+
+function encodeFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve({ name: file.name.slice(0, 200), data: String(reader.result).split(",")[1] });
+    reader.onerror = () => reject(new Error("Non riesco a leggere l’allegato. Selezionalo nuovamente."));
+    reader.onabort = reader.onerror;
+    reader.readAsDataURL(file);
+  });
+}
 
 /** Writing to a session from the phone (RF-34): the message wakes it. */
 export default function Composer({ session, sessions = [], onSend }) {
   const [text, setText] = useState("");
   const input = useRef(null);
+  const fileInput = useRef(null);
+  const [files, setFiles] = useState([]);
+  const [fileError, setFileError] = useState("");
+  const selectFiles = (event) => {
+    const selected = [...files, ...Array.from(event.target.files || [])];
+    event.target.value = "";
+    if (selected.length > 4) { setFileError("Puoi allegare al massimo 4 file."); return; }
+    if (selected.some((f) => !ALLOWED_TYPES.includes(f.type) && !((!f.type || f.type === "application/octet-stream") && /\.(pdf|png|jpe?g|webp)$/i.test(f.name)))) {
+      setFileError("Scegli immagini JPEG, PNG, WebP o PDF. Per una foto HEIC, esportala prima in JPEG."); return;
+    }
+    if (selected.some((f) => f.size > MAX_FILE_BYTES) || selected.reduce((n, f) => n + f.size, 0) > MAX_TOTAL_BYTES) {
+      setFileError("Limite di 10 MB per file e 20 MB complessivi."); return;
+    }
+    setFiles(selected); setFileError("");
+  };
   const [mentions, setMentions] = useState([]);
   const [query, setQuery] = useState(null);
   const [highlight, setHighlight] = useState(0);
@@ -33,10 +77,16 @@ export default function Composer({ session, sessions = [], onSend }) {
 
   const send = async () => {
     const message = text.trim();
-    if (!message || sending || closed) return;
+    if ((!message && !files.length) || sending || closed) return;
     setSending(true);
+    setFileError("");
     try {
-      if (await onSend(message, activeMentions)) { setText(""); setMentions([]); setQuery(null); }
+      const attachments = await Promise.all(files.map(encodeFile));
+      if (await onSend(message, activeMentions, attachments)) {
+        setText(""); setMentions([]); setQuery(null); setFiles([]);
+      }
+    } catch (error) {
+      setFileError(error.message || "Trasferimento non riuscito: puoi riprovare.");
     } finally {
       setSending(false);
     }
@@ -68,7 +118,19 @@ export default function Composer({ session, sessions = [], onSend }) {
           ))}
         </div>
       )}
+      {fileError && <p className="composer-note" role="alert">{fileError}</p>}
+      {files.length > 0 && <>
+        <ul className="composer-files" aria-label="Allegati da inviare">
+          {files.map((file, i) => <FilePreview key={`${file.name}-${i}`} file={file} disabled={sending}
+            onRemove={() => { setFiles((prev) => prev.filter((_, n) => n !== i)); setFileError(""); }} />)}
+        </ul>
+        <p className="composer-note" role="status">{sending ? "Trasferimento al PC e invio in corso…" : "Gli allegati saranno salvati sul PC prima dell’invio. Max 4 file, 10 MB ciascuno, 20 MB totali."}</p>
+      </>}
+      <input ref={fileInput} type="file" hidden multiple accept={ALLOWED_TYPES.join(",")}
+        aria-label="Scegli allegati" disabled={closed || sending} onChange={selectFiles} />
       <div className="composer-row">
+        <button type="button" className="icon-button attach-button" aria-label="Allega foto o PDF"
+          disabled={closed || sending} onClick={() => fileInput.current?.click()}><Paperclip size={18} /></button>
         <textarea
           ref={input}
           aria-label="Messaggio per la sessione"
@@ -79,7 +141,7 @@ export default function Composer({ session, sessions = [], onSend }) {
           placeholder={closed ? "Sessione chiusa" : "Scrivi alla sessione… @ per citarne un’altra"}
           value={text}
           rows={1}
-          disabled={closed}
+          disabled={closed || sending}
           onChange={(e) => { setText(e.target.value); updateQuery(e.target.value, e.target.selectionStart); }}
           onClick={(e) => updateQuery(text, e.target.selectionStart)}
           onKeyDown={(e) => {
@@ -102,7 +164,7 @@ export default function Composer({ session, sessions = [], onSend }) {
           className="icon-button send-button"
           aria-label="Invia"
           data-testid="composer-send"
-          disabled={closed || sending || !text.trim()}
+          disabled={closed || sending || (!text.trim() && !files.length)}
           onClick={send}
         >
           <SendHorizontal size={18} />

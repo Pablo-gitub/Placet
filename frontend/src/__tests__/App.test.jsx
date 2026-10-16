@@ -206,6 +206,20 @@ describe("writing from the PWA", () => {
     expect(JSON.parse(call[1].body)).toEqual({ text: "procedi pure" });
   });
 
+  it("posts selected attachments through the session composer", async () => {
+    const created = { id: 51, sender_id: "human", recipient_id: "codex", question_type: "message",
+      prompt: "Allegati: test.pdf", status: "APPROVED", created_at: ago(0), recipient_session_id: "cx1" };
+    const fetchMock = setup([[(url, o) => url === "/api/sessions/cx1/messages" && o.method === "POST", created]]);
+    window.location.hash = "#/sessione/cx1";
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId("composer-input")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Scegli allegati"), { target: { files: [new File(["%PDF-1.4"], "test.pdf", {type: "application/pdf"})] } });
+    fireEvent.click(screen.getByTestId("composer-send"));
+    await waitFor(() => expect(screen.getByTestId("outgoing-51")).toBeInTheDocument());
+    const call = fetchMock.mock.calls.find(([url]) => url === "/api/sessions/cx1/messages");
+    expect(JSON.parse(call[1].body)).toEqual({ text: "", attachments: [{ name: "test.pdf", data: btoa("%PDF-1.4") }] });
+  });
+
   it("says why a message was refused", async () => {
     setup([[(url, o) => url === "/api/sessions/cx1/messages" && o.method === "POST",
       () => Promise.resolve({ ok: false, status: 409, json: () => Promise.resolve({ detail: "La sessione è chiusa." }) })]]);

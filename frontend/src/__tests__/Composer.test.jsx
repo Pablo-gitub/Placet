@@ -47,3 +47,26 @@ describe("session mentions", () => {
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 });
+
+it("sends a file without text and keeps it after a failed transfer", async () => {
+  const send = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+  render(<Composer session={session} onSend={send} />);
+  fireEvent.change(screen.getByLabelText("Scegli allegati"), { target: { files: [new File(["%PDF-1.4"], "test.pdf", { type: "application/pdf" })] } });
+  fireEvent.click(screen.getByRole("button", { name: "Invia" }));
+  await waitFor(() => expect(send).toHaveBeenCalledOnce());
+  expect(send.mock.calls[0][2]).toEqual([{ name: "test.pdf", data: btoa("%PDF-1.4") }]);
+  await waitFor(() => expect(screen.getByRole("button", { name: "Invia" })).toBeEnabled());
+  expect(screen.getByRole("button", { name: "Rimuovi test.pdf" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Invia" }));
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Rimuovi test.pdf" })).not.toBeInTheDocument());
+});
+
+it("rejects unsupported files and allows removal", () => {
+  render(<Composer session={session} onSend={vi.fn()} />);
+  const choose = (files) => fireEvent.change(screen.getByLabelText("Scegli allegati"), { target: { files } });
+  choose([new File(["x"], "x.html", { type: "text/html" })]);
+  expect(screen.getByRole("alert")).toHaveTextContent("JPEG");
+  choose([new File(["x"], "ok.pdf", { type: "application/pdf" })]);
+  fireEvent.click(screen.getByRole("button", { name: "Rimuovi ok.pdf" }));
+  expect(screen.getByRole("button", { name: "Invia" })).toBeDisabled();
+});

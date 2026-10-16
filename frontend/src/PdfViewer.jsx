@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Download, X } from "lucide-react";
 
 /** Pages are drawn at this width (CSS px) times the screen's pixel ratio. */
@@ -57,8 +58,8 @@ export default function PdfViewer({ url, name, onClose }) {
     };
   }, [url, onClose]);
 
-  return (
-    <div className="attachment-viewer pdf-viewer" role="dialog" aria-label={name} data-testid="pdf-viewer">
+  return createPortal(
+    <div className="attachment-viewer pdf-viewer" role="dialog" aria-modal="true" aria-label={name} data-testid="pdf-viewer">
       <div className="attachment-viewer-bar">
         <span>
           {name}
@@ -79,6 +80,7 @@ export default function PdfViewer({ url, name, onClose }) {
           </p>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

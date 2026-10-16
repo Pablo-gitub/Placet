@@ -225,16 +225,16 @@ export default function App() {
   };
 
   /** The user writes to a session (RF-34); true when the message is accepted. */
-  const sendMessage = async (sessionId, text, mentions = []) => {
+  const sendMessage = async (sessionId, text, mentions = [], attachments = []) => {
     try {
       const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(mentions.length ? { text, mentions } : { text }),
+        body: JSON.stringify({ text, ...(mentions.length ? { mentions } : {}), ...(attachments.length ? { attachments } : {}) }),
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        showFeedback(errData.detail || `Messaggio non inviato (${res.status})`, true);
+        showFeedback(typeof errData.detail === "string" ? errData.detail : `Messaggio non inviato (${res.status}): controlla testo e allegati.`, true);
         return false;
       }
       const created = await res.json();

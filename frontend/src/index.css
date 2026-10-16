@@ -829,6 +829,7 @@ body.chat-open { overflow: hidden; }
   overscroll-behavior-y: contain;
   padding: 0.75rem 0 1rem;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain; padding: .75rem;
 }
 .chat-status { text-align: center; font-size: 0.75rem; color: var(--text-muted); margin: 0.5rem 0 1rem; }
 .chat-error { text-align: center; color: #f87171; font-size: 0.85rem; padding: 2rem 1rem; }
@@ -1146,10 +1147,26 @@ body.chat-open { overflow: hidden; }
   display: flex; align-items: center; gap: 0.5rem; flex: 1; min-width: 0;
   background: none; border: none; color: inherit; font: inherit; cursor: pointer; text-align: left; padding: 0;
 }
-.pdf-viewer { justify-content: flex-start; background: #020617; }
+.pdf-viewer {
+  justify-content: flex-start; background: #020617;
+  top: var(--chat-top, 0px); bottom: auto;
+  height: var(--chat-height, 100dvh); min-height: 0; overflow: hidden;
+  padding: calc(env(safe-area-inset-top, 0px) + 0.75rem) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
+.pdf-viewer .attachment-viewer-bar { position: static; width: 100%; flex: 0 0 auto; min-width: 0; }
+.pdf-viewer .attachment-viewer-bar span { min-width: 0; }
+.pdf-viewer .attachment-viewer-bar .icon-button { flex-shrink: 0; }
 .pdf-pages {
   width: 100%; max-width: 900px; flex: 1; min-height: 0; overflow-y: auto;
   display: flex; flex-direction: column; align-items: center; gap: 0.75rem;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain; padding: .75rem;
 }
-.pdf-page { background: #ffffff; max-width: 100%; height: auto; border-radius: 4px; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4); }
+.pdf-page { flex: 0 0 auto; display: block; background: #ffffff; max-width: 100%; height: auto; border-radius: 4px; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4); }
+
+.composer-files { list-style: none; margin: 0 0 .4rem; padding: 0; max-height: 22dvh; overflow-y: auto; overscroll-behavior: contain; }
+.composer-file { display: flex; align-items: center; gap: .5rem; padding: .35rem; border-bottom: 1px solid var(--border-color); }
+.composer-file img { width: 42px; height: 42px; object-fit: cover; border-radius: 4px; }
+.composer-file span { min-width: 0; flex: 1; overflow-wrap: anywhere; font-size: .8rem; }
+.composer-file small { display: block; color: var(--text-muted); }
+.composer-file .icon-button, .attach-button { flex-shrink: 0; }

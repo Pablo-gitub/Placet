@@ -279,6 +279,11 @@ class BridgeDaemon:
                     before=job.get("before"), after=job.get("after"),
                     limit=job.get("limit") or 40,
                 )
+            elif kind == "upload":
+                if not active(job.get("cwd")):
+                    return {"ok": False, "error": "excluded", "message": "Project excluded (.placet-off)."}
+                from bridge.uploads import save_uploads
+                page = save_uploads(job["session_id"], job.get("files") or [], cwd=job.get("cwd"))
             elif kind == "attachment":
                 if not active(job.get("cwd")):
                     return {"ok": False, "error": "excluded", "message": "Project excluded (.placet-off)."}

@@ -362,9 +362,10 @@ export default function SessionView({
           key={sessionId}
           session={session}
           sessions={sessions}
-          onSend={async (text, mentions) => {
+          onSend={async (text, mentions, attachments) => {
             following.current = true;
-            return mentions?.length ? onSend(sessionId, text, mentions) : onSend(sessionId, text);
+            return attachments?.length ? onSend(sessionId, text, mentions, attachments)
+              : mentions?.length ? onSend(sessionId, text, mentions) : onSend(sessionId, text);
           }}
         />
       )}

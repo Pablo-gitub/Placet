@@ -1,4 +1,5 @@
 import React, { Suspense, lazy, useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Download, FileText, ImageOff, X } from "lucide-react";
 
 // pdf.js is large: loaded only when a PDF is opened.
@@ -56,8 +57,8 @@ function Viewer({ sessionId, attachment, onClose }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
-  return (
-    <div className="attachment-viewer" role="dialog" aria-label={attachment.name} data-testid="attachment-viewer"
+  return createPortal(
+    <div className="attachment-viewer" role="dialog" aria-modal="true" aria-label={attachment.name} data-testid="attachment-viewer"
       onClick={onClose}>
       <div className="attachment-viewer-bar" onClick={(e) => e.stopPropagation()}>
         <span>{attachment.name}</span>
@@ -69,7 +70,8 @@ function Viewer({ sessionId, attachment, onClose }) {
         </button>
       </div>
       <img src={url} alt={attachment.name} onClick={(e) => e.stopPropagation()} />
-    </div>
+    </div>,
+    document.body
   );
 }
 
