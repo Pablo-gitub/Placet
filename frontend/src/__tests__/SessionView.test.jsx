@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import SessionView from "../SessionView";
 import { json, mockFetch, paramsOf, transcriptOf } from "./testUtils";
@@ -272,15 +272,16 @@ describe("images in the conversation", () => {
 });
 
 describe("files an agent shares", () => {
-  it("shows a PDF as a card that opens or downloads", async () => {
+  it("shows a PDF as a card that opens in Placet's viewer", async () => {
     mockFetch([[transcriptOf("s1"), { ...latest, messages: [
       { role: "media", text: "File condiviso", at: null, cursor: "30:0",
         attachments: [{ id: "30:0:0", name: "Rapporto.pdf", kind: "pdf" }] }] }]]);
     renderView();
     await waitFor(() => expect(screen.getByTestId("attachment-30:0:0")).toHaveTextContent("Rapporto.pdf"));
-    const open = screen.getByTestId("attachment-open-30:0:0");
-    expect(open).toHaveAttribute("href", "/api/sessions/s1/attachments/30%3A0%3A0");
-    expect(open).toHaveAttribute("target", "_blank");
     expect(screen.getByTestId("chat-media")).toHaveTextContent("File condiviso");
+    fireEvent.click(screen.getByTestId("attachment-open-30:0:0"));
+    // Placet's own viewer (white pages), loaded on demand.
+    await waitFor(() => expect(screen.getByTestId("pdf-viewer")).toBeInTheDocument());
+    expect(within(screen.getByTestId("pdf-viewer")).getByLabelText("Scarica")).toHaveAttribute("href", "/api/sessions/s1/attachments/30%3A0%3A0");
   });
 });
