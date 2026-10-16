@@ -29,6 +29,7 @@ class BridgeDaemon:
         tmux: Optional[TmuxController] = None,
         store: Optional[BridgeStore] = None,
         channels: Optional[dict] = None,
+        spool=None,
     ):
         # Direct database access (db/config) is the single-process dev mode;
         # in production pass an HttpStore.
@@ -36,6 +37,8 @@ class BridgeDaemon:
         self.tmux = tmux or TmuxController()
         # provider -> channel that queues a message into the provider's app
         self.channels = channels if channels is not None else default_channels()
+        # forwards the hooks' local event queue to the backend
+        self.spool = spool
 
     def format_injection_envelope(self, req: RequestModel, ack_mode: str = "mcp") -> str:
         return envelopes.injection(req, ack_mode=ack_mode, channel="tmux")
@@ -216,6 +219,8 @@ class BridgeDaemon:
         logger.info("Starting Placet Bridge Daemon...")
         if hasattr(self.store, "take_jobs"):
             threading.Thread(target=self.serve_jobs_forever, name="bridge-jobs", daemon=True).start()
+        if self.spool is not None:
+            threading.Thread(target=self.spool.run_forever, name="bridge-spool", daemon=True).start()
         while True:
             try:
                 self.run_loop_step()
@@ -227,4 +232,5 @@ class BridgeDaemon:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     from bridge.stores import HttpStore
-    BridgeDaemon(store=HttpStore()).run_forever()
+    from bridge.spool_forwarder import SpoolForwarder, http_sender
+    BridgeDaemon(store=HttpStore(), spool=SpoolForwarder(http_sender())).run_forever()

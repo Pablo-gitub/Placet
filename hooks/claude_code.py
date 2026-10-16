@@ -21,6 +21,9 @@ last_assistant_message, tool_name, ...): the same script serves them with
 `--agent codex --provider codex`.
 A `.placet-off` file in a project (or a folder containing it) keeps its sessions out of Placet.
 
+Events are written to the local queue (spool.py), which the bridge forwards
+to the backend: the hook makes no network call and returns at once.
+
 It never prints anything (UserPromptSubmit stdout would be added to the
 model's context) and always exits 0: a Placet problem must not block Claude.
 """
@@ -33,6 +36,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import placet_common  # noqa: E402
+import spool  # noqa: E402
 
 PLACET_REQUEST = re.compile(r"\[Placet Request #(\d+)\b")
 # Claude Code names MCP tools mcp__<server>__<tool>; other clients may not.
@@ -122,12 +126,10 @@ def main() -> None:
         return
     session_id = event.get("session_id")
     payload = build_event(event, provider=placet_common.option(sys.argv, "--provider") or "claude-code")
-    token = placet_common.token_for(agent)
-    if not session_id or payload is None or not token or not placet_common.active(event.get("cwd")):
+    if not session_id or payload is None or not placet_common.active(event.get("cwd")):
         return
-    payload = {k: v for k, v in payload.items() if v is not None}
     try:
-        placet_common.call("POST", f"/api/sessions/{session_id}/events", token, payload)
+        spool.write_event(agent, session_id, {k: v for k, v in payload.items() if v is not None})
     except Exception:
         pass
 

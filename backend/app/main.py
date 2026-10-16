@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, status, Requ
 from fastapi.middleware.cors import CORSMiddleware
 
 from fastapi.responses import FileResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
@@ -60,6 +60,8 @@ EXPIRY_SWEEP_SECONDS = 30.0
 class SessionEventPayload(BaseModel):
     """What an agent CLI / desktop app hook reports about one of its sessions."""
     event: Literal["start", "prompt", "stop", "tool", "end"]
+    # Set by the hooks' local queue: an event forwarded twice is applied once.
+    event_id: Optional[str] = Field(None, max_length=64)
     provider: Optional[str] = None
     entrypoint: Optional[str] = None
     cwd: Optional[str] = None
@@ -661,6 +663,8 @@ def create_app(
         to this session), end.
         """
         require_agent(who)
+        if payload.event_id and db.session_event_seen(payload.event_id):
+            return {"session": session_id, "event": payload.event, "duplicate": True}
         if not db.upsert_session(
             session_id, who.id, provider=payload.provider, entrypoint=payload.entrypoint,
             cwd=payload.cwd, title=payload.title, tmux_session=payload.tmux_session,
@@ -691,6 +695,8 @@ def create_app(
         elif payload.event == "end":
             db.end_session(session_id)
 
+        if payload.event_id:
+            db.mark_session_event(payload.event_id, session_id)
         notify_session(session_id)
         return result
 

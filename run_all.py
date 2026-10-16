@@ -13,7 +13,8 @@ logger = logging.getLogger("placet")
 def start_bridge():
     logger.info("Initializing Bridge Daemon thread...")
     try:
-        daemon = BridgeDaemon()
+        from bridge.spool_forwarder import SpoolForwarder, http_sender
+        daemon = BridgeDaemon(spool=SpoolForwarder(http_sender()))
         daemon.run_forever()
     except Exception as e:
         logger.error(f"Bridge daemon error: {e}")

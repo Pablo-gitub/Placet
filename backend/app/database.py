@@ -137,6 +137,14 @@ class Database:
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_request_events_request ON request_events(request_id);"
             )
+            # Hook events already applied: the bridge may forward one twice.
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS session_events_seen (
+                event_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                at TEXT NOT NULL
+            );
+            """)
             cursor.execute("PRAGMA table_info(requests);")
             cols = [r["name"] for r in cursor.fetchall()]
             for col in ("expires_at", "updated_at", "delivered_at", "priority",
@@ -828,6 +836,25 @@ class Database:
                 " WHERE id = ?",
                 (state, turn_request_id, now, now, session_id),
             )
+
+    SEEN_EVENTS_DAYS = 14
+
+    def session_event_seen(self, event_id: str) -> bool:
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM session_events_seen WHERE event_id = ?;", (event_id,)
+            ).fetchone()
+            return row is not None
+
+    def mark_session_event(self, event_id: str, session_id: str) -> None:
+        now = datetime.now(timezone.utc)
+        horizon = (now - timedelta(days=self.SEEN_EVENTS_DAYS)).isoformat()
+        with self._get_connection() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO session_events_seen (event_id, session_id, at) VALUES (?, ?, ?);",
+                (event_id, session_id, now.isoformat()),
+            )
+            conn.execute("DELETE FROM session_events_seen WHERE at < ?;", (horizon,))
 
     def set_session_pinned(self, session_id: str, pinned: bool) -> bool:
         """Adds a session to the PWA home, or removes it; False if unknown."""
