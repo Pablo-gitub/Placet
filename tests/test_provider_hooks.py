@@ -159,3 +159,30 @@ def test_dry_run_writes_nothing(tmp_path):
     out = run_install(tmp_path, "--dry-run")
     assert all("verrebbe aggiornato" in line for line in out)
     assert not list(tmp_path.rglob("*.json"))
+
+
+# --- Opt-in per project -----------------------------------------------------------------
+
+
+def test_only_projects_that_opt_in_go_through_placet(tmp_path, monkeypatch):
+    from hooks.placet_common import active
+    monkeypatch.delenv("PLACET_HOOK_FORCE", raising=False)
+    project = tmp_path / "proj"
+    (project / "src" / "deep").mkdir(parents=True)
+    assert not active(str(project)) and not active(None)
+    (project / ".placet-on").touch()
+    assert active(str(project)) and active(str(project / "src" / "deep"))
+    (project / "src" / ".placet-off").touch()
+    assert not active(str(project / "src" / "deep"))
+    monkeypatch.setenv("PLACET_HOOK_FORCE", "1")
+    assert active(str(tmp_path / "anything"))
+
+
+def test_hook_stays_silent_outside_opted_in_projects(tmp_path):
+    seen = tmp_path / "calls"
+    env = {"PATH": "/usr/bin", "HOME": str(tmp_path), "PLACET_API_TOKEN": "t",
+           "PLACET_API_URL": "http://127.0.0.1:9"}
+    event = {"hook_event_name": "UserPromptSubmit", "session_id": "s", "cwd": str(tmp_path), "prompt": "x"}
+    res = subprocess.run([sys.executable, str(HOOKS / "claude_code.py"), "--agent", "claude"],
+                         input=json.dumps(event), capture_output=True, text=True, env=env, timeout=10)
+    assert res.returncode == 0 and res.stdout == "" and not seen.exists()

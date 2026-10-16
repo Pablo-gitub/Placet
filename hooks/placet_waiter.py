@@ -65,7 +65,7 @@ def main() -> int:
         return 0
     session_id = event.get("session_id")
     token = placet_common.token_for(agent) if agent else ""
-    if not session_id or not token or placet_common.opted_out(event.get("cwd")):
+    if not session_id or not token or not placet_common.active(event.get("cwd")):
         return 0
     lock = _acquire(session_id)
     if lock is None:

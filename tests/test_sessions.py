@@ -296,6 +296,7 @@ def live_server(setup):
 def test_waiter_wakes_the_session_with_exit_code_2(live_server, tmp_path):
     url, db = live_server
     db.upsert_session("g1", "gemini")
+    (tmp_path / ".placet-on").touch()  # the project opted in
     env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "PLACET_API_URL": url,
            "PLACET_API_TOKEN": "tok-gemini"}
     waiter = subprocess.Popen(
@@ -321,7 +322,8 @@ def test_second_waiter_for_the_same_session_steps_aside(live_server, tmp_path):
     db.upsert_session("g1", "gemini")
     env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "PLACET_API_URL": url,
            "PLACET_API_TOKEN": "tok-gemini"}
-    stdin = json.dumps({"session_id": "g1"})
+    (tmp_path / ".placet-on").touch()
+    stdin = json.dumps({"session_id": "g1", "cwd": str(tmp_path)})
     first = subprocess.Popen([sys.executable, str(WAITER), "--agent", "gemini"], env=env,
                              stdin=subprocess.PIPE, text=True)
     first.stdin.write(stdin)
@@ -333,13 +335,18 @@ def test_second_waiter_for_the_same_session_steps_aside(live_server, tmp_path):
     first.kill()
 
 
-def test_waiter_ignores_opted_out_projects(tmp_path):
-    (tmp_path / ".placet-off").touch()
+def test_waiter_ignores_projects_that_did_not_opt_in(tmp_path):
     env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "PLACET_API_TOKEN": "t",
            "PLACET_API_URL": "http://127.0.0.1:9"}
-    res = subprocess.run([sys.executable, str(WAITER), "--agent", "gemini"], env=env, text=True,
-                         input=json.dumps({"session_id": "x", "cwd": str(tmp_path)}), timeout=10)
-    assert res.returncode == 0
+    for marker in (None, ".placet-off"):
+        if marker:
+            (tmp_path / ".placet-on").touch()
+            (tmp_path / "sub").mkdir()
+            (tmp_path / "sub" / marker).touch()
+        cwd = tmp_path / "sub" if marker else tmp_path
+        res = subprocess.run([sys.executable, str(WAITER), "--agent", "gemini"], env=env, text=True,
+                             input=json.dumps({"session_id": "x", "cwd": str(cwd)}), timeout=10)
+        assert res.returncode == 0
 
 
 @pytest.mark.asyncio

@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { AlertCircle, CheckCircle, Home as HomeIcon, Radio, ShieldCheck } from "lucide-react";
+import { AlertCircle, CheckCircle, Home as HomeIcon, Radio, Settings as SettingsIcon, ShieldCheck } from "lucide-react";
 import Home from "./Home";
 import History from "./History";
 import SessionView from "./SessionView";
+import Settings from "./Settings";
 import { requestIdFromHash, routeFromHash } from "./decisions";
 
 function upsert(list, item) {
@@ -252,6 +253,14 @@ export default function App() {
             <ShieldCheck size={16} />
             Storico
           </button>
+          <button
+            data-testid="tab-settings"
+            className={`nav-tab ${route.view === "settings" ? "active" : ""}`}
+            onClick={() => navigate("#/impostazioni")}
+          >
+            <SettingsIcon size={16} />
+            Impostazioni
+          </button>
         </nav>
       )}
 
@@ -270,6 +279,7 @@ export default function App() {
         {route.view === "history" && (
           <History requests={requests} sessions={sessions} focusId={focusId} onOpenSession={openSession} />
         )}
+        {route.view === "settings" && <Settings />}
         {route.view === "session" && (
           <SessionView
             key={route.sessionId}

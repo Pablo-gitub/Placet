@@ -15,7 +15,7 @@ it: `python3 antigravity.py --agent gemini --event Stop`.
 
 Hooks are synchronous and Antigravity expects a JSON object on stdout: this
 script always prints "{}" and exits 0, so a Placet problem never blocks
-the agent. A `.placet-off` file in the project keeps it out of Placet.
+the agent. Only projects with a `.placet-on` file go through Placet.
 """
 import json
 import os
@@ -133,7 +133,7 @@ def main() -> None:
     session_id = payload.get("conversationId")
     token = placet_common.token_for(agent)
     body = build_event(event_name, payload)
-    if not session_id or body is None or not token or placet_common.opted_out(body.get("cwd")):
+    if not session_id or body is None or not token or not placet_common.active(body.get("cwd")):
         return
     body = {k: v for k, v in body.items() if v is not None}
     try:

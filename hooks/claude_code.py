@@ -19,7 +19,7 @@ Usage: python3 claude_code.py --agent claude (or PLACET_HOOK_AGENT=claude).
 Codex hooks receive the same fields (session_id, transcript_path, prompt,
 last_assistant_message, tool_name, ...): the same script serves them with
 `--agent codex --provider codex`.
-A `.placet-off` file in the project keeps its sessions out of Placet.
+Only projects with a `.placet-on` file (or Placet's own sessions) go through Placet.
 
 It never prints anything (UserPromptSubmit stdout would be added to the
 model's context) and always exits 0: a Placet problem must not block Claude.
@@ -123,7 +123,7 @@ def main() -> None:
     session_id = event.get("session_id")
     payload = build_event(event, provider=placet_common.option(sys.argv, "--provider") or "claude-code")
     token = placet_common.token_for(agent)
-    if not session_id or payload is None or not token or placet_common.opted_out(event.get("cwd")):
+    if not session_id or payload is None or not token or not placet_common.active(event.get("cwd")):
         return
     payload = {k: v for k, v in payload.items() if v is not None}
     try:

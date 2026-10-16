@@ -50,7 +50,8 @@ export function requestIdFromHash(hash) {
 }
 
 /**
- * Where the PWA is: "#/" home, "#/storico" history, "#/sessione/<id>" a
+ * Where the PWA is: "#/" home, "#/storico" history, "#/impostazioni"
+ * settings, "#/sessione/<id>" a
  * session's conversation; "#request-N" (notification links) is resolved by
  * the app once the request is loaded.
  */
@@ -58,5 +59,6 @@ export function routeFromHash(hash) {
   const session = /^#\/sessione\/([A-Za-z0-9_-]+)$/.exec(hash || "");
   if (session) return { view: "session", sessionId: session[1] };
   if (hash === "#/storico") return { view: "history" };
+  if (hash === "#/impostazioni") return { view: "settings" };
   return { view: "home" };
 }

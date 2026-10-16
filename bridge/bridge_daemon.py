@@ -11,6 +11,7 @@ from backend.app.models import RequestModel
 from bridge.channels import ChannelError, default_channels
 from bridge.stores import BridgeStore, LocalStore, Work
 from bridge.tmux_controller import SessionSpec, TmuxController
+from bridge.folders import FolderError, known_folders, set_folder
 from bridge.transcripts import TranscriptError, read_transcript
 
 logger = logging.getLogger(__name__)
@@ -183,16 +184,22 @@ class BridgeDaemon:
 
     def handle_job(self, job: dict) -> dict:
         """The result of one job, never an exception: the backend is waiting."""
-        if job.get("kind") != "transcript":
-            return {"ok": False, "error": "unknown_job", "message": f"Unknown job {job.get('kind')!r}."}
+        kind = job.get("kind")
         try:
-            page = read_transcript(
-                job.get("provider"), job.get("session_id", ""), agent_id=job.get("agent_id"),
-                before=job.get("before"), after=job.get("after"),
-                limit=job.get("limit") or 40,
-            )
+            if kind == "transcript":
+                page = read_transcript(
+                    job.get("provider"), job.get("session_id", ""), agent_id=job.get("agent_id"),
+                    before=job.get("before"), after=job.get("after"),
+                    limit=job.get("limit") or 40,
+                )
+            elif kind == "folders":
+                page = {"folders": known_folders(extra=job.get("extra") or [])}
+            elif kind == "set_folder":
+                page = set_folder(job.get("path", ""), bool(job.get("active")))
+            else:
+                return {"ok": False, "error": "unknown_job", "message": f"Unknown job {kind!r}."}
             return {"ok": True, "page": page}
-        except TranscriptError as e:
+        except (TranscriptError, FolderError) as e:
             return {"ok": False, "error": e.code, "message": str(e)}
         except Exception as e:
             logger.exception("Job %s failed", job.get("id"))

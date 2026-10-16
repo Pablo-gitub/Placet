@@ -155,9 +155,9 @@ La notifica annuncia la richiesta e apre la PWA. Non ha bottoni Approva/Rifiuta:
 ## 🤖 Configurazione degli Agenti
 
 ### 1. Avvia le sessioni tmux
-Crea le sessioni tmux con i nomi definiti in `AGENTS.md`. `PLACET_HOOK_AGENT` dice agli hook (vedi sotto) a quale agente appartiene la sessione:
+Crea le sessioni tmux con i nomi definiti in `AGENTS.md`. `PLACET_HOOK_AGENT` dice agli hook (vedi sotto) a quale agente appartiene la sessione; `PLACET_HOOK_FORCE=1` la fa passare da Placet anche se la cartella non è attiva:
 ```bash
-tmux new -s agent-claude -e PLACET_HOOK_AGENT=claude claude
+tmux new -s agent-claude -e PLACET_HOOK_AGENT=claude -e PLACET_HOOK_FORCE=1 claude
 tmux new -s agent-gemini gemini
 ```
 
@@ -169,7 +169,9 @@ Le sessioni Claude Code, sia dell'app desktop (tab Code) sia della CLI, si colle
 - **Risveglio:** un ascoltatore in background (`hooks/placet_waiter.py`, hook `asyncRewake`) resta in attesa sulla casella di posta della sessione e la risveglia quando arriva un esito o un prompt da un altro agente. Mentre la sessione è al lavoro, i messaggi restano in coda.
 - **Visibilità:** l'app desktop non mostra il testo del risveglio, quindi Placet chiede all'agente di riportare per prima cosa chi gli scrive e cosa chiede.
 
-Per attivarlo in tutte le sessioni di tutti i provider (Claude, Codex, Antigravity) usa l'installatore. Tocca solo le voci di Placet, fa una copia di ogni file prima di cambiarlo e si può rilanciare senza effetti:
+**Attivazione per progetto.** Gli hook si installano per tutte le sessioni, ma **restano in silenzio** finché il progetto non è attivo. Un progetto è attivo se la sua cartella, o una che la contiene, ha un file `.placet-on`. Il marcatore più vicino vince, e `.placet-off` esclude una sottocartella. Si accende e si spegne dalla PWA (**Impostazioni → Progetti in Placet**: il bridge elenca le cartelle che Claude, Codex e Antigravity conoscono) oppure dal terminale con `touch .placet-on`. Una sessione in un progetto spento non manda niente a Placet e nessuno la sveglia.
+
+Per installarli in tutte le sessioni di tutti i provider (Claude, Codex, Antigravity) usa l'installatore. Tocca solo le voci di Placet, fa una copia di ogni file prima di cambiarlo e si può rilanciare senza effetti:
 ```bash
 python3 /opt/placet/hooks/install.py
 ```
@@ -183,7 +185,6 @@ Servono anche gli strumenti MCP di Placet in tutte le sessioni:
 ```bash
 claude mcp add placet --scope user -e PYTHONPATH=/opt/placet -e PLACET_API_URL=http://127.0.0.1:8000 -e PLACET_AGENT_ID=claude -e PLACET_API_TOKEN=<PLACET_TOKEN_CLAUDE> -- /opt/placet/.venv/bin/python -m mcp_server.server
 ```
-Per tenere fuori da Placet le sessioni di un progetto, crea un file vuoto `.placet-off` nella sua cartella.
 
 Il canale tmux (sotto) resta disponibile, per le CLI senza hook e per le sessioni tmux senza ascoltatore attivo.
 
@@ -213,7 +214,7 @@ Aggiungi a `~/.claude/settings.json`:
   }
 }
 ```
-Lo script agisce solo nelle sessioni avviate con `PLACET_HOOK_AGENT`, quindi le tue sessioni Claude Code normali non vengono toccate. Non stampa mai nulla e termina sempre senza errori. Il token lo legge da `~/.config/placet/agent-tokens.env`.
+Lo script agisce solo nelle sessioni avviate con `PLACET_HOOK_AGENT` e nei progetti attivi (vedi sotto). Non stampa mai nulla e termina sempre senza errori. Il token lo legge da `~/.config/placet/agent-tokens.env`.
 
 **Conferma di ricezione (`ack_mode` in `AGENTS.md`):**
 - **`mcp`** (default): il messaggio iniettato chiede al modello di chiamare `placet_ack` prima di iniziare. Con gli hook attivi la conferma arriva comunque dall'hook, e la chiamata del modello diventa innocua.
