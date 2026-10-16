@@ -91,8 +91,8 @@ Placet è un **punto unico di supervisione umana e bus di cooperazione per agent
 | ID | Requisito | Stato |
 |---|---|---|
 | RF-30 | La PWA mostra la **conversazione** di una sessione: in fondo l'ultimo messaggio e l'eventuale domanda, i precedenti si caricano scorrendo verso l'alto | [Deciso] |
-| RF-31 | Lettura **a richiesta tramite il bridge**: nessuna copia delle conversazioni sul backend | [Deciso] |
-| RF-32 | **Privacy**: si mostrano i messaggi dell'utente e le risposte testuali dell'agente; le azioni diventano una riga ("ha eseguito `cmd`"); risultati dei tool e ragionamento interno non si mostrano. Le compattazioni appaiono come separatore | [Deciso] |
+| RF-31 | Lettura **a richiesta tramite il bridge**: nessuna copia delle conversazioni sul backend | [Implementato] (Claude, Codex, Antigravity) |
+| RF-32 | **Privacy**: si mostrano i messaggi dell'utente e le risposte testuali dell'agente; le azioni diventano una riga ("ha eseguito `cmd`"); risultati dei tool e ragionamento interno non si mostrano. Le compattazioni appaiono come separatore | [Implementato] nel bridge; vista PWA [Deciso] |
 | RF-33 | Si risponde alla domanda **dentro la conversazione** | [Deciso] |
 | RF-34 | Si può **scrivere a una sessione** anche senza domande in corso; il messaggio la risveglia come se lo avessi scritto al PC, e nella PWA appare come messaggio tuo | [Deciso] |
 | RF-35 | Se la sessione sta lavorando: **In coda** (a fine turno) o **Subito** (inserito nel turno in corso dopo la prossima azione). Un'impostazione dà il default, modificabile per ogni messaggio | [Deciso] |
@@ -139,7 +139,7 @@ Placet è un **punto unico di supervisione umana e bus di cooperazione per agent
 | RS-03 | Identità degli agenti dal token (`PLACET_API_TOKEN`), mai dal corpo della richiesta | [Implementato] |
 | RS-04 | **Chi propone non esegue:** gli agenti non hanno credenziali per azioni pubbliche o distruttive | [Deciso] |
 | RS-05 | **Scrivere a una sessione o crearne una equivale a comandare il PC da remoto**: consentito solo all'identità Tailscale autorizzata | [Deciso] |
-| RS-06 | Il bridge legge solo i file di conversazione dei provider (es. `~/.claude/projects`, `~/.codex/sessions`, `~/.gemini/antigravity/brain`) e solo per sessioni registrate; mai un percorso passato dal backend | [Deciso] |
+| RS-06 | Il bridge legge solo i file di conversazione dei provider (es. `~/.claude/projects`, `~/.codex/sessions`, `~/.gemini/antigravity/brain`) e solo per sessioni registrate; mai un percorso passato dal backend | [Implementato] |
 | RS-07 | Le API **non documentate** (es. language server di Antigravity) stanno dietro un adattatore isolato, con controllo di versione e ripiego (tmux + CLI) | [Deciso] |
 | RS-08 | Le relazioni `automatic` sono da usare per scambi a basso rischio; tutto resta visibile nello storico | [Deciso] |
 

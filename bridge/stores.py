@@ -29,6 +29,8 @@ from bridge.tmux_controller import SessionSpec
 logger = logging.getLogger(__name__)
 
 BRIDGE_ACTOR = "bridge"
+# How long one poll for jobs (conversation pages) waits on the backend.
+JOBS_WAIT_SECONDS = 25
 
 
 @dataclass
@@ -112,6 +114,7 @@ class HttpStore:
         base_url: Optional[str] = None,
         token: Optional[str] = None,
         client: Optional[httpx.Client] = None,
+        jobs_client: Optional[httpx.Client] = None,
     ):
         base_url = (base_url or os.environ.get("PLACET_API_URL", "http://127.0.0.1:8000")).rstrip("/")
         token = token if token is not None else os.environ.get("PLACET_BRIDGE_TOKEN", "")
@@ -120,6 +123,10 @@ class HttpStore:
         self.client = client or httpx.Client(timeout=10.0)
         self.client.base_url = base_url
         self.client.headers["Authorization"] = f"Bearer {token}"
+        # Jobs are long-polled from another thread: a client of their own.
+        self.jobs_client = jobs_client or httpx.Client(timeout=JOBS_WAIT_SECONDS + 15.0)
+        self.jobs_client.base_url = base_url
+        self.jobs_client.headers["Authorization"] = f"Bearer {token}"
         self._sessions: Dict[str, SessionSpec] = {}
         self._sessions_at = 0.0
 
@@ -170,3 +177,16 @@ class HttpStore:
             }
             self._sessions_at = time.monotonic()
         return self._sessions.get(agent_id)
+
+    # --- Jobs someone is waiting for (conversation pages) ---------------------
+
+    def take_jobs(self, wait_seconds: int = JOBS_WAIT_SECONDS) -> List[dict]:
+        resp = self.jobs_client.get("/api/bridge/jobs", params={"wait_seconds": wait_seconds})
+        if resp.status_code == 204:
+            return []
+        resp.raise_for_status()
+        return list(resp.json().get("jobs", []))
+
+    def post_job_result(self, job_id: str, result: dict) -> None:
+        resp = self.jobs_client.post(f"/api/bridge/jobs/{job_id}/result", json=result)
+        resp.raise_for_status()

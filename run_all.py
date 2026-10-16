@@ -20,6 +20,10 @@ def start_bridge():
 
 
 if __name__ == "__main__":
+    import os
+    # One process, running as the user: the backend reads conversation
+    # pages itself instead of asking the bridge (production never does).
+    os.environ.setdefault("PLACET_TRANSCRIPTS_LOCAL", "1")
     from backend.app.main import app
     from backend.app.serve import serve
 

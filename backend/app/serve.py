@@ -21,10 +21,14 @@ logger = logging.getLogger(__name__)
 
 
 class _SkipBridgePolling(logging.Filter):
-    """The bridge polls /api/bridge/work every 2 seconds: keep it out of the access log."""
+    """
+    The bridge polls /api/bridge/work every 2 seconds and long-polls
+    /api/bridge/jobs without pause: keep both out of the access log.
+    """
 
     def filter(self, record: logging.LogRecord) -> bool:
-        return "/api/bridge/work" not in record.getMessage()
+        message = record.getMessage()
+        return "/api/bridge/work" not in message and "GET /api/bridge/jobs" not in message
 
 
 def default_human_socket() -> str:

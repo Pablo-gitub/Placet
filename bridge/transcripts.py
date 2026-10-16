@@ -1,0 +1,435 @@
+"""
+Reads the conversation of an agent session from the provider's own files,
+for the PWA (RF-30, RF-32).
+
+Runs in the bridge, as the user who owns the sessions: the backend never
+reads these files. The file is located from the provider and the session
+id only, under the provider's own folder (RS-06); no path ever comes from
+the backend.
+
+All supported providers write JSON Lines, so a page is a byte range of the
+file: the cursor is the offset of a line. Reading goes backwards from the end
+(`before`) for older messages, forwards (`after`) for new ones.
+
+What is shown: the user's messages and the agent's text answers; each tool
+call becomes one `action` entry; tool results and internal reasoning are
+never returned.
+"""
+import json
+import os
+import re
+from pathlib import Path
+from typing import Callable, Dict, Iterator, List, Optional, Tuple
+
+SESSION_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+DEFAULT_LIMIT = 40
+MAX_LIMIT = 200
+MAX_TEXT_CHARS = 20000
+MAX_DETAIL_CHARS = 300
+BLOCK_BYTES = 64 * 1024
+# Forward reads (live updates) stop after this much: the client asks again.
+MAX_FORWARD_BYTES = 4 * 1024 * 1024
+
+
+class TranscriptError(Exception):
+    """`code` is one of: invalid, unsupported, not_found."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+def _clip(text: str, limit: int = MAX_TEXT_CHARS) -> str:
+    text = text.strip()
+    return text if len(text) <= limit else text[:limit] + "…"
+
+
+def _entry(role: str, text: str = "", at: Optional[str] = None, **extra) -> dict:
+    entry = {"role": role, "text": text, "at": at}
+    entry.update({k: v for k, v in extra.items() if v is not None})
+    return entry
+
+
+def _action(name: str, kind: str, detail: Optional[str], at: Optional[str]) -> dict:
+    detail = _clip(" ".join(str(detail).split()), MAX_DETAIL_CHARS) if detail else None
+    return _entry("action", at=at, tool=name, kind=kind, detail=detail)
+
+
+def _placet_or_user(text: str, at: Optional[str]) -> dict:
+    return _entry("placet" if text.lstrip().startswith("[Placet") else "user", _clip(text), at)
+
+
+# --- Claude Code ----------------------------------------------------------------
+
+_CLAUDE_TOOLS = {
+    "Bash": ("command", "command"),
+    "Read": ("read", "file_path"),
+    "Edit": ("edit", "file_path"),
+    "MultiEdit": ("edit", "file_path"),
+    "Write": ("write", "file_path"),
+    "NotebookEdit": ("edit", "notebook_path"),
+    "Grep": ("search", "pattern"),
+    "Glob": ("search", "pattern"),
+    "WebFetch": ("web", "url"),
+    "WebSearch": ("web", "query"),
+    "Skill": ("skill", "skill"),
+    "Task": ("agent", "description"),
+    "Agent": ("agent", "description"),
+    "ToolSearch": ("tools", "query"),
+    "TodoWrite": ("plan", None),
+}
+_STOP_HOOK = re.compile(r'blocking error from command "[^"]*":\s*(.*?)\s*(?:</system-reminder>|$)', re.S)
+
+
+def _claude_user_text(text: str, at: Optional[str]) -> List[dict]:
+    stripped = text.lstrip()
+    if stripped.startswith("<task-notification>"):
+        # A Placet wake-up delivered by the background waiter (asyncRewake).
+        match = _STOP_HOOK.search(text)
+        return [_entry("placet", _clip(match.group(1)), at)] if match else []
+    if stripped.startswith("<command-name>"):
+        name = re.search(r"<command-name>(.*?)</command-name>", text, re.S)
+        args = re.search(r"<command-args>(.*?)</command-args>", text, re.S)
+        command = " ".join(p.strip() for p in (name and name.group(1), args and args.group(1)) if p and p.strip())
+        return [_entry("command", command, at)] if command else []
+    if stripped.startswith(("<local-command-", "<system-reminder>", "<bash-")):
+        return []
+    return [_placet_or_user(text, at)] if stripped else []
+
+
+def parse_claude(obj: dict) -> List[dict]:
+    if obj.get("isSidechain"):
+        return []  # a subagent's own conversation
+    kind, at = obj.get("type"), obj.get("timestamp")
+    if kind == "system":
+        return [_entry("compact", at=at)] if obj.get("subtype") == "compact_boundary" else []
+    message = obj.get("message") or {}
+    content = message.get("content")
+    if kind == "user":
+        if obj.get("isMeta") or obj.get("isCompactSummary"):
+            return []
+        if isinstance(content, str):
+            return _claude_user_text(content, at)
+        if isinstance(content, list):
+            parts = []
+            for block in content:
+                if block.get("type") == "text":
+                    parts.append(block.get("text", ""))
+                elif block.get("type") == "image":
+                    parts.append("[immagine]")
+            text = "\n".join(p for p in parts if p.strip())
+            return _claude_user_text(text, at) if text else []
+        return []
+    if kind == "assistant" and isinstance(content, list):
+        if obj.get("isApiErrorMessage"):
+            texts = [b.get("text", "") for b in content if b.get("type") == "text"]
+            return [_entry("notice", _clip(" ".join(texts)), at)]
+        out = []
+        for block in content:
+            if block.get("type") == "text" and block.get("text", "").strip():
+                out.append(_entry("assistant", _clip(block["text"]), at))
+            elif block.get("type") == "tool_use":
+                name = block.get("name", "")
+                args = block.get("input") or {}
+                if name.startswith("mcp__"):
+                    _, server, tool = (name.split("__", 2) + ["", ""])[:3]
+                    out.append(_action(tool or name, "mcp", server, at))
+                    continue
+                tool_kind, key = _CLAUDE_TOOLS.get(name, ("other", None))
+                out.append(_action(name, tool_kind, args.get(key) if key else None, at))
+        return out
+    return []
+
+
+# --- Codex ----------------------------------------------------------------------
+
+
+def _codex_text(content) -> str:
+    return "\n".join(
+        part.get("text", "") for part in content or [] if isinstance(part, dict)
+    )
+
+
+def parse_codex(obj: dict) -> List[dict]:
+    at = obj.get("timestamp")
+    if obj.get("type") == "compacted":
+        return [_entry("compact", at=at)]
+    payload = obj.get("payload") or {}
+    if obj.get("type") != "event_msg" or payload.get("type") != "item_completed":
+        return []
+    item = payload.get("item") or {}
+    kind = item.get("type")
+    if kind == "UserMessage":
+        text = _codex_text(item.get("content"))
+        return [_placet_or_user(text, at)] if text.strip() else []
+    if kind == "AgentMessage":
+        text = _codex_text(item.get("content"))
+        return [_entry("assistant", _clip(text), at)] if text.strip() else []
+    if kind == "CommandExecution":
+        command = item.get("command")
+        if isinstance(command, list):
+            # ["/bin/bash", "-lc", "<script>"]: show the script.
+            command = command[-1] if command else ""
+        return [_action("exec", "command", command, at)]
+    if kind == "McpToolCall":
+        return [_action(item.get("tool", ""), "mcp", item.get("server"), at)]
+    if kind == "Extension":
+        action = item.get("action") or {}
+        queries = action.get("queries") or [item.get("query") or action.get("query")]
+        return [_action(item.get("kind", "extension"), "web", " · ".join(q for q in queries if q), at)]
+    if kind == "FileChange":
+        paths = [c.get("path") for c in item.get("changes") or [] if isinstance(c, dict)]
+        return [_action("apply_patch", "edit", ", ".join(p for p in paths if p), at)]
+    if kind == "ContextCompaction":
+        return []  # the `compacted` line already marks it
+    if kind in ("Reasoning",):
+        return []
+    return [_action(kind or "tool", "other", None, at)] if kind else []
+
+
+# --- Antigravity ------------------------------------------------------------------
+
+_ANTIGRAVITY_TOOLS = {
+    "run_command": ("command", "CommandLine"),
+    "view_file": ("read", "AbsolutePath"),
+    "list_dir": ("read", "DirectoryPath"),
+    "replace_file_content": ("edit", "TargetFile"),
+    "write_to_file": ("write", "TargetFile"),
+    "grep_search": ("search", "Query"),
+    "find_by_name": ("search", "Pattern"),
+    "search_web": ("web", "query"),
+    "read_url_content": ("web", "Url"),
+}
+_USER_REQUEST = re.compile(r"<USER_REQUEST>\s*(.*?)\s*</USER_REQUEST>", re.S)
+
+
+def _antigravity_arg(value):
+    # Arguments are stored JSON-encoded: "\"git status\"".
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+            return decoded if isinstance(decoded, str) else value
+        except ValueError:
+            return value
+    return value
+
+
+def parse_antigravity(obj: dict) -> List[dict]:
+    kind, at = obj.get("type"), obj.get("created_at")
+    content = obj.get("content") or ""
+    if kind == "USER_INPUT":
+        match = _USER_REQUEST.search(content)
+        text = match.group(1) if match else content
+        return [_placet_or_user(text, at)] if text.strip() else []
+    if kind == "PLANNER_RESPONSE":
+        out = [_entry("assistant", _clip(content), at)] if content.strip() else []
+        for call in obj.get("tool_calls") or []:
+            name = call.get("name", "")
+            args = {k: _antigravity_arg(v) for k, v in (call.get("args") or {}).items()}
+            tool_kind, key = _ANTIGRAVITY_TOOLS.get(name, ("other", None))
+            detail = args.get(key) if key else None
+            out.append(_action(name, tool_kind, detail or args.get("toolSummary"), at))
+        return out
+    if kind == "CHECKPOINT":
+        return [_entry("compact", at=at)]  # the conversation was summarized here
+    if kind == "ERROR_MESSAGE":
+        return [_entry("notice", _clip(content, MAX_DETAIL_CHARS), at)]
+    return []
+
+
+# --- Locating the file --------------------------------------------------------------
+
+
+def _claude_file(home: Path, session_id: str) -> List[Tuple[Path, Path]]:
+    root = home / ".claude" / "projects"
+    return [(root, p) for p in root.glob(f"*/{session_id}.jsonl")]
+
+
+def _codex_file(home: Path, session_id: str) -> List[Tuple[Path, Path]]:
+    # rollout-<date>-<id>.jsonl, or rollout-<date>-<parent>_<id>.jsonl for forks.
+    name = re.compile(rf"^rollout-.*[-_]{re.escape(session_id)}(_[A-Za-z0-9-]+)?\.jsonl$")
+    found = []
+    for root in (home / ".codex" / "sessions", home / ".codex" / "archived_sessions"):
+        found += [(root, p) for p in root.glob(f"**/rollout-*{session_id}*.jsonl") if name.match(p.name)]
+    return found
+
+
+def _antigravity_file(home: Path, session_id: str) -> List[Tuple[Path, Path]]:
+    found = []
+    for app_dir in ("antigravity", "antigravity-cli"):
+        root = home / ".gemini" / app_dir / "brain"
+        path = root / session_id / ".system_generated" / "logs" / "transcript.jsonl"
+        if path.is_file():
+            found.append((root, path))
+    return found
+
+
+Provider = Tuple[Callable[[Path, str], List[Tuple[Path, Path]]], Callable[[dict], List[dict]]]
+PROVIDERS: Dict[str, Provider] = {
+    "claude-code": (_claude_file, parse_claude),
+    "codex": (_codex_file, parse_codex),
+    "antigravity": (_antigravity_file, parse_antigravity),
+}
+# Sessions registered without a provider: guess it from the agent.
+AGENT_PROVIDERS = {"claude": "claude-code", "codex": "codex", "gemini": "antigravity"}
+
+
+def provider_for(provider: Optional[str], agent_id: Optional[str]) -> Optional[str]:
+    if provider in PROVIDERS:
+        return provider
+    return AGENT_PROVIDERS.get(agent_id or "")
+
+
+# (provider, session id, home) -> file already validated, to avoid globbing
+# the provider's folder on every page.
+_located: Dict[Tuple[str, str, Path], Path] = {}
+
+
+def locate(provider: str, session_id: str, home: Optional[Path] = None) -> Path:
+    if provider not in PROVIDERS:
+        raise TranscriptError("unsupported", f"Provider {provider!r} is not supported.")
+    if not SESSION_ID.match(session_id or ""):
+        raise TranscriptError("invalid", "Invalid session id.")
+    home = home or Path.home()
+    key = (provider, session_id, home)
+    if key in _located and _located[key].is_file():
+        return _located[key]
+    candidates = []
+    for root, path in PROVIDERS[provider][0](home, session_id):
+        real, real_root = Path(os.path.realpath(path)), Path(os.path.realpath(root))
+        # A symlink must not lead outside the provider's folder.
+        if real.is_file() and real.is_relative_to(real_root):
+            candidates.append(real)
+    if not candidates:
+        raise TranscriptError("not_found", "Conversation file not found on this computer.")
+    _located[key] = max(candidates, key=lambda p: p.stat().st_mtime)
+    return _located[key]
+
+
+# --- Paging ----------------------------------------------------------------------------
+
+
+def _lines_backwards(f, end: int) -> Iterator[Tuple[int, bytes]]:
+    """(offset, line) of the complete lines before `end`, newest first."""
+    pos, tail = end, b""
+    while pos > 0:
+        size = min(BLOCK_BYTES, pos)
+        pos -= size
+        f.seek(pos)
+        chunk = f.read(size) + tail
+        lines = chunk.split(b"\n")
+        tail = lines[0]  # may continue in the previous block
+        offset = pos + len(chunk)
+        for line in reversed(lines[1:]):
+            offset -= len(line) + 1
+            if line.strip():
+                yield offset + 1, line
+    if tail.strip():
+        yield 0, tail
+
+
+def _complete_end(f, size: int) -> int:
+    """Offset just after the last newline: a last line without one is still being written."""
+    pos = size
+    while pos > 0:
+        start = max(0, pos - BLOCK_BYTES)
+        f.seek(start)
+        cut = f.read(pos - start).rfind(b"\n")
+        if cut >= 0:
+            return start + cut + 1
+        pos = start
+    return 0
+
+
+def _parse(parser: Callable[[dict], List[dict]], line: bytes) -> List[dict]:
+    try:
+        obj = json.loads(line)
+    except ValueError:
+        return []
+    if not isinstance(obj, dict):
+        return []
+    try:
+        return parser(obj)
+    except (AttributeError, TypeError, KeyError):
+        return []  # an unknown variant of a known record: skip it
+
+
+def _with_cursor(offset: int, entries: List[dict]) -> List[dict]:
+    for i, entry in enumerate(entries):
+        entry["cursor"] = f"{offset}:{i}"
+    return entries
+
+
+def read_page(
+    path: Path,
+    parser: Callable[[dict], List[dict]],
+    before: Optional[int] = None,
+    after: Optional[int] = None,
+    limit: int = DEFAULT_LIMIT,
+) -> dict:
+    """
+    Backwards (default): up to `limit` entries ending before offset `before`
+    (or the end of the file), oldest first, plus `before` for the next older
+    page (None at the beginning). Forwards (`after`): every entry after that
+    offset. Both return `end`, the offset to pass as `after` next time.
+    A last line still being written (no newline yet) is left for later.
+    """
+    limit = max(1, min(int(limit), MAX_LIMIT))
+    with open(path, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        complete = _complete_end(f, f.tell())
+
+        if after is not None:
+            start = max(0, min(int(after), complete))
+            f.seek(start)
+            data = f.read(min(complete - start, MAX_FORWARD_BYTES))
+            stop = data.rfind(b"\n") + 1
+            if stop == 0 and data:
+                # One line longer than the read window (a huge tool output):
+                # skip to its end. `complete` follows a newline, so one exists.
+                pos = start + len(data)
+                while pos < complete:
+                    cut = f.read(BLOCK_BYTES).find(b"\n")
+                    if cut >= 0:
+                        pos += cut + 1
+                        break
+                    pos += BLOCK_BYTES
+                return {"messages": [], "before": None, "end": min(pos, complete)}
+            messages, offset = [], start
+            for line in data[:stop].split(b"\n")[:-1]:
+                if line.strip():
+                    messages += _with_cursor(offset, _parse(parser, line))
+                offset += len(line) + 1
+            return {"messages": messages, "before": None, "end": start + stop}
+
+        end = complete if before is None else max(0, min(int(before), complete))
+        collected: List[List[dict]] = []
+        count, oldest = 0, end
+        for offset, line in _lines_backwards(f, end):
+            entries = _with_cursor(offset, _parse(parser, line))
+            oldest = offset
+            if entries:
+                collected.append(entries)
+                count += len(entries)
+                if count >= limit:
+                    break
+        messages = [e for entries in reversed(collected) for e in entries]
+        return {"messages": messages, "before": oldest if oldest > 0 else None, "end": complete}
+
+
+def read_transcript(
+    provider: Optional[str],
+    session_id: str,
+    agent_id: Optional[str] = None,
+    before: Optional[int] = None,
+    after: Optional[int] = None,
+    limit: int = DEFAULT_LIMIT,
+    home: Optional[Path] = None,
+) -> dict:
+    """A page of a session's conversation; raises TranscriptError."""
+    resolved = provider_for(provider, agent_id)
+    if resolved is None:
+        raise TranscriptError("unsupported", f"Provider {provider!r} is not supported.")
+    path = locate(resolved, session_id, home)
+    page = read_page(path, PROVIDERS[resolved][1], before=before, after=after, limit=limit)
+    return {"session_id": session_id, "provider": resolved, **page}

@@ -49,7 +49,8 @@ Tre flussi:
 - **Stack:** Python 3.11+, FastAPI, SQLite in WAL, Pydantic, Uvicorn.
 - **Due ingressi nello stesso processo** (`serve.py`): TCP `127.0.0.1:8000` per agenti e bridge; socket Unix `/run/placet/human.sock` per la PWA via `tailscale serve`. Se uno dei due si ferma, si ferma tutto.
 - **Responsabilità:** richieste e loro ciclo di vita, registro delle sessioni (dagli hook), inbox per sessione, decisione su chi riceve cosa, SSE (`request_update`, `session_update`), notifiche ntfy, sweeper di scadenze e riconsegne (ogni 30 s).
-- *(da implementare)* nodi, progetti, relazioni e tipi; inoltro alla PWA delle pagine di chat lette dal bridge; consumi per provider.
+- Inoltro alla PWA delle pagine di chat lette dal bridge (§5).
+- *(da implementare)* nodi, progetti, relazioni e tipi; consumi per provider.
 
 ### 2.2 Server MCP (`mcp_server`)
 - Un processo stdio per sessione, configurato nel client: Claude (`.mcp.json` o `claude mcp add`), Codex (`codex mcp add`, in `~/.codex/config.toml`), Antigravity 2.0 (`~/.gemini/config/mcp_config.json`; **non** `~/.gemini/antigravity/mcp_config.json`).
@@ -158,17 +159,21 @@ APPROVED ─claim─► DELIVERING ─ack─► EXECUTING ─reply─► COMPLET
 
 ---
 
-## 5. Lettura delle chat *(da implementare)*
+## 5. Lettura delle chat
 
 ```text
-PWA ── GET /api/sessions/{id}/transcript?before=<cursore> ──► backend
-backend ── lavoro "leggi chat" nella coda del bridge (/api/bridge/work) ──► bridge
-bridge ── legge il file dal fondo, filtra, restituisce una pagina ──► backend (attesa max ~5 s) ──► PWA
+PWA ── GET /api/sessions/{id}/transcript?before=<offset>|after=<offset>&limit=N ──► backend
+backend ── lavoro "transcript" (GET /api/bridge/jobs, long-polling) ──► bridge
+bridge ── trova il file, lo legge dal fondo, filtra ──► POST /api/bridge/jobs/{id}/result ──► backend ──► PWA
 ```
+- **Canale dei lavori** (`backend/app/bridge_jobs.py`): il bridge tiene aperto un long-polling (25 s) su `/api/bridge/jobs` in un thread suo; il backend accoda il lavoro, sveglia il bridge e aspetta il risultato fino a 8 s. Se il bridge non si è fatto vivo nell'ultimo minuto la risposta è subito 503 "Il PC non risponde"; se non risponde in tempo, 504. I lavori stanno in memoria: un lavoro perso è solo una pagina da ricaricare. Misurato: 16–46 ms per pagina.
+- **Lettori** (`bridge/transcripts.py`), uno per provider, tutti su file JSON Lines. Pagina = intervallo di byte: `before` legge a ritroso a blocchi da 64 KB fino a `limit` voci, `after` legge le righe nuove. Ogni voce ha `role` (`user`, `assistant`, `action`, `placet`, `command`, `compact`, `notice`), `text`, `at`, `cursor`; le azioni hanno `tool`, `kind` (`command`, `read`, `edit`, `write`, `search`, `web`, `mcp`, `skill`, `agent`, …) e `detail`. Una riga ancora in scrittura (senza a capo) viene lasciata alla lettura successiva.
+- **Sviluppo in un processo** (`run_all.py`, `PLACET_TRANSCRIPTS_LOCAL=1`): il backend legge da sé con gli stessi lettori.
 - **Cursore:** posizione (byte o indice di passo) della voce più vecchia restituita; il bridge legge a ritroso a blocchi.
 - **Filtro (RF-32):** messaggi dell'utente e risposte testuali; azioni come una riga; niente risultati dei tool né ragionamento. Voci di servizio scartate (Claude: `attachment`, `queue-operation`, `file-history-snapshot`, …).
 - **Aggiornamento dal vivo:** l'evento `stop` di una sessione produce `session_update` via SSE; la PWA chiede solo i messaggi nuovi.
-- **Sicurezza (RS-06):** il bridge risolve il file dalla sessione registrata (percorso dato dall'hook, verificato sotto le cartelle dei provider), mai da un percorso passato dal backend.
+- **Sicurezza (RS-06):** il backend passa solo provider e id della sessione registrata; il bridge cerca il file nelle cartelle del provider (`~/.claude/projects/*/<id>.jsonl`, `~/.codex/sessions/**/rollout-*-<id>.jsonl`, `~/.gemini/antigravity/brain/<id>/…/transcript.jsonl`), accetta solo id `[A-Za-z0-9_-]` e rifiuta i link simbolici che portano fuori da quelle cartelle.
+- *(da implementare, blocco 2)* la vista nella PWA.
 
 ---
 

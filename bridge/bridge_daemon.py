@@ -1,5 +1,6 @@
 import time
 import logging
+import threading
 from typing import List, Optional, Set
 
 from backend.app.config import PlacetConfig
@@ -8,6 +9,7 @@ from backend.app import envelopes
 from backend.app.models import RequestModel
 from bridge.stores import BridgeStore, LocalStore, Work
 from bridge.tmux_controller import SessionSpec, TmuxController
+from bridge.transcripts import TranscriptError, read_transcript
 
 logger = logging.getLogger(__name__)
 
@@ -141,8 +143,41 @@ class BridgeDaemon:
         delivered = self.process_pending_results(busy_sessions, work.results, busy_agents)
         return delivered + self.process_pending_injections(busy_sessions, work.injections, busy_agents)
 
+    # --- Jobs someone is waiting for (conversation pages) ---------------------
+
+    def handle_job(self, job: dict) -> dict:
+        """The result of one job, never an exception: the backend is waiting."""
+        if job.get("kind") != "transcript":
+            return {"ok": False, "error": "unknown_job", "message": f"Unknown job {job.get('kind')!r}."}
+        try:
+            page = read_transcript(
+                job.get("provider"), job.get("session_id", ""), agent_id=job.get("agent_id"),
+                before=job.get("before"), after=job.get("after"),
+                limit=job.get("limit") or 40,
+            )
+            return {"ok": True, "page": page}
+        except TranscriptError as e:
+            return {"ok": False, "error": e.code, "message": str(e)}
+        except Exception as e:
+            logger.exception("Job %s failed", job.get("id"))
+            return {"ok": False, "error": "internal", "message": str(e)}
+
+    def serve_jobs_forever(self):
+        backoff = 1.0
+        while True:
+            try:
+                for job in self.store.take_jobs():
+                    self.store.post_job_result(job["id"], self.handle_job(job))
+                backoff = 1.0
+            except Exception as e:
+                logger.warning(f"Bridge jobs: {e}")
+                time.sleep(backoff)
+                backoff = min(backoff * 2, 30.0)
+
     def run_forever(self, interval_seconds: float = 2.0):
         logger.info("Starting Placet Bridge Daemon...")
+        if hasattr(self.store, "take_jobs"):
+            threading.Thread(target=self.serve_jobs_forever, name="bridge-jobs", daemon=True).start()
         while True:
             try:
                 self.run_loop_step()

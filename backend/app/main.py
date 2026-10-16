@@ -43,6 +43,7 @@ from backend.app.models import (
     is_settled,
 )
 from backend.app import envelopes
+from backend.app.bridge_jobs import BridgeJobs, BridgeOffline, BridgeTimeout
 from backend.app.notifier import NtfyConfig, send_ntfy_alert, send_ntfy_notification
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,24 @@ class SessionEventPayload(BaseModel):
     last_message: Optional[str] = None
 
 
+class BridgeJobResult(BaseModel):
+    """What the bridge reports for a job: a result, or an error code."""
+    ok: bool
+    page: Optional[dict] = None
+    error: Optional[str] = None
+    message: Optional[str] = None
+
+
+# Conversation pages (RF-30): what the bridge's error codes mean for the PWA.
+TRANSCRIPT_ERRORS = {
+    "not_found": (404, "La conversazione non si trova su questo PC."),
+    "unsupported": (422, "Lettura della conversazione non supportata per questo provider."),
+    "invalid": (400, "Sessione non valida."),
+}
+TRANSCRIPT_MAX_LIMIT = 200
+BRIDGE_JOBS_WAIT_SECONDS = 30
+
+
 class AgentStatePayload(BaseModel):
     state: Literal["busy", "idle"]
     request_id: Optional[int] = None
@@ -93,6 +112,7 @@ def create_app(
     allowed_users: Optional[List[str]] = None,
     cors_origins: Optional[List[str]] = None,
     bridge_token: Optional[str] = None,
+    transcripts_local: Optional[bool] = None,
 ) -> FastAPI:
     # Waiters registered by long-polling calls, keyed by request id.
     request_waiters: Dict[int, Set[asyncio.Event]] = {}
@@ -100,6 +120,13 @@ def create_app(
 
     # Session inboxes waiting for something to change.
     inbox_waiters: Set[asyncio.Event] = set()
+
+    # Work for the bridge that someone is waiting for (conversation pages).
+    bridge_jobs = BridgeJobs()
+    if transcripts_local is None:
+        # Single-process development (run_all.py): the backend runs as the
+        # user and reads conversations itself. Never in production.
+        transcripts_local = os.environ.get("PLACET_TRANSCRIPTS_LOCAL") == "1"
 
     def _broadcast(item):
         for q in list(sse_subscribers):
@@ -709,7 +736,73 @@ def create_app(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not for the bridge.")
         return db.list_sessions(agent_id=agent_id, include_ended=include_ended)
 
+    def transcript_error(code: Optional[str], message: Optional[str] = None) -> HTTPException:
+        status_code, detail = TRANSCRIPT_ERRORS.get(code or "", (502, message or "Errore del bridge."))
+        return HTTPException(status_code=status_code, detail=detail)
+
+    @app.get("/api/sessions/{session_id}/transcript")
+    async def session_transcript(
+        session_id: str,
+        before: Optional[int] = Query(None, ge=0),
+        after: Optional[int] = Query(None, ge=0),
+        limit: int = Query(40, ge=1, le=TRANSCRIPT_MAX_LIMIT),
+        who: Principal = Depends(principal),
+    ):
+        """
+        A page of a session's conversation, read by the bridge from the
+        provider's files (RF-30, RF-31): the newest `limit` entries, older
+        ones with `before`, new ones with `after` (the `end` of a page).
+        """
+        require_human(who)
+        session = db.get_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        params = {
+            "session_id": session.id, "provider": session.provider, "agent_id": session.agent_id,
+            "before": before, "after": after, "limit": limit,
+        }
+        if transcripts_local:
+            from bridge.transcripts import TranscriptError, read_transcript
+            try:
+                return await asyncio.to_thread(read_transcript, **params)
+            except TranscriptError as e:
+                raise transcript_error(e.code) from None
+        try:
+            result = await bridge_jobs.run("transcript", params)
+        except BridgeOffline:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Il PC non risponde: il bridge non è attivo.",
+            ) from None
+        except BridgeTimeout:
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail="Il PC non ha risposto in tempo.",
+            ) from None
+        if not result.get("ok"):
+            raise transcript_error(result.get("error"), result.get("message"))
+        return result.get("page") or {}
+
     # --- Local bridge (tmux injection and outcome delivery) -----------------
+
+    @app.get("/api/bridge/jobs")
+    async def bridge_take_jobs(
+        wait_seconds: int = Query(0, ge=0, le=BRIDGE_JOBS_WAIT_SECONDS),
+        who: Principal = Depends(principal),
+    ):
+        """Long-polled by the bridge: work someone is waiting for, or 204."""
+        require_bridge(who)
+        jobs = await bridge_jobs.take(wait_seconds)
+        if not jobs:
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+        return {"jobs": jobs}
+
+    @app.post("/api/bridge/jobs/{job_id}/result")
+    async def bridge_job_result(
+        job_id: str, result: BridgeJobResult, who: Principal = Depends(principal)
+    ):
+        require_bridge(who)
+        return {"accepted": bridge_jobs.resolve(job_id, result.model_dump())}
 
     @app.get("/api/bridge/work")
     async def bridge_work(who: Principal = Depends(principal)):

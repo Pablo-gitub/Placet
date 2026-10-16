@@ -69,6 +69,7 @@ cd ..
 | `PLACET_AGENTS_FILE` | Percorso di `AGENTS.md` (in produzione `/etc/placet/AGENTS.md`) |
 | `PLACET_BRIDGE_TOKEN` | Token del bridge, ammesso solo sugli endpoint `/api/bridge/*` |
 | `PLACET_API_URL` | Per bridge e server MCP: indirizzo del backend (default `http://127.0.0.1:8000`) |
+| `PLACET_TRANSCRIPTS_LOCAL` | `1` = il backend legge da sé le conversazioni delle sessioni invece di chiederle al bridge. Solo per lo sviluppo in un unico processo (`run_all.py` la imposta); mai in produzione, dove il backend non ha accesso ai file dell'utente |
 | `PLACET_BASE_URL` | Indirizzo della PWA visto dall'iPhone (es. `https://muletto.tail1234.ts.net`), usato nei link delle notifiche |
 | `PLACET_NTFY_URL`, `PLACET_NTFY_TOPIC`, `PLACET_NTFY_TOKEN` | Server ntfy, topic e token di accesso. Senza URL, topic e `PLACET_BASE_URL` le notifiche sono disattivate |
 
