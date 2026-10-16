@@ -1,3 +1,4 @@
+import base64
 import time
 import logging
 import subprocess
@@ -11,7 +12,8 @@ from backend.app.models import RequestModel
 from bridge.channels import ChannelError, ChannelUncertain, default_channels
 from bridge.stores import BridgeStore, LocalStore, Work
 from bridge.tmux_controller import SessionSpec, TmuxController
-from bridge.transcripts import TranscriptError, read_transcript
+from bridge.attachments import AttachmentError
+from bridge.transcripts import TranscriptError, read_attachment, read_transcript
 from bridge.titles import codex_titles
 from hooks.placet_common import active
 
@@ -277,10 +279,18 @@ class BridgeDaemon:
                     before=job.get("before"), after=job.get("after"),
                     limit=job.get("limit") or 40,
                 )
+            elif kind == "attachment":
+                if not active(job.get("cwd")):
+                    return {"ok": False, "error": "excluded", "message": "Project excluded (.placet-off)."}
+                mime, data = read_attachment(
+                    job.get("provider"), job.get("session_id", ""), job.get("attachment_id", ""),
+                    agent_id=job.get("agent_id"),
+                )
+                page = {"mime": mime, "data": base64.b64encode(data).decode("ascii")}
             else:
                 return {"ok": False, "error": "unknown_job", "message": f"Unknown job {kind!r}."}
             return {"ok": True, "page": page}
-        except TranscriptError as e:
+        except (TranscriptError, AttachmentError) as e:
             return {"ok": False, "error": e.code, "message": str(e)}
         except Exception as e:
             logger.exception("Job %s failed", job.get("id"))

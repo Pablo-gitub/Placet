@@ -1,4 +1,5 @@
 import React, { useLayoutEffect, useRef, useState } from "react";
+import Attachments from "./Attachments";
 import Composer from "./Composer";
 import {
   ArrowLeft,
@@ -95,12 +96,14 @@ function PlacetMessage({ entry }) {
   );
 }
 
-function ChatEntry({ entry }) {
+function ChatEntry({ entry, sessionId }) {
+  const images = <Attachments sessionId={sessionId} items={entry.attachments} />;
   switch (entry.role) {
     case "user":
       return (
         <div className="msg msg-user" data-testid="chat-user">
-          <div className="bubble">{entry.text}</div>
+          {entry.text && <div className="bubble">{entry.text}</div>}
+          {images}
           <time>
             {timeOf(entry.at)}
             {entry.via === "placet" && " · dal telefono"}
@@ -110,12 +113,22 @@ function ChatEntry({ entry }) {
     case "assistant":
       return (
         <div className="msg msg-assistant" data-testid="chat-assistant">
-          <Markdown>{entry.text}</Markdown>
+          {entry.text && <Markdown>{entry.text}</Markdown>}
+          {images}
           <time>{timeOf(entry.at)}</time>
         </div>
       );
     case "placet":
       return <PlacetMessage entry={entry} />;
+    case "media":
+      // An image an agent's tool produced (e.g. Antigravity's generate_image).
+      return (
+        <div className="msg msg-media" data-testid="chat-media">
+          <span className="media-label">{entry.text}</span>
+          {images}
+          <time>{timeOf(entry.at)}</time>
+        </div>
+      );
     case "command":
       return (
         <div className="msg msg-command" data-testid="chat-command">
@@ -316,7 +329,7 @@ export default function SessionView({
               item.type === "actions" ? (
                 <ActionGroup key={item.key} entries={item.entries} />
               ) : (
-                <ChatEntry key={item.key} entry={item.entry} />
+                <ChatEntry key={item.key} entry={item.entry} sessionId={sessionId} />
               )
             )}
           </>

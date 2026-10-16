@@ -31,6 +31,20 @@ BLOCK_BYTES = 64 * 1024
 MAX_FORWARD_BYTES = 4 * 1024 * 1024
 
 
+from bridge import attachments as att  # noqa: E402
+
+
+def _with_attachments(entries: List[dict], found: List[dict], at: Optional[str], role: str = "user") -> List[dict]:
+    """Puts the images of a message on its entry (a new one if it had no text)."""
+    if not found:
+        return entries
+    for entry in entries:
+        if entry["role"] in ("user", "placet", "assistant"):
+            entry.setdefault("attachments", []).extend(found)
+            return entries
+    return entries + [_entry(role, "", at, attachments=list(found))]
+
+
 class TranscriptError(Exception):
     """`code` is one of: invalid, unsupported, not_found."""
 
@@ -126,14 +140,16 @@ def parse_claude(obj: dict) -> List[dict]:
         if isinstance(content, str):
             return _claude_user_text(content, at)
         if isinstance(content, list):
-            parts = []
+            parts, images = [], []
             for block in content:
                 if block.get("type") == "text":
                     parts.append(block.get("text", ""))
                 elif block.get("type") == "image":
-                    parts.append("[immagine]")
+                    source = block.get("source") or {}
+                    if source.get("type") == "base64":
+                        images.append(att.inline(source.get("media_type"), source.get("data")))
             text = "\n".join(p for p in parts if p.strip())
-            return _claude_user_text(text, at) if text else []
+            return _with_attachments(_claude_user_text(text, at) if text else [], images, at)
         return []
     if kind == "assistant" and isinstance(content, list):
         if obj.get("isApiErrorMessage"):
@@ -165,6 +181,10 @@ def _codex_text(content) -> str:
     )
 
 
+# Codex lists the files the user attached before the request itself.
+_CODEX_FILES_PREAMBLE = re.compile(r"^\s*# Files mentioned by the user:.*?## My request:\s*", re.S)
+
+
 def parse_codex(obj: dict) -> List[dict]:
     at = obj.get("timestamp")
     if obj.get("type") == "compacted":
@@ -175,8 +195,12 @@ def parse_codex(obj: dict) -> List[dict]:
     item = payload.get("item") or {}
     kind = item.get("type")
     if kind == "UserMessage":
-        text = _codex_text(item.get("content"))
-        return [_placet_or_user(text, at)] if text.strip() else []
+        text = _CODEX_FILES_PREAMBLE.sub("", _codex_text(item.get("content")))
+        images = [
+            att.file(part["path"]) for part in item.get("content") or []
+            if isinstance(part, dict) and part.get("type") == "local_image" and part.get("path")
+        ]
+        return _with_attachments([_placet_or_user(text, at)] if text.strip() else [], images, at)
     if kind == "AgentMessage":
         text = _codex_text(item.get("content"))
         return [_entry("assistant", _clip(text), at)] if text.strip() else []
@@ -216,6 +240,11 @@ _ANTIGRAVITY_TOOLS = {
     "read_url_content": ("web", "Url"),
 }
 _USER_REQUEST = re.compile(r"<USER_REQUEST>\s*(.*?)\s*</USER_REQUEST>", re.S)
+# Images the user attached, listed in the message's metadata; and the
+# output of the generate_image tool.
+_UPLOADED = re.compile(r"The user has uploaded \d+ image\(s\):\n((?:- [^\n]+\n?)+)")
+_LIST_ITEM = re.compile(r"^- (/[^\n]+?)\s*$", re.M)
+_GENERATED = re.compile(r"Generated image is saved at (/\S+?\.(?:png|jpe?g|webp))\.?(?:\s|$)")
 
 
 def _antigravity_arg(value):
@@ -235,7 +264,14 @@ def parse_antigravity(obj: dict) -> List[dict]:
     if kind == "USER_INPUT":
         match = _USER_REQUEST.search(content)
         text = match.group(1) if match else content
-        return [_placet_or_user(text, at)] if text.strip() else []
+        uploaded = _UPLOADED.search(content)
+        images = [att.file(p) for p in _LIST_ITEM.findall(uploaded.group(1))] if uploaded else []
+        return _with_attachments([_placet_or_user(text, at)] if text.strip() else [], images, at)
+    if kind == "GENERIC":
+        generated = _GENERATED.search(content)
+        if generated:
+            return [_entry("media", "Immagine generata", at, attachments=[att.file(generated.group(1))])]
+        return []
     if kind == "PLANNER_RESPONSE":
         out = [_entry("assistant", _clip(content), at)] if content.strip() else []
         for call in obj.get("tool_calls") or []:
@@ -375,6 +411,8 @@ def _parse(parser: Callable[[dict], List[dict]], line: bytes) -> List[dict]:
 def _with_cursor(offset: int, entries: List[dict]) -> List[dict]:
     for i, entry in enumerate(entries):
         entry["cursor"] = f"{offset}:{i}"
+        if entry.get("attachments"):
+            entry["attachments"] = att.public(entry["attachments"], entry["cursor"])
     return entries
 
 
@@ -451,3 +489,46 @@ def read_transcript(
     path = locate(resolved, session_id, home)
     page = read_page(path, PROVIDERS[resolved][1], before=before, after=after, limit=limit)
     return {"session_id": session_id, "provider": resolved, **page}
+
+
+# --- Attachments ------------------------------------------------------------------------
+
+ATTACHMENT_ID = re.compile(r"^(\d+):(\d+):(\d+)$")
+
+
+def read_attachment(
+    provider: Optional[str],
+    session_id: str,
+    attachment_id: str,
+    agent_id: Optional[str] = None,
+    home: Optional[Path] = None,
+) -> Tuple[str, bytes]:
+    """
+    (mime, bytes) of one attachment, found again by re-reading the line its
+    id points to with the same parser: only what the adapter recognised there
+    can be read. Raises TranscriptError or attachments.AttachmentError.
+    """
+    match = ATTACHMENT_ID.match(attachment_id or "")
+    if not match:
+        raise TranscriptError("invalid", "Invalid attachment id.")
+    offset, entry_index, index = (int(g) for g in match.groups())
+    resolved = provider_for(provider, agent_id)
+    if resolved is None:
+        raise TranscriptError("unsupported", f"Provider {provider!r} is not supported.")
+    path = locate(resolved, session_id, home)
+    with open(path, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        if offset >= f.tell():
+            raise TranscriptError("not_found", "Attachment not found.")
+        if offset > 0:
+            f.seek(offset - 1)
+            if f.read(1) != b"\n":
+                raise TranscriptError("invalid", "Invalid attachment id.")
+        f.seek(offset)
+        line = f.readline()
+    entries = _parse(PROVIDERS[resolved][1], line)
+    try:
+        found = entries[entry_index]["attachments"][index]
+    except (IndexError, KeyError):
+        raise TranscriptError("not_found", "Attachment not found.") from None
+    return att.load(resolved, session_id, found, home)

@@ -77,7 +77,7 @@ def test_claude_shows_messages_and_actions_only(tmp_path):
         ("placet", "[Placet Request #7 da claude]: Scrivi hola"),
         ("command", "/compact"),
         ("compact", ""),
-        ("user", "guarda questa\n[immagine]"),
+        ("user", "guarda questa"),  # an image without data is not an attachment
         ("assistant", "Fatto."),
     ]
     text = json.dumps(page)

@@ -1096,3 +1096,31 @@ body.chat-open { overflow: hidden; }
 }
 .session-row-card.active { background: var(--prov-soft, var(--bg-card-hover)); border-color: var(--prov, var(--primary)); }
 .app-container.wide .msg-user .bubble { max-width: 75%; }
+
+/* --- Attachments ---------------------------------------------------------------- */
+.attachments { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.35rem; }
+.msg-user .attachments { justify-content: flex-end; }
+.attachment-thumb {
+  padding: 0; border: 1px solid var(--border-color); border-radius: 10px; overflow: hidden;
+  background: #0b1120; cursor: zoom-in; line-height: 0;
+}
+.attachment-thumb img { display: block; max-width: min(240px, 70vw); max-height: 240px; object-fit: cover; }
+.attachment-missing {
+  display: flex; align-items: center; gap: 0.45rem; max-width: 260px;
+  padding: 0.5rem 0.65rem; border: 1px dashed var(--border-color); border-radius: 10px;
+  font-size: 0.75rem; color: var(--text-muted);
+}
+.msg-media { display: flex; flex-direction: column; align-items: flex-start; }
+.media-label { font-size: 0.72rem; color: var(--text-muted); }
+.attachment-viewer {
+  position: fixed; inset: 0; z-index: 50; background: rgba(2, 6, 23, 0.94);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: calc(3.5rem + env(safe-area-inset-top)) 1rem calc(1rem + env(safe-area-inset-bottom));
+}
+.attachment-viewer img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; }
+.attachment-viewer-bar {
+  position: absolute; top: env(safe-area-inset-top); left: 0; right: 0;
+  display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 1rem; color: var(--text-muted); font-size: 0.8rem;
+}
+.attachment-viewer-bar span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-viewer-bar .icon-button { color: var(--text-main); }

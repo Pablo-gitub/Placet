@@ -103,6 +103,7 @@ Placet è un **punto unico di supervisione umana e bus di cooperazione per agent
 | RF-35 | Se la sessione sta lavorando: **In coda** (a fine turno) o **Subito** (inserito nel turno in corso dopo la prossima azione). Un'impostazione dà il default, modificabile per ogni messaggio | [Implementato] "In coda"; "Subito" [Deciso] (blocco 4) |
 | RF-36 | Dal telefono si possono **lanciare skill** (verificato anche sul desktop). Digitando `/` compaiono le skill e i comandi del provider, con la skill evidenziata | [Deciso] (elenco con `/` utile, non indispensabile) |
 | RF-37 | PC spento: avviso "PC non raggiungibile" | [Implementato] ("Il PC non risponde", con Riprova) |
+| RF-38 | **Allegati nella conversazione**: le immagini incollate dall'utente nelle app e quelle prodotte da uno strumento di generazione si vedono come anteprime, si aprono a tutto schermo e si scaricano. Il telefono chiede un identificativo, mai un percorso; il bridge legge solo allegati riconosciuti dall'adattatore, nelle cartelle dell'app per quella conversazione, JPEG/PNG/WebP veri e di dimensioni ragionevoli. Un percorso scritto in un messaggio resta testo; le immagini nei risultati degli altri strumenti (es. screenshot del browser) restano nascoste come gli altri risultati (RF-32) | [Implementato] (immagini già presenti); invio dal telefono [Deciso] |
 
 ### 3.5 Home, elenco sessioni e notifiche
 | ID | Requisito | Stato |

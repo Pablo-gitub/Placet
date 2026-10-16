@@ -147,6 +147,12 @@ Trasformano gli eventi del client in fatti per Placet (`POST /api/sessions/{id}/
   - Richieste precedenti a questa versione: non trattengono nessuna coda.
   - PWA: Riprova (con conferma, perché può arrivare due volte) e Annulla sul messaggio incerto, Annulla su quello in attesa; nello storico la riga dei tre aspetti. API: `POST /api/requests/{id}/delivery/retry|cancel` (utente), `POST /api/bridge/requests/{id}/uncertain|seen` (bridge).
 
+### 3.9 Allegati *(RF-38: `bridge/attachments.py`)*
+- Ogni adattatore riconosce le immagini nel proprio formato: Claude in base64 nel messaggio dell'utente; Codex come `local_image`, un file temporaneo `/tmp/codex-clipboard-<uuid>` (sparisce al riavvio: "non più disponibile"); Antigravity in `brain/<id>/.user_uploaded/` (citate nei metadati del messaggio) e i risultati di `generate_image` in `brain/<id>/`.
+- La pagina della conversazione elenca per ogni voce solo `id` e nome; l'id è il cursore della voce più la posizione (`offset:voce:n`). Per leggere un allegato il bridge rilegge quella riga con lo stesso parser: si legge solo ciò che l'adattatore ha riconosciuto lì.
+- Controlli sul file: percorso reale (symlink risolti) dentro le radici dell'app per quella conversazione, file regolare dell'utente, al massimo 10 MB; contenuto JPEG, PNG o WebP verificato dai magic byte, al massimo 50 Mpx. Mai SVG o HTML. `.placet-off` verificato dal backend e dal bridge.
+- `GET /api/sessions/{id}/attachments/{offset:voce:n}` (solo umano) passa dal bridge come le pagine e risponde con `Cache-Control: no-store`, `nosniff` e una CSP restrittiva; nessuna copia sul backend, nessun service worker. La PWA mostra "PC non raggiungibile o file non più presente" se l'immagine non arriva.
+
 ### 3.8 Esclusione `.placet-off` *(RF-45)*
 Gli hook non scrivono eventi; il bridge scarta gli eventi in coda di sessioni escluse, non legge le loro conversazioni e non consegna; le consegne in sospeso diventano annullate ("progetto escluso"); la PWA nasconde sessioni e richieste del progetto (restano nel database per l'audit).
 - Il backend gira come utente `placet` e non vede la home: è il bridge che cerca `.placet-off` (nella cartella o in una che la contiene) per le cartelle delle sessioni note (`folders` in `/api/bridge/work`), al massimo ogni 15 s, e le riporta con `POST /api/bridge/folders`. Il backend segna le sessioni (`excluded_at`), annulla i messaggi non ancora consegnati e, togliendo il file, le fa ricomparire.

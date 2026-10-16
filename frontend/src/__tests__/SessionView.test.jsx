@@ -238,3 +238,35 @@ describe("a delivered request whose end Placet cannot see", () => {
     expect(screen.queryByTestId(/^queue-hold-/)).toBeNull();
   });
 });
+
+describe("images in the conversation", () => {
+  const withImages = {
+    ...latest, messages: [
+      { role: "user", text: "guarda", at: null, cursor: "10:0", attachments: [{ id: "10:0:0", name: "immagine" }] },
+      { role: "media", text: "Immagine generata", at: null, cursor: "20:0",
+        attachments: [{ id: "20:0:0", name: "tramonto.jpg" }] },
+    ],
+  };
+
+  it("shows thumbnails by id and opens them full screen with a download", async () => {
+    mockFetch([[transcriptOf("s1"), withImages]]);
+    renderView();
+    await waitFor(() => expect(screen.getByTestId("attachment-10:0:0")).toBeInTheDocument());
+    const img = screen.getByTestId("attachment-20:0:0").querySelector("img");
+    expect(img.getAttribute("src")).toBe("/api/sessions/s1/attachments/20%3A0%3A0");
+    expect(screen.getByTestId("chat-media")).toHaveTextContent("Immagine generata");
+    fireEvent.click(screen.getByTestId("attachment-20:0:0"));
+    expect(screen.getByTestId("attachment-viewer")).toBeInTheDocument();
+    expect(screen.getByTestId("attachment-download")).toHaveAttribute("download", "tramonto.jpg");
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByTestId("attachment-viewer")).toBeNull();
+  });
+
+  it("says when an image cannot be read", async () => {
+    mockFetch([[transcriptOf("s1"), withImages]]);
+    renderView();
+    await waitFor(() => expect(screen.getByTestId("attachment-10:0:0")).toBeInTheDocument());
+    fireEvent.error(screen.getByTestId("attachment-10:0:0").querySelector("img"));
+    expect(screen.getByTestId("attachment-missing-10:0:0")).toHaveTextContent("PC non raggiungibile");
+  });
+});

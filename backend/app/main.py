@@ -1,11 +1,13 @@
 import os
 import asyncio
+import base64
 import contextlib
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Literal, Optional, Dict, Set
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, status, Request, Depends
+from fastapi import Path as FastAPIPath
 from fastapi.middleware.cors import CORSMiddleware
 
 from fastapi.responses import FileResponse, Response
@@ -111,6 +113,14 @@ TRANSCRIPT_ERRORS = {
     "invalid": (400, "Sessione non valida."),
     "excluded": (409, "Questo progetto è escluso da Placet (file .placet-off)."),
 }
+ATTACHMENT_ERRORS = {
+    **TRANSCRIPT_ERRORS,
+    "not_found": (404, "Il file non è più disponibile sul PC."),
+    "forbidden": (403, "Questo file non si può mostrare."),
+    "unsupported": (415, "Formato non supportato: si mostrano immagini JPEG, PNG e WebP."),
+    "too_large": (413, "Immagine troppo grande."),
+}
+ATTACHMENT_ID_PATTERN = r"^\d+:\d+:\d+$"
 TRANSCRIPT_MAX_LIMIT = 200
 BRIDGE_JOBS_WAIT_SECONDS = 30
 
@@ -898,10 +908,11 @@ def create_app(
             return HTTPException(status_code=status_code, detail=detail)
 
         if transcripts_local:
+            from bridge.attachments import AttachmentError
             from bridge.transcripts import TranscriptError
             try:
                 return await asyncio.to_thread(local)
-            except TranscriptError as e:
+            except (TranscriptError, AttachmentError) as e:
                 raise http_error(e.code) from None
         try:
             result = await bridge_jobs.run(kind, params)
@@ -949,6 +960,44 @@ def create_app(
 
         # The bridge checks the folder again: it may know of a .placet-off first.
         return await bridge_call("transcript", {**params, "cwd": session.cwd}, local, TRANSCRIPT_ERRORS)
+
+    @app.get("/api/sessions/{session_id}/attachments/{attachment_id}")
+    async def session_attachment(
+        session_id: str,
+        attachment_id: str = FastAPIPath(pattern=ATTACHMENT_ID_PATTERN),
+        who: Principal = Depends(principal),
+    ):
+        """
+        An image of a session's conversation, by the id its page gave it
+        (never a path), read on demand through the bridge: no copy is kept.
+        """
+        require_human(who)
+        session = db.get_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        if session.excluded:
+            raise HTTPException(status_code=409, detail=EXCLUDED_DETAIL)
+        params = {"session_id": session.id, "provider": session.provider, "agent_id": session.agent_id,
+                  "attachment_id": attachment_id}
+
+        def local():
+            from bridge.transcripts import read_attachment
+            mime, data = read_attachment(**params)
+            return {"mime": mime, "data": base64.b64encode(data).decode("ascii")}
+
+        result = await bridge_call("attachment", {**params, "cwd": session.cwd}, local, ATTACHMENT_ERRORS)
+        if result.get("mime") not in ("image/jpeg", "image/png", "image/webp"):
+            raise HTTPException(status_code=415, detail=ATTACHMENT_ERRORS["unsupported"][1])
+        return Response(
+            content=base64.b64decode(result.get("data") or ""),
+            media_type=result["mime"],
+            headers={
+                # Not kept by the browser or the service worker: the PC is the source.
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+                "Content-Security-Policy": "default-src 'none'; sandbox",
+            },
+        )
 
     # --- Local bridge (tmux injection and outcome delivery) -----------------
 
