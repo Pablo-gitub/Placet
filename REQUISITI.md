@@ -1,6 +1,6 @@
 # Placet — Requisiti Applicativi
 
-> **Versione:** 2.0 — 16/10/2026 · **Stato:** Consolidato dopo il laboratorio multi-provider
+> **Versione:** 2.1 — 16/10/2026 · **Stato:** Consolidato dopo il laboratorio multi-provider e due revisioni di Codex
 >
 > **Fonti:** Chat con ChatGPT del 09/10/2026, sessioni con Claude Code del 10–16/10/2026, intervista /grill-me del 14/10/2026, discussione e laboratorio del 15–16/10/2026 (risultati in [LABORATORIO.md](LABORATORIO.md)).
 
@@ -67,9 +67,11 @@ Placet è un **punto unico di supervisione umana e bus di cooperazione per agent
 | RFC-03 | **Tipi di relazione** (id, nome, descrizione) riutilizzabili. La descrizione la legge l'AI per capire quando e perché scrivere a quella sessione | [Deciso] |
 | RFC-04 | **Relazioni globali** A→B con un tipo e un'approvazione `manual` o `automatic`. Una relazione è unica per (A, B, tipo); tra le stesse sessioni possono esistere più relazioni con tipi diversi | [Deciso] |
 | RFC-05 | `manual`: il prompt arriva a te, lo approvi, modifichi o rifiuti. `automatic`: va diretto a B | [Deciso] |
-| RFC-06 | **L'agente non conosce mai l'approvazione**: testi ed esiti sono identici nei due casi, così pensa sempre che il prompt passi dall'utente | [Deciso] |
+| RFC-06 | **L'agente vede la politica di consegna** di una relazione: "Consegna automatica, non revisionata dall'umano" oppure "Revisione umana richiesta: può essere modificato o rifiutato". Il destinatario vede la provenienza (mittente, revisionato o no, modificato dall'utente). L'approvazione della consegna non autorizza l'agente a eseguire tutto ciò che il prompt chiede | [Deciso] — sostituisce la versione "nascosta" del 15/10 |
 | RFC-07 | Senza relazione definita, l'invio è sempre `manual`; dalla card si può creare la relazione per le volte successive | [Deciso] |
-| RFC-08 | API dell'agente: `send(target, type_id, prompt)`. Uno strumento elenca le relazioni che partono dalla sessione (destinazione, tipo, descrizione), mai l'approvazione | [Deciso] |
+| RFC-08 | API dell'agente: `send(target, type_id, prompt)`. Uno strumento elenca le relazioni che partono dalla sessione: destinazione, tipo, descrizione e politica di consegna | [Deciso] |
+| RFC-13 | Le **risposte** seguono la politica della relazione nel verso del ritorno: approvare A→B non approva B→A | [Deciso] |
+| RFC-14 | **Limiti contro i cicli** tra relazioni automatiche: al massimo 3 passaggi automatici di fila nella stessa catena (poi la catena si ferma e chiede all'utente) e 20 messaggi automatici l'ora per relazione; valori predefiniti modificabili per progetto (impostazioni del progetto, menu "⋯"). Pulsante **Ferma tutto** nella PWA | [Deciso] |
 | RFC-09 | **Progetti**: raggruppano nodi e relazioni; un nodo e una relazione possono stare in più progetti. Se in un progetto riusi per A→B un tipo già usato altrove, l'app avvisa che la relazione è condivisa e propone un tipo diverso; puoi confermare | [Deciso] |
 | RFC-10 | Le regole per coppia di agenti in `AGENTS.md` sono **sostituite** dalle relazioni. `AGENTS.md` resta per agenti, token e descrizioni | [Deciso] |
 | RFC-11 | L'agente B riceve **solo il prompt**, con un preambolo che rende l'origine verificabile (può controllare la richiesta con uno strumento Placet) | [Implementato] solo prompt; [Deciso] origine verificabile |
@@ -86,6 +88,9 @@ Placet è un **punto unico di supervisione umana e bus di cooperazione per agent
 | RF-25 | La consegna è confermata (ack) e la risposta raccolta anche senza `placet_reply` (risposta implicita dall'ultimo messaggio del turno) | [Implementato] (Claude e Codex dallo Stop hook, Antigravity dal file della conversazione) |
 | RF-26 | Il processo che consegna non dipende da una sessione aperta: gira nel bridge come servizio, e un waiter morto viene rilevato e sostituito | [Deciso] |
 | RF-27 | Placet si accorge se una sessione **non ha il server MCP collegato** e lo segnala (sessione e PWA) | [Deciso] |
+| RF-28 | **Coda locale degli eventi**: gli hook non chiamano il backend; scrivono ogni evento in una coda di file sul PC e terminano subito. Il bridge la svuota verso il backend, con ritentativi; gli eventi non si perdono se il backend è spento (salvo disco pieno o mancanza di corrente). Un turno non viene mai rallentato da Placet oltre l'avvio dello script | [Deciso] |
+| RF-29 | **Tre aspetti di ogni richiesta**, ciascuno con le sue prove e orari: consegna (in attesa, in corso, accettata, incerta, fallita, annullata), esecuzione (non osservata, iniziata, completata, interrotta), risposta (nessuna, esplicita, implicita, ambigua). Una consegna incerta (es. timeout del comando) non viene reinviata in automatico: la PWA la mostra con Riprova e Annulla | [Deciso] |
+| RF-29b | **Una richiesta alla volta per sessione**, fino alla sua conclusione; i messaggi scritti direttamente nell'app restano liberi (se finiscono nello stesso turno la risposta diventa "ambigua"). "Subito" è l'eccezione esplicita | [Deciso] |
 
 ### 3.4 Le sessioni sul telefono
 | ID | Requisito | Stato |
@@ -110,7 +115,7 @@ Placet è un **punto unico di supervisione umana e bus di cooperazione per agent
 | RF-11 | Notifiche ntfy self-hosted in tailnet, con solo l'azione "Apri": si decide dalla PWA vedendo il testo completo | [Implementato] nel codice; ntfy da installare |
 | RF-12 | Nella PWA si può modificare il prompt prima di approvarlo; il mittente viene informato della modifica | [Implementato] |
 | RF-13 | Storico e audit completi, con timeline per richiesta | [Implementato] |
-| RF-45 | **Presenti ma silenziose**: tutte le sessioni si registrano ma non fanno nulla finché non arriva un messaggio Placet; a fine turno tornano silenziose. Nell'app si lavora come sempre. Un file `.placet-off` esclude un progetto (e le sue sottocartelle) | [Implementato] |
+| RF-45 | **Presenti ma silenziose**: tutte le sessioni si registrano ma non fanno nulla finché non arriva un messaggio Placet; a fine turno tornano silenziose. Nell'app si lavora come sempre. Un file `.placet-off` esclude un progetto (e le sue sottocartelle): hook, bridge (eventi in coda, lettura delle chat, consegne) e PWA lo rispettano; le consegne in sospeso vengono annullate con il motivo, e i dati già in Placet vengono **nascosti** (restano nello storico per l'audit e ricompaiono togliendo il file) | [Implementato] negli hook; [Deciso] nel bridge e nella PWA |
 | RF-44 | **Grafo per progetto**: nodi e frecce orientate con il tipo; l'approvazione manual/automatic è visibile solo a te. Sezione per creare progetti, nodi, relazioni e tipi | [Deciso] |
 
 ### 3.6 Creare sessioni
@@ -167,6 +172,7 @@ Placet è un **punto unico di supervisione umana e bus di cooperazione per agent
 | Fase | Contenuto |
 |---|---|
 | 1 | **Laboratorio** — fatto il 15–16/10/2026, risultati in [LABORATORIO.md](LABORATORIO.md) |
+| 2b | **Affidabilità** (revisioni Codex): coda locale degli eventi (RF-28), tre aspetti delle richieste e una richiesta alla volta (RF-29), `.placet-off` ovunque (RF-45) |
 | 2 | **Sessioni sul telefono**: lettura della chat (RF-30…33), scrittura e risveglio (RF-34, RF-35), home con domande e sessioni aggiunte (RF-40…43); adattatori Claude, Codex, Antigravity nel bridge (RF-24…27) |
 | 3 | **Nodi, relazioni e tipi** (RFC-02…10), nuova API `send(target, type_id, prompt)`, rimozione di `context` (RF-05b) |
 | 4 | **Contesto, effort, compact e consumi** (RF-60…63) |

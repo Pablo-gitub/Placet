@@ -1,6 +1,6 @@
 # Placet — Architettura di Sistema e Specifica Tecnica
 
-> **Versione:** 2.0 — 16/10/2026 · **Stato:** Aggiornata dopo il laboratorio multi-provider ([LABORATORIO.md](LABORATORIO.md))
+> **Versione:** 2.1 — 16/10/2026 · **Stato:** Aggiornata dopo il laboratorio multi-provider ([LABORATORIO.md](LABORATORIO.md))
 > **Ruolo:** Hub per Human-in-the-Loop, bus tra sessioni di provider diversi (Claude Code, Codex, Antigravity/Gemini) e vista delle sessioni sul telefono.
 
 Le parti marcate *(da implementare)* sono decise ma non ancora nel codice.
@@ -122,6 +122,25 @@ Trasformano gli eventi del client in fatti per Placet (`POST /api/sessions/{id}/
 - I messaggi dell'utente dalla PWA (`question_type: message`) arrivano come `[Placet Request #N dall'utente]: <testo>` con una nota: niente `placet_reply`, la risposta è il turno stesso. Nella PWA appaiono come messaggi dell'utente.
 - *(da implementare)* l'origine deve essere verificabile (l'agente può controllare la richiesta con uno strumento Placet): una sessione che riceve un prompt inatteso tende, giustamente, a trattarlo come prompt injection.
 
+### 3.6 Coda locale degli eventi *(da implementare, RF-28)*
+- Gli hook non fanno HTTP: scrivono l'evento in `~/.cache/placet/spool/` (cartella 0700, file 0600) con scrittura atomica (temporaneo nella stessa cartella + rename) e terminano. Nessun `fsync`: si accetta di perdere un evento se manca la corrente.
+- Nome del file: `<boot_id>-<contatore monotono>-<event_id>.json`; l'evento contiene `event_id`, `boot_id`, `seq`, `agent`, `provider`, `session_id`, `kind` (start, prompt, tool solo per gli strumenti Placet, stop, end), `at`, `cwd` e i dati. L'ordine è quello osservato per sessione.
+- L'ultima risposta di un turno è catturata dall'hook alla fine del turno e scritta nell'evento (Antigravity: letta dal file della conversazione in quel momento, con brevi ritentativi), mai letta dopo al momento dell'inoltro.
+- Il bridge (unico consumatore, con lock) sorveglia la cartella con inotify e una scansione completa all'avvio e periodica; inoltra in ordine per sessione con il token dell'agente; cancella il file solo dopo la conferma del backend, che risponde solo dopo aver salvato ed è idempotente sull'`event_id`. 429, 5xx, 401/403 ed errori di rete: ritenta con backoff. Evento malformato o rifiutato in modo definitivo: spostato in `spool/failed/` senza bloccare gli altri. Limite di spazio con avviso nella PWA; temporanei abbandonati ripuliti.
+- Fuori dalla coda: il waiter di Claude (long-polling) e il futuro "Subito", che legge un file locale lasciato dal bridge.
+
+### 3.7 Consegna, esecuzione, risposta *(da implementare, RF-29)*
+- Tre aspetti indipendenti per richiesta, con le prove e i loro orari (non una catena obbligatoria: possono arrivare fuori ordine):
+  - **consegna**: in attesa → in corso (tentativo con `attempt_id`) → accettata (comando riuscito) / **incerta** / fallita / annullata; il messaggio *visto* nella conversazione è una prova in più;
+  - **esecuzione**: non osservata → iniziata (turno aperto da quel messaggio) → completata / interrotta;
+  - **risposta**: nessuna / esplicita (`placet_reply`) / implicita (ultima risposta del turno) / **ambigua** (nel turno sono entrati anche altri messaggi).
+- Il messaggio porta un identificatore osservabile (`[Placet Request #N`, più l'`attempt_id`) che il bridge cerca nel file della conversazione per riconciliare un esito incerto.
+- Una richiesta alla volta per sessione, fino alla conclusione. Scadenza breve per la conferma di consegna (poi riconciliazione, non reinvio), scadenza lunga solo informativa per l'esecuzione. Un'incerta non sblocca la successiva: decide l'utente (Riprova / Annulla).
+- `placet_reply` non chiude da solo la richiesta: completamento del turno e risposta sono distinti.
+
+### 3.8 Esclusione `.placet-off` *(in parte da implementare, RF-45)*
+Gli hook non scrivono eventi; il bridge scarta gli eventi in coda di sessioni escluse, non legge le loro conversazioni e non consegna; le consegne in sospeso diventano annullate ("progetto escluso"); la PWA nasconde sessioni e richieste del progetto (restano nel database per l'audit).
+
 ---
 
 ## 4. Ciclo di vita di una richiesta
@@ -204,7 +223,7 @@ project_relations  (project_id, relation_id)
 requests.relation_id ─► relations.id                        per lo storico e l'audit
 ```
 - `context` resta per compatibilità con le richieste passate, ma non viene più richiesto (RF-05b).
-- L'approvazione non viene mai restituita agli agenti (RFC-06).
+- La politica di consegna (manual/automatic) è visibile all'agente (RFC-06); limiti contro i cicli per relazione e per catena, modificabili per progetto (RFC-14).
 
 ---
 
