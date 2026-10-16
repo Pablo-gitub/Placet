@@ -105,12 +105,12 @@ Placet è un **punto unico di supervisione umana e bus di cooperazione per agent
 | RF-10 | Interfaccia come **PWA installata sulla Home dell'iPhone**, servita su Tailscale | [Implementato] |
 | RF-40 | **Home**: in cima le domande in corso; sotto le **sessioni aggiunte**, ordinate per attività (chi ha appena finito il turno in cima) | [Implementato] |
 | RF-41 | **Aggiungi / vedi tutte**: scegli il provider, vedi le sue sessioni aperte, spunti quelle da aggiungere; le altre non compaiono in home | [Implementato] per sessione; per nodo con la fase 3 |
-| RF-42 | Anche le sessioni che **non hanno mai usato Placet** si registrano, grazie agli hook installati globalmente (nei progetti attivi, RF-45) | [Implementato] (`hooks/install.py`) |
+| RF-42 | Anche le sessioni che **non hanno mai usato Placet** si registrano, grazie agli hook installati globalmente (salvo i progetti esclusi, RF-45) | [Implementato] (`hooks/install.py`) |
 | RF-43 | Due tipi di notifica: **domanda** (priorità alta, suono) e **turno finito** (silenziosa, solo per le sessioni aggiunte). Titolo con provider e nome della sessione; il tocco apre la sessione | [Deciso] |
 | RF-11 | Notifiche ntfy self-hosted in tailnet, con solo l'azione "Apri": si decide dalla PWA vedendo il testo completo | [Implementato] nel codice; ntfy da installare |
 | RF-12 | Nella PWA si può modificare il prompt prima di approvarlo; il mittente viene informato della modifica | [Implementato] |
 | RF-13 | Storico e audit completi, con timeline per richiesta | [Implementato] |
-| RF-45 | **Attivazione per progetto**: gli hook sono installati ovunque ma una sessione passa da Placet solo se il suo progetto è attivo (`.placet-on`; `.placet-off` esclude una sottocartella). Si attiva dalla PWA (Impostazioni, elenco delle cartelle che i provider conoscono) o dal terminale | [Implementato] |
+| RF-45 | **Presenti ma silenziose**: tutte le sessioni si registrano ma non fanno nulla finché non arriva un messaggio Placet; a fine turno tornano silenziose. Nell'app si lavora come sempre. Un file `.placet-off` esclude un progetto (e le sue sottocartelle) | [Implementato] |
 | RF-44 | **Grafo per progetto**: nodi e frecce orientate con il tipo; l'approvazione manual/automatic è visibile solo a te. Sezione per creare progetti, nodi, relazioni e tipi | [Deciso] |
 
 ### 3.6 Creare sessioni

@@ -41,32 +41,23 @@ def api_url() -> str:
     return os.environ.get("PLACET_API_URL", "http://127.0.0.1:8000").rstrip("/")
 
 
-ON_MARKER = ".placet-on"
 OFF_MARKER = ".placet-off"
 
 
 def active(cwd: Optional[str]) -> bool:
     """
-    Whether sessions in this folder go through Placet. The hooks are
-    installed for every session but stay silent unless the project opts in:
-    a `.placet-on` file in the folder or in one containing it (the closest
-    marker wins; `.placet-off` keeps a subfolder out). Sessions that Placet
-    starts itself set PLACET_HOOK_FORCE=1.
+    Whether sessions in this folder go through Placet: all of them, quietly
+    (they only report turn starts and ends, and act on a Placet message when
+    one arrives), except projects with a `.placet-off` file in the folder or
+    in one containing it.
     """
-    if os.environ.get("PLACET_HOOK_FORCE") == "1":
-        return True
     if not cwd:
-        return False
+        return True
     try:
         folder = Path(cwd).resolve()
     except (OSError, RuntimeError):
-        return False
-    for current in (folder, *folder.parents):
-        if (current / OFF_MARKER).exists():
-            return False
-        if (current / ON_MARKER).exists():
-            return True
-    return False
+        return True
+    return not any((current / OFF_MARKER).exists() for current in (folder, *folder.parents))
 
 
 def call(method: str, path: str, token: str, body=None, timeout: float = 3) -> Tuple[int, Optional[dict]]:

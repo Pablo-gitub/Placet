@@ -11,7 +11,6 @@ from backend.app.models import RequestModel
 from bridge.channels import ChannelError, default_channels
 from bridge.stores import BridgeStore, LocalStore, Work
 from bridge.tmux_controller import SessionSpec, TmuxController
-from bridge.folders import FolderError, known_folders, set_folder
 from bridge.transcripts import TranscriptError, read_transcript
 
 logger = logging.getLogger(__name__)
@@ -192,14 +191,10 @@ class BridgeDaemon:
                     before=job.get("before"), after=job.get("after"),
                     limit=job.get("limit") or 40,
                 )
-            elif kind == "folders":
-                page = {"folders": known_folders(extra=job.get("extra") or [])}
-            elif kind == "set_folder":
-                page = set_folder(job.get("path", ""), bool(job.get("active")))
             else:
                 return {"ok": False, "error": "unknown_job", "message": f"Unknown job {kind!r}."}
             return {"ok": True, "page": page}
-        except (TranscriptError, FolderError) as e:
+        except TranscriptError as e:
             return {"ok": False, "error": e.code, "message": str(e)}
         except Exception as e:
             logger.exception("Job %s failed", job.get("id"))

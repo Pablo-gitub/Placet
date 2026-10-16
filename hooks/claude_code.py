@@ -19,7 +19,7 @@ Usage: python3 claude_code.py --agent claude (or PLACET_HOOK_AGENT=claude).
 Codex hooks receive the same fields (session_id, transcript_path, prompt,
 last_assistant_message, tool_name, ...): the same script serves them with
 `--agent codex --provider codex`.
-Only projects with a `.placet-on` file (or Placet's own sessions) go through Placet.
+A `.placet-off` file in a project (or a folder containing it) keeps its sessions out of Placet.
 
 It never prints anything (UserPromptSubmit stdout would be added to the
 model's context) and always exits 0: a Placet problem must not block Claude.

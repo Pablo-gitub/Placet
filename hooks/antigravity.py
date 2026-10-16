@@ -15,7 +15,7 @@ it: `python3 antigravity.py --agent gemini --event Stop`.
 
 Hooks are synchronous and Antigravity expects a JSON object on stdout: this
 script always prints "{}" and exits 0, so a Placet problem never blocks
-the agent. Only projects with a `.placet-on` file go through Placet.
+the agent. A `.placet-off` file in the project keeps it out of Placet.
 """
 import json
 import os

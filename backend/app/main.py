@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, status, Requ
 from fastapi.middleware.cors import CORSMiddleware
 
 from fastapi.responses import FileResponse, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
@@ -76,12 +76,6 @@ class PinPayload(BaseModel):
     pinned: bool
 
 
-class FolderPayload(BaseModel):
-    """Switches a project folder in or out of Placet (opt-in per project)."""
-    path: str = Field(min_length=1, max_length=4096)
-    active: bool
-
-
 class BridgeJobResult(BaseModel):
     """What the bridge reports for a job: a result, or an error code."""
     ok: bool
@@ -95,10 +89,6 @@ TRANSCRIPT_ERRORS = {
     "not_found": (404, "La conversazione non si trova su questo PC."),
     "unsupported": (422, "Lettura della conversazione non supportata per questo provider."),
     "invalid": (400, "Sessione non valida."),
-}
-FOLDER_ERRORS = {
-    "not_found": (404, "La cartella non esiste su questo PC."),
-    "invalid": (400, "Solo cartelle dentro la tua home, e non la home stessa."),
 }
 TRANSCRIPT_MAX_LIMIT = 200
 BRIDGE_JOBS_WAIT_SECONDS = 30
@@ -803,20 +793,19 @@ def create_app(
 
     async def bridge_call(kind: str, params: dict, local, errors: Dict[str, tuple]):
         """
-        Work only the bridge can do (it runs as the user: conversation files,
-        project folders). In single-process development the backend runs as
-        the user too and calls `local` directly.
+        Work only the bridge can do (it runs as the user and reads the
+        conversation files). In single-process development the backend runs
+        as the user too and calls `local` directly.
         """
         def http_error(code, message=None):
             status_code, detail = errors.get(code or "", (502, message or "Errore del bridge."))
             return HTTPException(status_code=status_code, detail=detail)
 
         if transcripts_local:
-            from bridge.folders import FolderError
             from bridge.transcripts import TranscriptError
             try:
                 return await asyncio.to_thread(local)
-            except (TranscriptError, FolderError) as e:
+            except TranscriptError as e:
                 raise http_error(e.code) from None
         try:
             result = await bridge_jobs.run(kind, params)
@@ -861,29 +850,6 @@ def create_app(
             return read_transcript(**params)
 
         return await bridge_call("transcript", params, local, TRANSCRIPT_ERRORS)
-
-    @app.get("/api/folders")
-    async def list_folders(who: Principal = Depends(principal)):
-        """Project folders the providers know, and whether they go through Placet."""
-        require_human(who)
-        extra = sorted({s.cwd for s in db.list_sessions(include_ended=True) if s.cwd})
-
-        def local():
-            from bridge.folders import known_folders
-            return {"folders": known_folders(extra=extra)}
-
-        return await bridge_call("folders", {"extra": extra}, local, FOLDER_ERRORS)
-
-    @app.put("/api/folders")
-    async def set_folder(body: FolderPayload, who: Principal = Depends(principal)):
-        """Switches a project in or out of Placet: the bridge writes `.placet-on` / `.placet-off`."""
-        require_human(who)
-
-        def local():
-            from bridge.folders import set_folder as switch
-            return switch(body.path, body.active)
-
-        return await bridge_call("set_folder", {"path": body.path, "active": body.active}, local, FOLDER_ERRORS)
 
     # --- Local bridge (tmux injection and outcome delivery) -----------------
 

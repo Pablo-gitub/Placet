@@ -59,7 +59,7 @@ Tre flussi:
 - *(da implementare)* `send(target, type_id, prompt)` e l'elenco delle relazioni della sessione (RFC-08); attesa minima lato server per le domande all'umano (RF-09).
 
 ### 2.3 Hook dei provider (`hooks/`)
-Trasformano gli eventi del client in fatti per Placet (`POST /api/sessions/{id}/events`: `start`, `prompt`, `tool`, `stop`, `end`). Non bloccano mai il client. Si installano per tutte le sessioni con `hooks/install.py`, che tocca solo le voci di Placet (RF-42), ma agiscono solo nei progetti attivi: `placet_common.active(cwd)` cerca `.placet-on` / `.placet-off` nella cartella e in quelle che la contengono (il più vicino vince; `PLACET_HOOK_FORCE=1` per le sessioni avviate da Placet). Il bridge elenca le cartelle note ai provider e scrive i marcatori (`bridge/folders.py`, `GET`/`PUT /api/folders`, solo dentro la home) (RF-45).
+Trasformano gli eventi del client in fatti per Placet (`POST /api/sessions/{id}/events`: `start`, `prompt`, `tool`, `stop`, `end`). Non bloccano mai il client. Si installano per tutte le sessioni con `hooks/install.py`, che tocca solo le voci di Placet (RF-42). Tutte le sessioni sono presenti ma silenziose: riportano solo inizio e fine dei turni e agiscono solo quando arriva un messaggio Placet; `placet_common.active(cwd)` esclude i progetti con `.placet-off` nella cartella o in una che la contiene (RF-45).
 
 | Provider | File | Eventi usati | Note |
 |---|---|---|---|
