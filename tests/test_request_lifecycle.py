@@ -15,6 +15,12 @@ from backend.app.main import create_app
 from backend.app.models import RequestCreate, RequestStatus
 from tests.helpers import agent_client, human_client
 
+
+@pytest.fixture(autouse=True)
+def short_minimum_wait(monkeypatch):
+    """Questions to the user wait at least a minute (RF-09): one second here."""
+    monkeypatch.setattr("backend.app.main.MIN_HUMAN_WAIT_SECONDS", 1)
+
 AUTH_CLAUDE = {"Authorization": "Bearer tok-claude"}
 AUTH_GEMINI = {"Authorization": "Bearer tok-gemini"}
 
@@ -206,3 +212,20 @@ def test_list_requests_newest_first_beyond_limit(setup):
     assert len(newest) == 50
     oldest = db.list_requests(limit=50, oldest_first=True)
     assert oldest[0].prompt == "0"
+
+
+@pytest.mark.asyncio
+async def test_questions_to_the_user_wait_a_minimum_and_explain_what_follows(setup, monkeypatch):
+    monkeypatch.setattr("backend.app.main.MIN_HUMAN_WAIT_SECONDS", 2)
+    app, _ = setup
+    async with agent_client(app) as client:
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        resp = (await client.post(
+            "/api/requests?wait_seconds=1",
+            json={"sender_id": "claude", "recipient_id": "human", "prompt": "Ok?", "context": "x"},
+            headers=AUTH_CLAUDE,
+        )).json()
+        assert loop.time() - started >= 1.9
+        assert resp["status"] == "PENDING" and resp["wait_seconds"] == 2
+        assert "[Placet" in resp["note"] and "Termina il turno" in resp["note"]

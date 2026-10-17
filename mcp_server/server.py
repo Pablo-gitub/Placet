@@ -78,6 +78,8 @@ def placet_ask_human(
     `selected_options` e `custom_text` (testo di "Altro" o nota).
     `priority` (low/normal/high/urgent, default high) decide quanto è insistente la notifica:
     usa urgent solo se un'attesa blocca qualcosa di importante.
+    `timeout_seconds`: quanto aspettare la risposta, almeno 60 secondi (valori più bassi vengono
+    portati a 60, perché l'utente deve avere il tempo di leggere e rispondere).
     La richiesta viene notificata istantaneamente su iPhone. Se l'utente risponde entro il timeout,
     lo strumento restituisce la decisione, le opzioni scelte o il testo inserito/modificato.
     Se scade il timeout, restituisce lo stato PENDING con request_id: in quel caso termina il turno

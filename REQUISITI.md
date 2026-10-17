@@ -57,7 +57,7 @@ Placet è un **punto unico di supervisione umana e bus di cooperazione per agent
 | RF-06 | L'agente può annullare una richiesta ancora pendente | [Implementato] |
 | RF-07 | Scadenza configurabile e priorità che orienta la notifica | [Implementato] |
 | RF-08 | Un prompt per un altro agente può arrivare da un **file Markdown** (`prompt_file`); la PWA lo mostra leggibile e permette di modificarlo come testo | [Implementato] |
-| RF-09 | **Attesa minima lato server** per le domande all'umano: un agente non può scegliere attese di pochi secondi. Se l'attesa scade, lo strumento dice chiaramente che l'esito arriverà con un risveglio | [Deciso] |
+| RF-09 | **Attesa minima lato server** per le domande all'umano: un agente non può scegliere attese di pochi secondi. Se l'attesa scade, lo strumento dice chiaramente che l'esito arriverà con un risveglio | [Implementato] (minimo 60 s; nota `note` nella risposta PENDING) |
 
 ### 3.2 Comunicazione tra sessioni: progetti, relazioni e tipi
 | ID | Requisito | Stato |

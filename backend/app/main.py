@@ -84,6 +84,14 @@ class TitlesReport(BaseModel):
     titles: Dict[str, str] = Field(default_factory=dict, max_length=500)
 
 
+# RF-09: a question to the user waits at least this long before returning PENDING.
+MIN_HUMAN_WAIT_SECONDS = 60
+PENDING_NOTE = (
+    "Nessun esito ancora. Termina il turno senza ripetere la richiesta: quando arriva "
+    "l'esito, Placet lo scrive in questa sessione con un messaggio che inizia con \"[Placet\"."
+)
+
+
 class FoldersReport(BaseModel):
     checked: List[str] = Field(default_factory=list, max_length=1000)
     excluded: List[str] = Field(default_factory=list, max_length=1000)
@@ -463,10 +471,20 @@ def create_app(
             )
         notify_change(created.id)
 
-        if wait_seconds > 0:
-            created = deliver_to(who, await wait_until_settled(created.id, float(wait_seconds)))
+        extra: Dict[str, object] = {}
         if target_warning:
-            return {**created.model_dump(mode="json"), "warning": target_warning}
+            extra["warning"] = target_warning
+        if wait_seconds > 0:
+            if created.recipient_id == "human" and wait_seconds < MIN_HUMAN_WAIT_SECONDS:
+                # RF-09: the user needs time to read and answer; a few seconds
+                # would only turn every question into a wake-up.
+                wait_seconds = MIN_HUMAN_WAIT_SECONDS
+                extra["wait_seconds"] = wait_seconds
+            created = deliver_to(who, await wait_until_settled(created.id, float(wait_seconds)))
+            if not is_settled(created):
+                extra["note"] = PENDING_NOTE
+        if extra:
+            return {**created.model_dump(mode="json"), **extra}
         return created
 
     @app.get("/api/requests", response_model=List[RequestModel])
