@@ -19,6 +19,9 @@ from backend.app.auth import HumanListener
 
 logger = logging.getLogger(__name__)
 
+# How long a stop waits for open connections before closing them.
+SHUTDOWN_GRACE_SECONDS = 3
+
 
 class _SkipBridgePolling(logging.Filter):
     """
@@ -67,7 +70,8 @@ async def serve(
 
     logging.getLogger("uvicorn.access").addFilter(_SkipBridgePolling())
     agent_server = uvicorn.Server(
-        uvicorn.Config(app, host=host, port=port, log_level=log_level)
+        uvicorn.Config(app, host=host, port=port, log_level=log_level,
+                       timeout_graceful_shutdown=SHUTDOWN_GRACE_SECONDS)
     )
     human_server = uvicorn.Server(
         uvicorn.Config(
@@ -76,6 +80,9 @@ async def serve(
             log_level=log_level,
             # The agent server already runs the app lifespan (expiry sweeper).
             lifespan="off",
+            # SSE streams and long polls never end on their own: without a
+            # limit, stopping waits until systemd kills the process.
+            timeout_graceful_shutdown=SHUTDOWN_GRACE_SECONDS,
         )
     )
 
