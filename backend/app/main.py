@@ -50,7 +50,7 @@ from backend.app.models import (
 from backend.app import envelopes
 from backend.app.upload_limits import MessageBodyLimit
 from backend.app.bridge_jobs import BridgeJobs, BridgeOffline, BridgeTimeout
-from backend.app.notifier import NtfyConfig, send_ntfy_alert, send_ntfy_notification
+from backend.app.notifier import NtfyConfig, send_ntfy_alert, send_ntfy_notification, send_ntfy_turn_end, session_label
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +84,8 @@ class TitlesReport(BaseModel):
     titles: Dict[str, str] = Field(default_factory=dict, max_length=500)
 
 
+# RF-43: one "turn finished" notification per followed session at most this often.
+TURN_END_NOTIFY_GAP = 60.0
 # RF-09: a question to the user waits at least this long before returning PENDING.
 MIN_HUMAN_WAIT_SECONDS = 60
 PENDING_NOTE = (
@@ -344,13 +346,28 @@ def create_app(
         return busy[0].id if len(busy) == 1 else None
 
     def origin_of(req: RequestModel) -> Optional[str]:
-        """The sender session's project, to say where a request comes from."""
+        """The sender session, as the notification names it: 'Claude · <title>'."""
         if not req.sender_session_id:
             return None
         session = db.get_session(req.sender_session_id)
-        if session is None or not session.cwd:
+        if session is None:
             return None
-        return session.cwd.rstrip("/").rsplit("/", 1)[-1]
+        return session_label(session.provider, session.title, session.cwd) or None
+
+    # A followed session's turn ends: at most one quiet notification a minute each.
+    turn_end_notified: Dict[str, float] = {}
+
+    def notify_turn_end(session: SessionModel, last_message: Optional[str]) -> None:
+        if not session.pinned or session.excluded:
+            return
+        loop_time = asyncio.get_running_loop().time()
+        if loop_time - turn_end_notified.get(session.id, -TURN_END_NOTIFY_GAP) < TURN_END_NOTIFY_GAP:
+            return
+        turn_end_notified[session.id] = loop_time
+        task = asyncio.get_running_loop().create_task(send_ntfy_turn_end(
+            session.id, session_label(session.provider, session.title, session.cwd), last_message, ntfy))
+        background_alerts.add(task)
+        task.add_done_callback(background_alerts.discard)
 
     def check_target_session(session_id: str, agent_id: str) -> None:
         session = db.get_session(session_id)
@@ -799,6 +816,8 @@ def create_app(
             result["turn_request_id"] = turn_request_id
         elif payload.event == "stop":
             db.set_session_state(session_id, "idle")
+            if session.state == "busy":
+                notify_turn_end(session, payload.last_message)
             if session.turn_request_id is not None:
                 db.set_execution(session.turn_request_id, "completed", actor=f"{who.actor}:hook",
                                  source=source)

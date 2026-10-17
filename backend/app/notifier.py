@@ -71,19 +71,34 @@ class NtfyConfig:
 
 def _ascii_header(value: str) -> str:
     # HTTP header values must be latin-1; keep them plain ASCII.
+    value = value.replace("·", "-").replace("→", "->").replace("…", "...")
     return value.encode("ascii", "replace").decode("ascii")
+
+
+PROVIDER_LABELS = {"claude-code": "Claude", "codex": "Codex", "antigravity": "Antigravity"}
+
+
+def session_label(provider: Optional[str], title: Optional[str], cwd: Optional[str]) -> str:
+    """'Claude · Refactor payment service' (or the project when untitled)."""
+    name = title or ((cwd or "").rstrip("/").rsplit("/", 1)[-1]) or None
+    label = PROVIDER_LABELS.get(provider or "", provider or "")
+    return " · ".join(p for p in (label, name) if p)
 
 
 def build_notification(
     request: RequestModel, cfg: NtfyConfig, origin: Optional[str] = None
 ) -> Tuple[str, Dict[str, str], str]:
     """
-    Returns (url, headers, body) for the ntfy publish call. `origin` names
-    where the request comes from (e.g. the sender session's project).
+    Returns (url, headers, body) for the ntfy publish call: a question (or a
+    prompt to approve), loud. `origin` names the session it comes from
+    ("Claude · <title>"); the tap opens that conversation (RF-43).
     """
     open_url = f"{cfg.base_url}/#request-{request.id}"
-    sender = f"{request.sender_id} ({origin})" if origin else request.sender_id
-    title = f"Placet #{request.id}: {sender} -> {request.recipient_id}"
+    sender = origin or request.sender_id
+    if request.recipient_id == "human":
+        title = f"{sender}: domanda"
+    else:
+        title = f"{sender} -> {request.recipient_id}: da approvare"
 
     if cfg.is_private:
         body = request.prompt
@@ -105,6 +120,39 @@ def build_notification(
         headers["Authorization"] = f"Bearer {cfg.access_token}"
 
     return f"{cfg.server_url}/{cfg.topic}", headers, body
+
+
+def build_turn_end(
+    session_id: str, label: str, last_message: Optional[str], cfg: NtfyConfig
+) -> Tuple[str, Dict[str, str], str]:
+    """A followed session finished its turn: quiet, opens the conversation (RF-43)."""
+    open_url = f"{cfg.base_url}/#/sessione/{session_id}"
+    body = "Turno finito."
+    if cfg.is_private and last_message:
+        body = last_message if len(last_message) <= BODY_PREVIEW_CHARS else last_message[:BODY_PREVIEW_CHARS] + "..."
+    headers = {
+        "Title": _ascii_header(f"{label}: turno finito"),
+        "Priority": "low",
+        "Tags": "white_check_mark",
+        "Click": open_url,
+        "Actions": f"view, Apri, {open_url}, clear=true",
+    }
+    if cfg.access_token:
+        headers["Authorization"] = f"Bearer {cfg.access_token}"
+    return f"{cfg.server_url}/{cfg.topic}", headers, body
+
+
+async def send_ntfy_turn_end(session_id: str, label: str, last_message: Optional[str], cfg: NtfyConfig) -> bool:
+    if not cfg.enabled:
+        return False
+    url, headers, body = build_turn_end(session_id, label, last_message, cfg)
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(url, content=body.encode("utf-8"), headers=headers)
+        return resp.status_code == 200
+    except Exception as e:
+        logger.warning(f"Impossibile inviare notifica di fine turno: {e}")
+        return False
 
 
 def build_alert(

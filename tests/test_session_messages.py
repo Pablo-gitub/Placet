@@ -209,3 +209,31 @@ async def test_invalid_mentions_do_not_enqueue_a_message(setup):
             response = await human.post("/api/sessions/c1/messages", json={"text": "chiedi a @x", "mentions": [mention]})
             assert response.status_code == expected
     assert db.inbox_has_message(db.get_session("c1")) is False
+
+
+@pytest.mark.asyncio
+async def test_a_followed_session_notifies_the_end_of_its_turn(setup, monkeypatch):
+    app, db = setup
+    sent = []
+
+    async def fake_turn_end(session_id, label, last_message, cfg):
+        sent.append((session_id, label, last_message))
+        return True
+    monkeypatch.setattr("backend.app.main.send_ntfy_turn_end", fake_turn_end)
+    await start(app, "codex", "cx1", "codex")
+    async with agent_client(app, "tok-codex") as codex:
+        await codex.post("/api/sessions/cx1/events", json={"event": "prompt"})
+        await codex.post("/api/sessions/cx1/events", json={"event": "stop", "last_message": "fatto"})
+    assert sent == []  # not followed
+    db.set_session_pinned("cx1", True)
+    async with agent_client(app, "tok-codex") as codex:
+        await codex.post("/api/sessions/cx1/events", json={"event": "prompt", "title": "Review PR"})
+        await codex.post("/api/sessions/cx1/events", json={"event": "stop", "last_message": "fatto"})
+        # A second turn right after: no second notification within the minute.
+        await codex.post("/api/sessions/cx1/events", json={"event": "prompt"})
+        await codex.post("/api/sessions/cx1/events", json={"event": "stop", "last_message": "ancora"})
+        # A stop without a running turn (a repeated event) never notifies.
+        await codex.post("/api/sessions/cx1/events", json={"event": "stop"})
+    import asyncio
+    await asyncio.sleep(0)
+    assert sent == [("cx1", "Codex · Review PR", "fatto")]

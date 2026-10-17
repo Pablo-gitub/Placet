@@ -114,7 +114,7 @@ Placet è un **punto unico di supervisione umana e bus di cooperazione per agent
 | RF-40 | **Home**: in cima le domande in corso; sotto le **sessioni aggiunte**, ordinate per attività (chi ha appena finito il turno in cima) | [Implementato] |
 | RF-41 | **Aggiungi / vedi tutte**: scegli il provider, vedi le sue sessioni aperte, spunti quelle da aggiungere; le altre non compaiono in home | [Implementato] per sessione; per nodo con la fase 3 |
 | RF-42 | Anche le sessioni che **non hanno mai usato Placet** si registrano, grazie agli hook installati globalmente (salvo i progetti esclusi, RF-45) | [Implementato] (`hooks/install.py`) |
-| RF-43 | Due tipi di notifica: **domanda** (priorità alta, suono) e **turno finito** (silenziosa, solo per le sessioni aggiunte). Titolo con provider e nome della sessione; il tocco apre la sessione | [Deciso] |
+| RF-43 | Due tipi di notifica: **domanda** (priorità alta, suono) e **turno finito** (silenziosa, solo per le sessioni aggiunte). Titolo con provider e nome della sessione; il tocco apre la sessione | [Implementato] (al massimo una notifica di fine turno al minuto per sessione) |
 | RF-11 | Notifiche ntfy self-hosted in tailnet, con solo l'azione "Apri": si decide dalla PWA vedendo il testo completo | [Implementato] nel codice; ntfy da installare |
 | RF-12 | Nella PWA si può modificare il prompt prima di approvarlo; il mittente viene informato della modifica | [Implementato] |
 | RF-13 | Storico e audit completi, con timeline per richiesta | [Implementato] |

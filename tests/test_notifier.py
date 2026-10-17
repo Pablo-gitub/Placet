@@ -104,6 +104,24 @@ async def test_send_skipped_when_disabled():
     assert not await send_ntfy_notification(_request(), NtfyConfig())
 
 
-def test_origin_in_title():
-    _, headers, _ = build_notification(_request(), PRIVATE, origin="placet-hook-lab")
-    assert headers["Title"] == "Placet #7: claude (placet-hook-lab) -> human"
+def test_title_names_the_session_and_the_kind():
+    _, headers, _ = build_notification(_request(), PRIVATE, origin="Claude · Refactor payments")
+    assert headers["Title"] == "Claude - Refactor payments: domanda"  # ASCII header
+    assert headers["Priority"] in ("default", "high", "urgent", "low")
+    _, headers, _ = build_notification(_request(), PRIVATE)
+    assert headers["Title"] == "claude: domanda"
+
+
+def test_session_label():
+    from backend.app.notifier import session_label
+    assert session_label("codex", "Review PR", "/p/web") == "Codex · Review PR"
+    assert session_label("antigravity", None, "/home/u/Projects/shop/") == "Antigravity · shop"
+    assert session_label(None, None, None) == ""
+
+
+def test_turn_end_is_quiet_and_opens_the_session():
+    from backend.app.notifier import build_turn_end
+    _, headers, body = build_turn_end("s-1", "Codex · Review PR", "Fatto: 3 commenti.", PRIVATE)
+    assert headers["Title"] == "Codex - Review PR: turno finito"
+    assert headers["Priority"] == "low" and headers["Click"].endswith("/#/sessione/s-1")
+    assert body == "Fatto: 3 commenti."
