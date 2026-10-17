@@ -227,6 +227,10 @@ def create_app(
         for req_id in db.unconfirmed_to_uncertain(ACK_TIMEOUT_SECONDS):
             notify_change(req_id)
             alert(req_id, "consegna incerta: riprova o annulla")
+        for req_id in db.waiting_for_unreachable_sessions():
+            notify_change(req_id)
+            alert(req_id, "sessione non raggiungibile: il messaggio parte al suo prossimo turno, "
+                          "o scrivi qualcosa nella sessione dal PC")
         for req_id in db.unconfirmed_starts():
             notify_change(req_id)
             alert(req_id, "avvio non confermato: i messaggi successivi restano in attesa")

@@ -669,6 +669,36 @@ class Database:
                       {"source": source} if source else None, at=now)
             return True
 
+    def waiting_for_unreachable_sessions(self, grace_seconds: float = 120.0) -> List[int]:
+        """
+        Messages waiting for a Claude session whose waiter stopped listening
+        (RF-26), noted once each. Nobody can restart a waiter from outside:
+        the session starts a new one with its next turn.
+        """
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
+        cutoff = (now_dt - timedelta(seconds=grace_seconds)).isoformat()
+        waiter_cutoff = (now_dt - timedelta(seconds=WAITER_TTL_SECONDS)).isoformat()
+        placeholders = ", ".join("?" for _ in BRIDGE_PROVIDERS)
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                SELECT r.id FROM requests r JOIN sessions s ON s.id = r.recipient_session_id
+                WHERE r.status = ? AND r.created_at <= ?
+                  AND s.ended_at IS NULL AND s.excluded_at IS NULL
+                  AND COALESCE(s.provider, '') NOT IN ({placeholders})
+                  AND (s.waiter_seen_at IS NULL OR s.waiter_seen_at <= ?)
+                  AND NOT EXISTS (SELECT 1 FROM request_events e
+                                  WHERE e.request_id = r.id AND e.event = 'recipient_unreachable')
+                """,
+                (RequestStatus.APPROVED.value, cutoff, *BRIDGE_PROVIDERS, waiter_cutoff),
+            )
+            ids = sorted(r["id"] for r in cursor.fetchall())
+            for req_id in ids:
+                self._log(cursor, req_id, "system", "recipient_unreachable", at=now)
+            return ids
+
     def unconfirmed_starts(self, seconds: float = START_UNCONFIRMED_SECONDS) -> List[int]:
         """
         Delivered requests whose turn was not seen starting in time: marked

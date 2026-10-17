@@ -19,6 +19,7 @@ const EVENT_LABELS = {
   execution_completed: "Turno concluso",
   execution_interrupted: "Turno interrotto",
   start_unconfirmed: "Avvio del turno non confermato",
+  recipient_unreachable: "Sessione non raggiungibile: in attesa del suo prossimo turno",
   marked_finished_by_user: "Segnata da te come terminata",
   queue_overridden: "Prossimo messaggio accodato comunque",
   stalled: "Bloccata: nessuna risposta",

@@ -312,3 +312,26 @@ async def test_the_users_messages_have_no_outcome_to_deliver(setup):  # noqa: F8
     await event(app, "claude", "c1", event="stop", last_message="ok")
     now = datetime.now(timezone.utc)
     assert db.list_undelivered_results(now + timedelta(hours=1), now - timedelta(hours=1)) == []
+
+
+@pytest.mark.asyncio
+async def test_a_message_for_a_claude_session_without_waiter_is_flagged_once(setup):  # noqa: F811
+    app, db = setup
+    await start(app, "claude", "c1", "claude-code")
+    await take(app)  # the waiter listens once, then dies
+    req_id = (await write(app, "c1", "ci sei?")).json()["id"]
+    old = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    with db._get_connection() as conn:
+        conn.execute("UPDATE requests SET created_at = ? WHERE id = ?", (old, req_id))
+    assert db.waiting_for_unreachable_sessions() == []  # its waiter was seen recently
+    with db._get_connection() as conn:
+        conn.execute("UPDATE sessions SET waiter_seen_at = ? WHERE id = 'c1'", (old,))
+    assert db.waiting_for_unreachable_sessions() == [req_id]
+    assert db.waiting_for_unreachable_sessions() == []  # once
+    assert "recipient_unreachable" in [e.event for e in db.list_events(req_id)]
+    # Codex and Antigravity are woken by the bridge: never flagged.
+    await start(app, "codex", "cx1", "codex")
+    other = (await write(app, "cx1", "x")).json()["id"]
+    with db._get_connection() as conn:
+        conn.execute("UPDATE requests SET created_at = ? WHERE id = ?", (old, other))
+    assert db.waiting_for_unreachable_sessions() == []
