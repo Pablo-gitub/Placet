@@ -22,7 +22,7 @@ import sys
 import time
 from pathlib import Path
 
-SCRIPTS = ("claude_code.py", "placet_waiter.py", "antigravity.py")
+SCRIPTS = ("claude_code.py", "placet_waiter.py", "antigravity.py", "steer.py")
 HOME = Path.home()
 
 
@@ -55,10 +55,16 @@ def claude_hooks(hooks_dir: str) -> dict:
     hook = {"type": "command", "command": _command(hooks_dir, "claude_code.py", "--agent", "claude"), "timeout": 5}
     waiter = {"type": "command", "command": _command(hooks_dir, "placet_waiter.py", "--agent", "claude"),
               "async": True, "asyncRewake": True}
+    # "Subito" (RF-35): after every action, but Python starts only when a
+    # message is waiting for some session.
+    steer = {"type": "command", "timeout": 5, "command": (
+        f"sh -c '[ -n \"$(ls -A \"$HOME/.cache/placet/steer\" 2>/dev/null)\" ] "
+        f"&& exec {_command(hooks_dir, 'steer.py', '--agent', 'claude')} || cat >/dev/null'"
+    )}
     return {
         "SessionStart": [{"hooks": [hook, waiter]}],
         "UserPromptSubmit": [{"hooks": [hook]}],
-        "PostToolUse": [{"matcher": "mcp__placet__.*", "hooks": [hook]}],
+        "PostToolUse": [{"matcher": "mcp__placet__.*", "hooks": [hook]}, {"hooks": [steer]}],
         "Stop": [{"hooks": [hook, waiter]}],
         "SessionEnd": [{"hooks": [hook]}],
     }

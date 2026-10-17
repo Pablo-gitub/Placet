@@ -32,7 +32,30 @@ function encodeFile(file) {
 }
 
 /** Writing to a session from the phone (RF-34): the message wakes it. */
+const MODE_KEY = "placet.sendMode";
+// Providers whose running turn can take a message "now" (RF-35).
+const STEER_PROVIDERS = ["claude-code", "antigravity"];
+
+function savedMode() {
+  try {
+    return localStorage.getItem(MODE_KEY) === "now" ? "now" : "queue";
+  } catch {
+    return "queue";
+  }
+}
+
 export default function Composer({ session, sessions = [], onSend }) {
+  // "In coda" (end of the turn) or "Subito" (inside the running turn): the
+  // last choice is the default on this device (RF-35).
+  const [mode, setModeState] = useState(savedMode);
+  const setMode = (value) => {
+    setModeState(value);
+    try {
+      localStorage.setItem(MODE_KEY, value);
+    } catch {
+      // private mode: the choice lasts for this page
+    }
+  };
   const [text, setText] = useState("");
   const input = useRef(null);
   const fileInput = useRef(null);
@@ -74,6 +97,8 @@ export default function Composer({ session, sessions = [], onSend }) {
   const [sending, setSending] = useState(false);
   const closed = !!session?.ended_at;
   const unreachable = session && !closed && !session.reachable && !session.tmux_session;
+  const busy = session?.state === "busy" && !closed;
+  const canSteer = STEER_PROVIDERS.includes(session?.provider);
 
   const send = async () => {
     const message = text.trim();
@@ -82,7 +107,8 @@ export default function Composer({ session, sessions = [], onSend }) {
     setFileError("");
     try {
       const attachments = await Promise.all(files.map(encodeFile));
-      if (await onSend(message, activeMentions, attachments)) {
+      const now = busy && canSteer && mode === "now";
+      if (await onSend(message, activeMentions, attachments, now ? "now" : "queue")) {
         setText(""); setMentions([]); setQuery(null); setFiles([]);
       }
     } catch (error) {
@@ -100,8 +126,26 @@ export default function Composer({ session, sessions = [], onSend }) {
           La sessione non è raggiungibile ora: il messaggio partirà quando torna attiva.
         </p>
       )}
-      {session?.state === "busy" && !closed && (
-        <p className="composer-note">Sta lavorando: il messaggio arriverà a fine turno.</p>
+      {busy && (
+        <div className="send-mode" role="radiogroup" aria-label="Quando consegnare" data-testid="send-mode">
+          <span className="composer-note">Sta lavorando:</span>
+          <button type="button" role="radio" aria-checked={mode !== "now" || !canSteer}
+            className={mode !== "now" || !canSteer ? "active" : ""} data-testid="mode-queue"
+            onClick={() => setMode("queue")}>
+            In coda
+          </button>
+          <button type="button" role="radio" aria-checked={mode === "now" && canSteer} disabled={!canSteer}
+            className={mode === "now" && canSteer ? "active" : ""} data-testid="mode-now"
+            title={canSteer ? "Entra nel turno in corso, dopo la prossima azione" : "Non ancora disponibile per Codex"}
+            onClick={() => setMode("now")}>
+            Subito
+          </button>
+          <span className="composer-note send-mode-hint">
+            {mode === "now" && canSteer
+              ? "entra nel turno in corso, dopo la prossima azione."
+              : canSteer ? "arriva a fine turno." : "arriva a fine turno (Subito non ancora disponibile per Codex)."}
+          </span>
+        </div>
       )}
       {activeMentions.length > 0 && (
         <p className="composer-note" role="status">Riferimenti: {activeMentions.length === 1 ? "una sessione" : `${activeMentions.length} sessioni`}. Scrivi alla sessione corrente: le richieste agli altri agenti passeranno da Placet.</p>

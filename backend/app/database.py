@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 from backend.app.models import (
     BRIDGE_PROVIDERS,
+    STEER_PROVIDERS,
     START_UNCONFIRMED_SECONDS,
     OPEN_STATUSES,
     RequestCreate,
@@ -213,6 +214,8 @@ class Database:
                         cursor.execute(f"ALTER TABLE requests ADD COLUMN {col} TEXT;")
                 cursor.execute("ALTER TABLE requests ADD COLUMN turn_mixed INTEGER NOT NULL DEFAULT 0;")
                 cursor.execute(_BACKFILL_ASPECTS_SQL)
+            if "delivery_mode" not in cols:
+                cursor.execute("ALTER TABLE requests ADD COLUMN delivery_mode TEXT;")
             if "queue_released_at" not in cols:
                 for col in ("queue_released_at", "start_unconfirmed_at", "execution_source"):
                     cursor.execute(f"ALTER TABLE requests ADD COLUMN {col} TEXT;")
@@ -362,6 +365,7 @@ class Database:
             reply=row["reply_state"] or "none",
             start_unconfirmed_at=_ts(row["start_unconfirmed_at"]),
             queue_released_at=_ts(row["queue_released_at"]),
+            delivery_mode=row["delivery_mode"] or "queue",
         )
 
     def list_requests(
@@ -743,6 +747,80 @@ class Database:
             self._log(cursor, request_id, actor, event, at=now)
             return True
 
+    # --- "Subito": a message inside the running turn (RF-35) -------------------------
+
+    def set_delivery_mode(self, request_id: int, mode: str) -> None:
+        with self._get_connection() as conn:
+            conn.execute("UPDATE requests SET delivery_mode = ? WHERE id = ?", (mode, request_id))
+
+    def steer_candidates(self) -> List[Tuple[RequestModel, SessionModel]]:
+        """'Now' messages for sessions in the middle of a turn that can take them."""
+        placeholders = ", ".join("?" for _ in STEER_PROVIDERS)
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT r.id AS request_id, s.id AS session_id FROM requests r
+                JOIN sessions s ON s.id = r.recipient_session_id
+                WHERE r.status = ? AND r.delivery_mode = 'now' AND s.state = 'busy'
+                  AND s.ended_at IS NULL AND s.excluded_at IS NULL AND s.provider IN ({placeholders})
+                ORDER BY r.id
+                """,
+                (RequestStatus.APPROVED.value, *STEER_PROVIDERS),
+            ).fetchall()
+        out = []
+        for row in rows:
+            req, session = self.get_request(row["request_id"]), self.get_session(row["session_id"])
+            if req is not None and session is not None:
+                out.append((req, session))
+        return out
+
+    def claim_steer(self, request_id: int, session_id: str, actor: str) -> Optional[RequestModel]:
+        """APPROVED -> DELIVERING through the running turn of this session."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if not self._transition(
+                cursor, request_id, RequestStatus.APPROVED, RequestStatus.DELIVERING, now,
+                ", delivering_since = ?, delivery_attempts = delivery_attempts + 1,"
+                " delivery_state = 'in_progress', delivery_channel = 'steer', attempt_id = ?",
+                [now, _new_attempt()],
+            ):
+                return None
+            self._log(cursor, request_id, actor, "injection_claimed",
+                      {"via": "steer", "session": session_id}, at=now)
+        return self.get_request(request_id)
+
+    def steers_waiting(self) -> List[Tuple[RequestModel, SessionModel]]:
+        """'Now' messages still waiting for an action of a turn that has ended."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT r.id AS request_id, s.id AS session_id FROM requests r
+                JOIN sessions s ON s.id = r.recipient_session_id
+                WHERE r.status = ? AND r.delivery_channel = 'steer' AND r.delivery_state = 'in_progress'
+                  AND (s.state != 'busy' OR s.ended_at IS NOT NULL)
+                ORDER BY r.id
+                """,
+                (RequestStatus.DELIVERING.value,),
+            ).fetchall()
+        out = []
+        for row in rows:
+            req, session = self.get_request(row["request_id"]), self.get_session(row["session_id"])
+            if req is not None and session is not None:
+                out.append((req, session))
+        return out
+
+    def steered_in_turn(self, session_id: str) -> List[int]:
+        """'Now' messages that entered this session's current turn."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT id FROM requests WHERE recipient_session_id = ? AND status = ?"
+                " AND delivery_channel = 'steer' AND delivery_state = 'accepted'"
+                " AND COALESCE(execution_state, 'unobserved') IN ('unobserved', 'started')",
+                (session_id, RequestStatus.EXECUTING.value),
+            ).fetchall()
+            return [r["id"] for r in rows]
+
     def mark_turn_mixed(self, request_id: int) -> None:
         """Another message entered the turn: its implicit reply is ambiguous."""
         with self._get_connection() as conn:
@@ -792,7 +870,8 @@ class Database:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT id FROM requests WHERE status = ? AND delivering_since <= ?"
-                " AND delivery_state = 'in_progress' AND COALESCE(delivery_channel, 'tmux') != 'tmux'",
+                " AND delivery_state = 'in_progress'"
+                " AND COALESCE(delivery_channel, 'tmux') NOT IN ('tmux', 'steer')",
                 (RequestStatus.DELIVERING.value, cutoff),
             )
             ids = [r["id"] for r in cursor.fetchall()]

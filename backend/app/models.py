@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Literal
 from datetime import datetime, timezone
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -204,6 +204,9 @@ class RequestModel(BaseModel):
     start_unconfirmed_at: Optional[datetime] = None
     # The user let the session's queue move on past this request.
     queue_released_at: Optional[datetime] = None
+    # "queue": at the end of the recipient's turn; "now": inside the running
+    # turn, after its next action (RF-35, "Subito").
+    delivery_mode: str = "queue"
 
 
 # Providers whose sessions the bridge wakes from outside (RF-24): Codex with
@@ -222,8 +225,15 @@ class SessionUpload(BaseModel):
     data: str = Field(min_length=1, max_length=13981016)
 
 
+# Providers whose running turn can take a message "now" (RF-35): Claude Code
+# through its PostToolUse hook, Antigravity through its language server.
+# Codex: not verified yet, its "now" messages wait for the end of the turn.
+STEER_PROVIDERS = ("claude-code", "antigravity")
+
+
 class SessionMessage(BaseModel):
     """A message the user writes to a session (RF-34)."""
+    mode: Literal["queue", "now"] = "queue"
     text: str = Field(default="", max_length=20000)
     attachments: List[SessionUpload] = Field(default_factory=list, max_length=4)
     mentions: List[SessionMention] = Field(default_factory=list, max_length=20)

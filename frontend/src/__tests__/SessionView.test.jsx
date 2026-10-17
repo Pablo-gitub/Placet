@@ -285,3 +285,43 @@ describe("files an agent shares", () => {
     expect(within(screen.getByTestId("pdf-viewer")).getByLabelText("Scarica")).toHaveAttribute("href", "/api/sessions/s1/attachments/30%3A0%3A0");
   });
 });
+
+describe("Subito", () => {
+  it("lets the user put a message into the running turn, and remembers the choice", async () => {
+    localStorage.clear();
+    mockFetch([[transcriptOf("s1"), latest]]);
+    const onSend = vi.fn(() => Promise.resolve(true));
+    renderView({ onSend, session: { ...session, state: "busy" } });
+    expect(screen.getByTestId("mode-queue")).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(screen.getByTestId("mode-now"));
+    expect(screen.getByTestId("send-mode")).toHaveTextContent("dopo la prossima azione");
+    fireEvent.change(screen.getByTestId("composer-input"), { target: { value: "fermati" } });
+    fireEvent.click(screen.getByTestId("composer-send"));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("s1", "fermati", [], [], "now"));
+    expect(localStorage.getItem("placet.sendMode")).toBe("now");
+  });
+
+  it("is not offered for Codex yet, nor when the session is idle", async () => {
+    localStorage.setItem("placet.sendMode", "now");
+    mockFetch([[transcriptOf("s1"), latest]]);
+    const onSend = vi.fn(() => Promise.resolve(true));
+    const { rerender } = renderView({ onSend, session: { ...session, provider: "codex", state: "busy" } });
+    expect(screen.getByTestId("mode-now")).toBeDisabled();
+    expect(screen.getByTestId("send-mode")).toHaveTextContent("non ancora disponibile per Codex");
+    fireEvent.change(screen.getByTestId("composer-input"), { target: { value: "x" } });
+    fireEvent.click(screen.getByTestId("composer-send"));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("s1", "x"));
+    rerender(<SessionView sessionId="s1" session={session} requests={[]} sessions={[session]} onBack={vi.fn()}
+      onDecide={vi.fn()} onSend={onSend} />);
+    expect(screen.queryByTestId("send-mode")).toBeNull();
+    localStorage.clear();
+  });
+
+  it("shows a now-message as entering after the next action", async () => {
+    mockFetch([[transcriptOf("s1"), latest]]);
+    renderView({ requests: [{ id: 70, sender_id: "human", recipient_id: "claude", question_type: "message",
+      prompt: "fermati", options: [], status: "DELIVERING", delivery: "in_progress", delivery_mode: "now",
+      created_at: "2026-10-16T10:00:00Z", recipient_session_id: "s1" }] });
+    await waitFor(() => expect(screen.getByTestId("outgoing-70")).toHaveTextContent("dopo la prossima azione"));
+  });
+});

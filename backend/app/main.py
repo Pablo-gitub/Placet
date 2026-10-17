@@ -63,7 +63,7 @@ EXPIRY_SWEEP_SECONDS = 30.0
 
 class SessionEventPayload(BaseModel):
     """What an agent CLI / desktop app hook reports about one of its sessions."""
-    event: Literal["start", "prompt", "stop", "tool", "end"]
+    event: Literal["start", "prompt", "stop", "tool", "end", "steered"]
     # The hook script and its version: the provenance of execution proofs.
     adapter: Optional[str] = Field(None, max_length=64)
     # Set by the hooks' local queue: an event forwarded twice is applied once.
@@ -829,6 +829,22 @@ def create_app(
             replied = implicit_reply(who, session.turn_request_id, payload.last_message)
             if replied is not None:
                 result["implicit_reply_for"] = replied
+            for steered_id in db.steered_in_turn(session_id):
+                db.set_execution(steered_id, "completed", actor=f"{who.actor}:hook", source=source)
+                implicit_reply(who, steered_id, payload.last_message)
+                notify_change(steered_id)
+        elif payload.event == "steered" and payload.request_id is not None:
+            # A "now" message entered the running turn (RF-35): delivered and
+            # being executed; the turn now answers more than one message.
+            try:
+                ack_request(who, payload.request_id, via="hook")
+                db.set_execution(payload.request_id, "started", actor=f"{who.actor}:hook", source=source)
+                db.mark_turn_mixed(payload.request_id)
+                if session.turn_request_id is not None:
+                    db.mark_turn_mixed(session.turn_request_id)
+                notify_change(payload.request_id)
+            except HTTPException as e:
+                result["ack_error"] = e.detail
         elif payload.event == "tool" and payload.request_id is not None:
             result["linked"] = db.link_sender_session(payload.request_id, session_id, who.id)
         elif payload.event == "end":
@@ -992,6 +1008,9 @@ def create_app(
             ),
             actor=who.actor,
         )
+        if body.mode == "now":
+            db.set_delivery_mode(created.id, "now")
+            created = db.get_request(created.id)
         approved = db.update_request_decision(created.id, RequestStatus.APPROVED, actor=who.actor)
         notify_change(created.id)
         return approved
@@ -1163,9 +1182,29 @@ def create_app(
             "uncertain": uncertain_to_reconcile(),
             # Folders of known sessions: the bridge looks for `.placet-off`.
             "folders": db.known_folders(),
+            # "Now" messages for running turns, and those whose turn ended first.
+            "steer": [{"request_id": r.id, "session_id": s.id, "provider": s.provider}
+                      for r, s in db.steer_candidates()],
+            "steer_waiting": [{"request_id": r.id, "session_id": s.id, "provider": s.provider}
+                              for r, s in db.steers_waiting()],
             # Codex and Antigravity sessions: the bridge reads their titles.
             "titles": [{"id": s.id, "provider": s.provider} for s in db.untitled_bridge_sessions()],
         }
+
+    @app.post("/api/bridge/requests/{request_id}/steer")
+    async def bridge_steer(request_id: int, who: Principal = Depends(principal)):
+        """Takes a "now" message for its session's running turn, with the text to insert."""
+        require_bridge(who)
+        req = get_or_404(request_id)
+        session = db.get_session(req.recipient_session_id) if req.recipient_session_id else None
+        if session is None or session.excluded or session.state != "busy" or req.delivery_mode != "now":
+            raise HTTPException(status_code=409, detail="Not a running turn.")
+        claimed = db.claim_steer(request_id, session.id, actor=who.actor)
+        if claimed is None:
+            raise HTTPException(status_code=409, detail=f"Request {request_id} is not APPROVED.")
+        notify_change(request_id)
+        return {"request_id": request_id, "session_id": session.id, "provider": session.provider,
+                "text": envelopes.steer(claimed)}
 
     @app.post("/api/bridge/titles")
     async def bridge_titles(payload: TitlesReport, who: Principal = Depends(principal)):

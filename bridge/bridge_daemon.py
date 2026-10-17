@@ -14,6 +14,7 @@ from bridge.stores import BridgeStore, LocalStore, Work
 from bridge.tmux_controller import SessionSpec, TmuxController
 from bridge.attachments import AttachmentError
 from bridge.transcripts import TranscriptError, read_attachment, read_transcript
+from bridge import steer as steer_files
 from bridge.titles import codex_titles
 from hooks.placet_common import active
 
@@ -26,6 +27,8 @@ RECENT_INPUT_SECONDS = 15.0
 RECONCILE_EVERY_SECONDS = 20.0
 # How often the folders of known sessions are checked for `.placet-off`.
 FOLDERS_EVERY_SECONDS = 15.0
+# A "now" message taken by the hook is confirmed by its event within this long.
+STEER_CONFIRM_SECONDS = 120.0
 # How often Codex and Antigravity titles are read (they change on rename).
 TITLES_EVERY_SECONDS = 30.0
 
@@ -53,6 +56,8 @@ class BridgeDaemon:
         self._folders_at = -FOLDERS_EVERY_SECONDS
         self._excluded: Optional[Set[str]] = None
         self._titles_at = -TITLES_EVERY_SECONDS
+        # "now" messages left for a turn that ended, and since when (monotonic)
+        self._steer_orphans: Dict[int, float] = {}
 
     def format_injection_envelope(self, req: RequestModel, ack_mode: str = "mcp") -> str:
         return envelopes.injection(req, ack_mode=ack_mode, channel="tmux")
@@ -251,6 +256,55 @@ class BridgeDaemon:
             self.store.report_titles(titles)
         return titles
 
+    def process_steer(self, steer: List[dict], waiting: List[dict]) -> int:
+        """
+        "Subito" (RF-35). Claude Code: the message is left for the session's
+        PostToolUse hook. Antigravity: queued for the next model call. If the
+        turn ends before it got in, it goes back to wait for the end of the turn.
+        """
+        inserted = 0
+        for item in steer:
+            provider, session_id = item.get("provider"), item["session_id"]
+            if provider == "claude-code" and (steer_files.steer_dir() / f"{session_id}.json").exists():
+                continue  # one at a time per session
+            taken = self.store.take_steer(item["request_id"])
+            if taken is None:
+                continue
+            try:
+                if provider == "antigravity":
+                    self.channels["antigravity"].send(session_id, taken["text"], now=True)
+                    self.store.confirm_injection(taken["request_id"])
+                else:
+                    steer_files.leave(session_id, taken["request_id"], taken["text"])
+                inserted += 1
+                logger.info(f"Request #{taken['request_id']} goes into the running turn of {session_id}.")
+            except ChannelUncertain as e:
+                logger.warning(f"Inserting #{taken['request_id']} is uncertain: {e}")
+                self.store.mark_uncertain(taken["request_id"])
+            except (ChannelError, OSError, KeyError) as e:
+                logger.warning(f"Could not insert #{taken['request_id']} now ({e}): it waits for the turn end.")
+                self.store.release_injection(taken["request_id"])
+        now = time.monotonic()
+        current = set()
+        for item in waiting:
+            request_id, session_id = item["request_id"], item["session_id"]
+            current.add(request_id)
+            if item.get("provider") == "claude-code" and steer_files.take_back(session_id, request_id):
+                # The turn ended with no other action: deliver it as usual.
+                self.store.release_injection(request_id)
+                self._steer_orphans.pop(request_id, None)
+                logger.info(f"Request #{request_id} missed the turn: back in the queue.")
+                continue
+            # Taken by the hook (its event is on its way), or unknown: wait, then flag.
+            since = self._steer_orphans.setdefault(request_id, now)
+            if now - since > STEER_CONFIRM_SECONDS:
+                self.store.mark_uncertain(request_id)
+                self._steer_orphans.pop(request_id, None)
+        for request_id in list(self._steer_orphans):
+            if request_id not in current:
+                self._steer_orphans.pop(request_id, None)
+        return inserted
+
     def run_loop_step(self) -> int:
         # At most one injection per session per tick, outcomes first: they
         # unblock work that is already waiting.
@@ -262,6 +316,7 @@ class BridgeDaemon:
         delivered = self.process_pending_results(busy_sessions, work.results, busy_agents)
         delivered += self.process_pending_injections(busy_sessions, work.injections, busy_agents)
         delivered += self.process_session_mail(work.sessions)
+        delivered += self.process_steer(work.steer, work.steer_waiting)
         self.reconcile_uncertain(work.uncertain)
         return delivered
 

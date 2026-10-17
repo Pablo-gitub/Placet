@@ -225,12 +225,17 @@ export default function App() {
   };
 
   /** The user writes to a session (RF-34); true when the message is accepted. */
-  const sendMessage = async (sessionId, text, mentions = [], attachments = []) => {
+  const sendMessage = async (sessionId, text, mentions = [], attachments = [], mode = "queue") => {
     try {
       const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, ...(mentions.length ? { mentions } : {}), ...(attachments.length ? { attachments } : {}) }),
+        body: JSON.stringify({
+          text,
+          ...(mentions.length ? { mentions } : {}),
+          ...(attachments.length ? { attachments } : {}),
+          ...(mode === "now" ? { mode } : {}),
+        }),
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));

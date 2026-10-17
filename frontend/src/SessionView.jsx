@@ -156,6 +156,7 @@ function ChatEntry({ entry, sessionId }) {
 // The user's messages not yet in the conversation: waiting, or failed.
 const OUTGOING_STATES = {
   APPROVED: "In attesa che la sessione sia libera",
+  NOW: "Subito: entra dopo la prossima azione",
   DELIVERING: "In consegna…",
   DELIVERY_FAILED: "Non consegnato",
   EXPIRED: "Non consegnato: scaduto",
@@ -171,7 +172,11 @@ function Outgoing({ req, onDelivery }) {
     >
       <div className="bubble">{req.prompt}</div>
       <time>
-        {uncertain ? "Consegna incerta: forse è già arrivato, ma non c'è conferma" : OUTGOING_STATES[req.status]}
+        {uncertain
+          ? "Consegna incerta: forse è già arrivato, ma non c'è conferma"
+          : req.delivery_mode === "now" && ["APPROVED", "DELIVERING"].includes(req.status)
+            ? OUTGOING_STATES.NOW
+            : OUTGOING_STATES[req.status]}
       </time>
       {onDelivery && (uncertain || req.status === "APPROVED") && (
         <div className="outgoing-actions">
@@ -362,8 +367,9 @@ export default function SessionView({
           key={sessionId}
           session={session}
           sessions={sessions}
-          onSend={async (text, mentions, attachments) => {
+          onSend={async (text, mentions, attachments, mode) => {
             following.current = true;
+            if (mode === "now") return onSend(sessionId, text, mentions || [], attachments || [], "now");
             return attachments?.length ? onSend(sessionId, text, mentions, attachments)
               : mentions?.length ? onSend(sessionId, text, mentions) : onSend(sessionId, text);
           }}

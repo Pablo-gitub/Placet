@@ -208,13 +208,16 @@ class AntigravityChannel:
                     return user_input[key]
         raise ChannelError("No previous user turn to copy the model configuration from.")
 
-    def send(self, session_id: str, text: str) -> None:
+    def send(self, session_id: str, text: str, now: bool = False) -> None:
+        """Queues the message for when the agent is idle, or with now=True for
+        its next model call inside the running turn (RF-35)."""
         base, token, trajectory = self._trajectory(session_id)
         body = {
             "cascadeId": session_id,
             "items": [{"text": text}],
             "cascadeConfig": self._config(trajectory),
-            "deliveryStrategy": "MESSAGE_DELIVERY_STRATEGY_WHEN_IDLE",
+            "deliveryStrategy": ("MESSAGE_DELIVERY_STRATEGY_NEXT_INVOCATION" if now
+                                 else "MESSAGE_DELIVERY_STRATEGY_WHEN_IDLE"),
         }
         try:
             resp = self._call(base, token, "SendUserCascadeMessage", body)

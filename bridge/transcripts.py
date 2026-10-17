@@ -140,6 +140,13 @@ def parse_claude(obj: dict) -> List[dict]:
     kind, at = obj.get("type"), obj.get("timestamp")
     if kind == "system":
         return [_entry("compact", at=at)] if obj.get("subtype") == "compact_boundary" else []
+    if kind == "attachment":
+        # A "now" message (RF-35) the PostToolUse hook put into the turn.
+        attachment = obj.get("attachment") or {}
+        if attachment.get("type") != "hook_additional_context":
+            return []
+        texts = [t for t in attachment.get("content") or [] if isinstance(t, str)]
+        return [_placet_or_user(t, at) for t in texts if _REQUEST_ID.match(t)]
     message = obj.get("message") or {}
     content = message.get("content")
     if kind == "user":

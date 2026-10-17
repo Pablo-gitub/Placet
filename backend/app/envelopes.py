@@ -32,6 +32,20 @@ USER_MESSAGE_NOTE = (
 )
 
 
+STEER_NOTE = (
+    "Arriva adesso, mentre stai lavorando: tienine conto nel turno in corso "
+    "(l'utente ha scelto di inserirlo subito invece di aspettare la fine del turno)."
+)
+
+
+def steer(req: RequestModel) -> str:
+    """A message the user sends "now", inside the running turn (RF-35)."""
+    text = f"[Placet Request #{req.id} dall'utente]: {req.prompt}\n{USER_MESSAGE_NOTE}\n{STEER_NOTE}"
+    if req.context:
+        text += f"\n{req.context}"
+    return text
+
+
 def injection(req: RequestModel, ack_mode: str = "mcp", channel: str = "tmux") -> str:
     if req.question_type == QuestionType.MESSAGE:
         # The user's own message (RF-34): no reply tool, the answer is the turn.

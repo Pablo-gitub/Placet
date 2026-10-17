@@ -1170,3 +1170,12 @@ body.chat-open { overflow: hidden; }
 .composer-file span { min-width: 0; flex: 1; overflow-wrap: anywhere; font-size: .8rem; }
 .composer-file small { display: block; color: var(--text-muted); }
 .composer-file .icon-button, .attach-button { flex-shrink: 0; }
+.send-mode { display: flex; align-items: center; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.4rem; }
+.send-mode .composer-note { margin: 0; }
+.send-mode button {
+  background: none; border: 1px solid var(--border-color); color: var(--text-muted);
+  border-radius: 999px; padding: 0.15rem 0.65rem; font-size: 0.75rem; cursor: pointer;
+}
+.send-mode button.active { background: var(--prov, var(--primary)); border-color: var(--prov, var(--primary)); color: var(--prov-ink, #fff); }
+.send-mode button:disabled { opacity: 0.45; cursor: not-allowed; }
+.send-mode-hint { flex-basis: 100%; }

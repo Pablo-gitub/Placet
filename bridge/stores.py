@@ -52,6 +52,10 @@ class Work:
     folders: List[str] = field(default_factory=list)
     # Codex and Antigravity sessions whose titles the bridge reads: {"id", "provider"}.
     titles: List[dict] = field(default_factory=list)
+    # "Now" messages (RF-35) for running turns, and those whose turn ended
+    # before they got in: {"request_id", "session_id", "provider"}.
+    steer: List[dict] = field(default_factory=list)
+    steer_waiting: List[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -81,6 +85,8 @@ class BridgeStore(Protocol):
     # Which of the folders have a `.placet-off`.
     def report_folders(self, checked: List[str], excluded: List[str]) -> None: ...
     def report_titles(self, titles: Dict[str, str]) -> None: ...
+    # Takes a "now" message: {"request_id", "session_id", "provider", "text"} or None.
+    def take_steer(self, request_id: int) -> Optional[dict]: ...
 
 
 def _session_spec(spec) -> SessionSpec:
@@ -122,6 +128,10 @@ class LocalStore:
             ],
             folders=self.db.known_folders(),
             titles=[{"id": s.id, "provider": s.provider} for s in self.db.untitled_bridge_sessions()],
+            steer=[{"request_id": r.id, "session_id": s.id, "provider": s.provider}
+                   for r, s in self.db.steer_candidates()],
+            steer_waiting=[{"request_id": r.id, "session_id": s.id, "provider": s.provider}
+                           for r, s in self.db.steers_waiting()],
         )
 
     def take_session_mail(self, session_id: str) -> Optional[SessionMail]:
@@ -156,6 +166,17 @@ class LocalStore:
 
     def report_titles(self, titles: Dict[str, str]) -> None:
         self.db.set_session_titles(titles)
+
+    def take_steer(self, request_id: int) -> Optional[dict]:
+        req = self.db.get_request(request_id)
+        session = self.db.get_session(req.recipient_session_id) if req and req.recipient_session_id else None
+        if session is None or session.state != "busy":
+            return None
+        claimed = self.db.claim_steer(request_id, session.id, actor=BRIDGE_ACTOR)
+        if claimed is None:
+            return None
+        return {"request_id": request_id, "session_id": session.id, "provider": session.provider,
+                "text": envelopes.steer(claimed)}
 
     def claim_delivery(self, request_id: int) -> bool:
         return self.db.mark_delivered(request_id, actor=BRIDGE_ACTOR, via="tmux")
@@ -204,6 +225,8 @@ class HttpStore:
             uncertain=list(data.get("uncertain", [])),
             folders=list(data.get("folders", [])),
             titles=list(data.get("titles", [])),
+            steer=list(data.get("steer", [])),
+            steer_waiting=list(data.get("steer_waiting", [])),
         )
 
     def take_session_mail(self, session_id: str) -> Optional[SessionMail]:
@@ -233,6 +256,13 @@ class HttpStore:
     def report_titles(self, titles: Dict[str, str]) -> None:
         resp = self.client.post("/api/bridge/titles", json={"titles": titles})
         resp.raise_for_status()
+
+    def take_steer(self, request_id: int) -> Optional[dict]:
+        resp = self.client.post(f"/api/bridge/requests/{request_id}/steer")
+        if resp.status_code in (404, 409):
+            return None
+        resp.raise_for_status()
+        return resp.json()
 
     def report_folders(self, checked: List[str], excluded: List[str]) -> None:
         resp = self.client.post("/api/bridge/folders", json={"checked": checked, "excluded": excluded})
