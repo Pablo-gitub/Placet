@@ -125,3 +125,7 @@ cd frontend && npm install && npx vitest run     # PWA
 ## Contributing
 
 Issues and pull requests are welcome, especially adapters for other agents and checks on new versions of the supported apps. Please keep the two rules that shape the project: nothing reaches an agent from another agent without passing through Placet's policy, and nothing on the phone reveals a file the user did not choose to share.
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE). Copyright 2026 Paolo Pietrelli.
