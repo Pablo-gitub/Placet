@@ -64,6 +64,7 @@ export function providerClass(session) {
 
 export function sessionStatus(session) {
   if (session.ended_at) return { key: "offline", label: "Chiusa" };
+  if (session.suspended_at) return { key: "offline", label: "Sospesa" };
   if (session.state === "busy") return { key: "busy", label: "Al lavoro" };
   if (session.reachable) return { key: "idle", label: "In attesa" };
   if (session.tmux_session) return { key: "idle", label: "In attesa (tmux)" };

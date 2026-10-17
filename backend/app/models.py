@@ -213,6 +213,9 @@ class RequestModel(BaseModel):
 # `codex queue`, Antigravity through its app's language server. Claude Code
 # sessions are woken by their own background waiter instead.
 BRIDGE_PROVIDERS = ("codex", "antigravity")
+# SessionEnd only means the app unloaded the conversation (idle, restart,
+# update): it can be resumed, so the session is suspended, not ended.
+SUSPENDING_PROVIDERS = ("codex",)
 
 
 class SessionMention(BaseModel):
@@ -260,6 +263,7 @@ class SessionModel(BaseModel):
     last_seen_at: datetime
     waiter_seen_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
+    suspended_at: Optional[datetime] = None
     # Last turn start or end: orders the PWA home by activity (RF-40).
     activity_at: Optional[datetime] = None
     # Added by the user to the PWA home (RF-41).

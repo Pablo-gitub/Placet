@@ -2,6 +2,7 @@ import React from "react";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import SessionView from "../SessionView";
+import { splitPrompt } from "../draft";
 import { json, mockFetch, paramsOf, transcriptOf } from "./testUtils";
 
 const session = {
@@ -323,5 +324,49 @@ describe("Subito", () => {
       prompt: "fermati", options: [], status: "DELIVERING", delivery: "in_progress", delivery_mode: "now",
       created_at: "2026-10-16T10:00:00Z", recipient_session_id: "s1" }] });
     await waitFor(() => expect(screen.getByTestId("outgoing-70")).toHaveTextContent("dopo la prossima azione"));
+  });
+});
+
+describe("suspended sessions and messages still in Placet", () => {
+  const codex = { ...session, id: "s1", agent_id: "codex", provider: "codex", reachable: false,
+    suspended_at: "2026-10-17T02:24:42Z" };
+  const message = (id, status, extra = {}) => ({
+    id, sender_id: "human", recipient_id: "codex", question_type: "message", prompt: `messaggio ${id}`,
+    options: [], status, created_at: "2026-10-16T10:00:00Z", recipient_session_id: "s1", ...extra,
+  });
+
+  it("says a message to a suspended session waits for the app, and one queued in Codex cannot be withdrawn", async () => {
+    mockFetch([[transcriptOf("s1"), latest]]);
+    renderView({ session: codex, onSend: vi.fn(), onDelivery: vi.fn(),
+      requests: [message(1, "APPROVED"), message(2, "EXECUTING", { execution: "unobserved" }),
+        message(3, "EXECUTING", { execution: "started" })] });
+    await waitFor(() => expect(screen.getByText("ciao")).toBeInTheDocument());
+    expect(screen.getByTestId("composer-suspended")).toBeInTheDocument();
+    expect(screen.getByTestId("outgoing-1")).toHaveTextContent("quando riapri la conversazione in Codex");
+    expect(screen.getByTestId("outgoing-2")).toHaveTextContent("Accodato in Codex");
+    expect(screen.queryByTestId("cancel-2")).toBeNull();
+    expect(screen.queryByTestId("outgoing-3")).toBeNull(); // its turn started: it is in the conversation
+  });
+
+  it("Modifica withdraws the message and puts it back in the composer", async () => {
+    mockFetch([[transcriptOf("s1"), latest]]);
+    const onDelivery = vi.fn(() => Promise.resolve(true));
+    const other = { ...session, id: "abcdef12-0000", title: "Altra" };
+    const token = "@Claude · lab · Altra [abcdef12]";
+    renderView({ onSend: vi.fn(), onDelivery, sessions: [session, other],
+      requests: [message(4, "APPROVED", { prompt: `chiedi a ${token} di rivedere\n\nAllegati: foto.png, nota.pdf` })] });
+    await waitFor(() => expect(screen.getByText("ciao")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("edit-4"));
+    expect(onDelivery).toHaveBeenCalledWith(4, "cancel");
+    await waitFor(() => expect(screen.getByTestId("composer-input")).toHaveValue(`chiedi a ${token} di rivedere`));
+    expect(screen.getByTestId("composer-refiles")).toHaveTextContent("foto.png, nota.pdf");
+  });
+
+  it("splitPrompt keeps text, mentions and attachment names apart", () => {
+    const sessions = [{ id: "abcdef12-0000" }];
+    expect(splitPrompt("Leggi gli allegati che ti ho inviato.\n\nAllegati: a.png", sessions))
+      .toEqual({ text: "", mentions: [], files: ["a.png"] });
+    expect(splitPrompt("vedi @X · p · T [abcdef12] ora", sessions).mentions)
+      .toEqual([{ session_id: "abcdef12-0000", token: "@X · p · T [abcdef12]" }]);
   });
 });

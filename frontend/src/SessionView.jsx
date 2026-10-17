@@ -1,6 +1,7 @@
 import React, { useLayoutEffect, useRef, useState } from "react";
 import Attachments from "./Attachments";
 import Composer from "./Composer";
+import { splitPrompt } from "./draft";
 import {
   ArrowLeft,
   Bot,
@@ -159,10 +160,14 @@ const OUTGOING_STATES = {
   NOW: "Subito: entra dopo la prossima azione",
   DELIVERING: "In consegna…",
   DELIVERY_FAILED: "Non consegnato",
+  EXECUTING: "Consegnato: il turno non è ancora iniziato",
   EXPIRED: "Non consegnato: scaduto",
 };
 
-function Outgoing({ req, onDelivery }) {
+// Delivered, but its turn not seen yet: still shown as the user's message.
+const notStarted = (req) => req.status !== "EXECUTING" || req.execution === "unobserved";
+
+function Outgoing({ req, session, onDelivery, onEdit }) {
   const uncertain = isUncertain(req);
   const failed = req.status === "DELIVERY_FAILED" || req.status === "EXPIRED";
   return (
@@ -176,13 +181,22 @@ function Outgoing({ req, onDelivery }) {
           ? "Consegna incerta: forse è già arrivato, ma non c'è conferma"
           : req.delivery_mode === "now" && ["APPROVED", "DELIVERING"].includes(req.status)
             ? OUTGOING_STATES.NOW
-            : OUTGOING_STATES[req.status]}
+            : req.status === "APPROVED" && session?.suspended_at
+              ? "In attesa: parte quando riapri la conversazione in Codex"
+              : req.status === "EXECUTING" && session?.provider === "codex"
+                ? "Accodato in Codex: esecuzione non ancora vista, non si può più ritirare"
+                : OUTGOING_STATES[req.status]}
       </time>
       {onDelivery && (uncertain || req.status === "APPROVED") && (
         <div className="outgoing-actions">
           {uncertain && (
             <button type="button" data-testid={`retry-${req.id}`} onClick={() => onDelivery(req.id, "retry")}>
               Riprova
+            </button>
+          )}
+          {req.status === "APPROVED" && onEdit && (
+            <button type="button" data-testid={`edit-${req.id}`} onClick={() => onEdit(req)}>
+              Modifica
             </button>
           )}
           <button type="button" data-testid={`cancel-${req.id}`} onClick={() => onDelivery(req.id, "cancel")}>
@@ -249,9 +263,15 @@ export default function SessionView({
   const anchor = useRef(null);
   const questions = requests.filter((r) => r.status === "PENDING" && r.sender_session_id === sessionId);
   const outgoing = requests
-    .filter((r) => r.question_type === "message" && r.recipient_session_id === sessionId && r.status in OUTGOING_STATES)
+    .filter((r) => r.question_type === "message" && r.recipient_session_id === sessionId
+      && r.status in OUTGOING_STATES && notStarted(r))
     .sort((a, b) => a.id - b.id);
   const held = requests.filter((r) => r.recipient_session_id === sessionId && holdsQueueUnseen(r));
+  // Modifica: withdraws a waiting message and puts it back in the composer.
+  const [draft, setDraft] = useState(null);
+  const edit = async (req) => {
+    if (await onDelivery(req.id, "cancel")) setDraft({ ...splitPrompt(req.prompt, sessions), nonce: req.id });
+  };
 
   // Keep the view where the reader is: at the bottom while following, on the
   // same message after older ones are added above.
@@ -349,7 +369,7 @@ export default function SessionView({
             />
           ))}
         {outgoing.map((req) => (
-          <Outgoing key={req.id} req={req} onDelivery={onDelivery} />
+          <Outgoing key={req.id} req={req} session={session} onDelivery={onDelivery} onEdit={onDelivery && edit} />
         ))}
         {questions.map((req) => (
           <RequestCard
@@ -364,8 +384,9 @@ export default function SessionView({
       </div>
       {onSend && (
         <Composer
-          key={sessionId}
+          key={`${sessionId}:${draft?.nonce ?? ""}`}
           session={session}
+          draft={draft}
           sessions={sessions}
           onSend={async (text, mentions, attachments, mode) => {
             following.current = true;

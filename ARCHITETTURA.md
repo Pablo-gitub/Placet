@@ -64,7 +64,7 @@ Trasformano gli eventi del client in fatti per Placet (`POST /api/sessions/{id}/
 | Provider | File | Eventi usati | Note |
 |---|---|---|---|
 | Claude Code (app e CLI) | `~/.claude/settings.json` (globale) | SessionStart, UserPromptSubmit, PostToolUse `mcp__placet__.*`, Stop, SessionEnd | Stop contiene `last_assistant_message`. Hook asincroni con `asyncRewake` (waiter) |
-| Codex | `~/.codex/hooks.json` | SessionStart, UserPromptSubmit, PostToolUse, Stop, SessionEnd | Stessi campi di Claude: stesso script (`claude_code.py --provider codex`). Solo sincroni ("async hooks are not supported yet"); vanno approvati una volta con `/hooks` |
+| Codex | `~/.codex/hooks.json` | SessionStart, UserPromptSubmit, PostToolUse, Stop, SessionEnd | Stessi campi di Claude: stesso script (`claude_code.py --provider codex`). Solo sincroni ("async hooks are not supported yet"); vanno approvati una volta con `/hooks`. `SessionEnd` = conversazione scaricata dall'app: la sessione è *sospesa* (RF-29c) e il bridge non le consegna nulla finché non torna `SessionStart` |
 | Antigravity 2.0 | `~/.gemini/config/hooks.json` | SessionStart, PreInvocation (la prima del turno = inizio), Stop | `antigravity.py`. JSON camelCase con `conversationId`, `transcriptPath`, `modelName`; solo sincroni, devono stampare `{}`; lo Stop non ha l'ultima risposta: la legge dal file della conversazione |
 
 ### 2.4 Bridge (`bridge/`)

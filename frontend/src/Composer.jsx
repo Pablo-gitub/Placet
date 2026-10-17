@@ -44,7 +44,7 @@ function savedMode() {
   }
 }
 
-export default function Composer({ session, sessions = [], onSend }) {
+export default function Composer({ session, sessions = [], onSend, draft }) {
   // "In coda" (end of the turn) or "Subito" (inside the running turn): the
   // last choice is the default on this device (RF-35).
   const [mode, setModeState] = useState(savedMode);
@@ -56,7 +56,9 @@ export default function Composer({ session, sessions = [], onSend }) {
       // private mode: the choice lasts for this page
     }
   };
-  const [text, setText] = useState("");
+  // A withdrawn message to correct (Modifica) starts the composer again with
+  // its text; its files must be picked again.
+  const [text, setText] = useState(draft?.text || "");
   const input = useRef(null);
   const fileInput = useRef(null);
   const [files, setFiles] = useState([]);
@@ -73,7 +75,8 @@ export default function Composer({ session, sessions = [], onSend }) {
     }
     setFiles(selected); setFileError("");
   };
-  const [mentions, setMentions] = useState([]);
+  const [mentions, setMentions] = useState(draft?.mentions || []);
+  const [refiles, setRefiles] = useState(draft?.files || []);
   const [query, setQuery] = useState(null);
   const [highlight, setHighlight] = useState(0);
   const updateQuery = (value, caret) => {
@@ -96,7 +99,8 @@ export default function Composer({ session, sessions = [], onSend }) {
   };
   const [sending, setSending] = useState(false);
   const closed = !!session?.ended_at;
-  const unreachable = session && !closed && !session.reachable && !session.tmux_session;
+  const suspended = !closed && !!session?.suspended_at;
+  const unreachable = session && !closed && !suspended && !session.reachable && !session.tmux_session;
   const busy = session?.state === "busy" && !closed;
   const canSteer = STEER_PROVIDERS.includes(session?.provider);
 
@@ -109,7 +113,7 @@ export default function Composer({ session, sessions = [], onSend }) {
       const attachments = await Promise.all(files.map(encodeFile));
       const now = busy && canSteer && mode === "now";
       if (await onSend(message, activeMentions, attachments, now ? "now" : "queue")) {
-        setText(""); setMentions([]); setQuery(null); setFiles([]);
+        setText(""); setMentions([]); setQuery(null); setFiles([]); setRefiles([]);
       }
     } catch (error) {
       setFileError(error.message || "Trasferimento non riuscito: puoi riprovare.");
@@ -121,6 +125,16 @@ export default function Composer({ session, sessions = [], onSend }) {
   return (
     <div className="composer" data-testid="composer">
       {closed && <p className="composer-note">La sessione è chiusa: non puoi più scriverle.</p>}
+      {suspended && (
+        <p className="composer-note" data-testid="composer-suspended">
+          Codex ha sospeso la conversazione: il messaggio aspetta in Placet e parte quando la riapri nell’app.
+        </p>
+      )}
+      {refiles.length > 0 && (
+        <p className="composer-note" data-testid="composer-refiles">
+          Allegati da scegliere di nuovo: {refiles.join(", ")}
+        </p>
+      )}
       {unreachable && (
         <p className="composer-note" data-testid="composer-unreachable">
           La sessione non è raggiungibile ora: il messaggio partirà quando torna attiva.
@@ -175,7 +189,7 @@ export default function Composer({ session, sessions = [], onSend }) {
       <div className="composer-row">
         <button type="button" className="icon-button attach-button" aria-label="Allega foto o PDF"
           disabled={closed || sending} onClick={() => fileInput.current?.click()}><Paperclip size={18} /></button>
-        <textarea
+        <textarea autoFocus={!!draft}
           ref={input}
           aria-label="Messaggio per la sessione"
           aria-controls={query ? "session-mentions" : undefined}

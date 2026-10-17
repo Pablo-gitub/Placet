@@ -38,6 +38,7 @@ from backend.app.models import (
     SessionMessage,
     SessionModel,
     BRIDGE_PROVIDERS,
+    SUSPENDING_PROVIDERS,
     INBOX_WAIT_SECONDS,
     RESULT_GRACE_SECONDS,
     RESULT_MAX_AGE_SECONDS,
@@ -799,6 +800,10 @@ def create_app(
         result: Dict[str, object] = {"session": session_id, "event": payload.event}
         source = " ".join(filter(None, [payload.provider or session.provider, payload.adapter or "hook"]))
 
+        if payload.event in ("start", "prompt"):
+            # Only a real start or turn brings a session back: a late event
+            # of another kind must not reopen it.
+            db.reopen_session(session_id)
         if payload.event == "start":
             db.set_session_state(session_id, "idle")
         elif payload.event == "prompt":
@@ -852,7 +857,10 @@ def create_app(
                 db.set_execution(session.turn_request_id, "interrupted", actor=f"{who.actor}:hook",
                                  source=source)
                 notify_change(session.turn_request_id)
-            db.end_session(session_id)
+            if (payload.provider or session.provider) in SUSPENDING_PROVIDERS:
+                db.suspend_session(session_id)
+            else:
+                db.end_session(session_id)
 
         if payload.event_id:
             db.mark_session_event(payload.event_id, session_id)

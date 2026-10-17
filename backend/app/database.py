@@ -202,9 +202,16 @@ class Database:
             # activity_at: last turn start or end (the waiter's polls do not count);
             # pinned_at: the user added the session to the PWA home.
             # excluded_at: the bridge found a `.placet-off` for its folder (RF-45).
-            for col in ("activity_at", "pinned_at", "excluded_at"):
+            # suspended_at: the app unloaded the conversation; it can be resumed.
+            for col in ("activity_at", "pinned_at", "excluded_at", "suspended_at"):
                 if col not in session_cols:
                     cursor.execute(f"ALTER TABLE sessions ADD COLUMN {col} TEXT;")
+            if "suspended_at" not in session_cols:
+                # Codex sessions "ended" before were only unloaded by the app.
+                cursor.execute(
+                    "UPDATE sessions SET suspended_at = ended_at, ended_at = NULL"
+                    " WHERE provider = 'codex' AND ended_at IS NOT NULL;"
+                )
             # The three aspects of a request (RF-29); older rows are backfilled
             # from their status once.
             if "delivery_state" not in cols:
@@ -1082,7 +1089,7 @@ class Database:
         waiter = _ts(row["waiter_seen_at"])
         # A session can be woken when its waiter listens (Claude Code), or
         # when the bridge wakes it from outside (Codex, Antigravity).
-        reachable = row["ended_at"] is None and (
+        reachable = row["ended_at"] is None and row["suspended_at"] is None and (
             row["provider"] in BRIDGE_PROVIDERS
             or (waiter is not None
                 and (datetime.now(timezone.utc) - waiter).total_seconds() < waiter_ttl_seconds)
@@ -1101,6 +1108,7 @@ class Database:
             last_seen_at=datetime.fromisoformat(row["last_seen_at"]),
             waiter_seen_at=waiter,
             ended_at=_ts(row["ended_at"]),
+            suspended_at=_ts(row["suspended_at"]),
             activity_at=_ts(row["activity_at"]) or datetime.fromisoformat(row["started_at"]),
             pinned=row["pinned_at"] is not None,
             reachable=reachable and row["excluded_at"] is None,
@@ -1145,7 +1153,7 @@ class Database:
                         provider = COALESCE(?, provider), entrypoint = COALESCE(?, entrypoint),
                         cwd = COALESCE(?, cwd), title = COALESCE(?, title),
                         tmux_session = COALESCE(?, tmux_session),
-                        last_seen_at = ?, ended_at = NULL
+                        last_seen_at = ?
                     WHERE id = ?
                     """,
                     (provider, entrypoint, cwd, title, tmux_session, now, session_id),
@@ -1257,6 +1265,25 @@ class Database:
             conn.execute(
                 "UPDATE sessions SET waiter_seen_at = ?, last_seen_at = ? WHERE id = ?",
                 (now, now, session_id),
+            )
+
+    def reopen_session(self, session_id: str) -> None:
+        """The session runs again (it started, or a turn began): neither ended nor suspended."""
+        with self._get_connection() as conn:
+            conn.execute(
+                "UPDATE sessions SET ended_at = NULL, suspended_at = NULL WHERE id = ?", (session_id,)
+            )
+
+    def suspend_session(self, session_id: str) -> None:
+        """
+        The app unloaded the conversation (Codex: idle, restart, update). It
+        can be resumed: it stays listed, and its messages wait in Placet.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            conn.execute(
+                "UPDATE sessions SET suspended_at = ?, state = 'idle', waiter_seen_at = NULL WHERE id = ?",
+                (now, session_id),
             )
 
     def end_session(self, session_id: str) -> None:
@@ -1401,7 +1428,8 @@ class Database:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                f"SELECT * FROM sessions WHERE ended_at IS NULL AND provider IN ({placeholders})",
+                f"SELECT * FROM sessions WHERE ended_at IS NULL AND suspended_at IS NULL"
+                f" AND provider IN ({placeholders})",
                 BRIDGE_PROVIDERS,
             )
             sessions = [self._row_to_session(r, WAITER_TTL_SECONDS) for r in cursor.fetchall()]

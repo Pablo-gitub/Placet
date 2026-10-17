@@ -258,7 +258,7 @@ export default function App() {
    */
   const deliveryAction = async (requestId, action) => {
     if (action === "retry" && !window.confirm("Il messaggio potrebbe essere già arrivato: inviarlo di nuovo?")) {
-      return;
+      return false;
     }
     const release = action === "finished" || action === "queue_next";
     try {
@@ -272,7 +272,7 @@ export default function App() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         showFeedback(data.detail || `Operazione non riuscita (${res.status})`, true);
-        return;
+        return false;
       }
       setRequests((prev) => upsert(prev, data));
       showFeedback(
@@ -283,8 +283,10 @@ export default function App() {
           queue_next: "Il prossimo messaggio parte senza aspettare.",
         }[action]
       );
+      return true;
     } catch {
       showFeedback("Errore di connessione.", true);
+      return false;
     }
   };
 
