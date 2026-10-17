@@ -68,7 +68,7 @@ CLAUDE_THEME_MENU = """\
 
 # Captured from the real Codex trust dialog.
 CODEX_TRUST_DIALOG = """\
-> You are in /home/paolo/Projects/placet
+> You are in /home/user/Projects/placet
   Do you trust the contents of this directory?
 › 1. Yes, continue
   2. No, quit

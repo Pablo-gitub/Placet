@@ -71,7 +71,7 @@ cd ..
 | `PLACET_API_URL` | Per bridge e server MCP: indirizzo del backend (default `http://127.0.0.1:8000`) |
 | `PLACET_CODEX_BIN` | Per il bridge: il `codex` con il comando `queue` (default: quello dell'app, `/usr/lib/chatgpt/resources/codex`, poi quello nel `PATH`) |
 | `PLACET_TRANSCRIPTS_LOCAL` | `1` = il backend legge da sé le conversazioni delle sessioni invece di chiederle al bridge. Solo per lo sviluppo in un unico processo (`run_all.py` la imposta); mai in produzione, dove il backend non ha accesso ai file dell'utente |
-| `PLACET_BASE_URL` | Indirizzo della PWA visto dall'iPhone (es. `https://muletto.tail1234.ts.net`), usato nei link delle notifiche |
+| `PLACET_BASE_URL` | Indirizzo della PWA visto dall'iPhone (es. `https://server.tail1234.ts.net`), usato nei link delle notifiche |
 | `PLACET_NTFY_URL`, `PLACET_NTFY_TOPIC`, `PLACET_NTFY_TOKEN` | Server ntfy, topic e token di accesso. Senza URL, topic e `PLACET_BASE_URL` le notifiche sono disattivate |
 
 Genera i token con `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
@@ -94,7 +94,7 @@ La PWA è poi raggiungibile su `https://<nome-macchina>.<tailnet>.ts.net`.
 
 `run_all.py` è la modalità di sviluppo: backend e bridge nello stesso processo, con il tuo utente. Gli agenti, che girano anch'essi come te, potrebbero leggere il DB e approvarsi le richieste. Per l'uso reale installa i servizi come descritto sotto.
 
-### 4b. Installazione sul muletto (produzione)
+### 4b. Installazione sul server (produzione)
 
 ```bash
 sudo deploy/install.sh
@@ -128,11 +128,11 @@ PLACET_DEV_LOGIN=paolo@github npx vite
 
 La notifica annuncia la richiesta e apre la PWA. Non ha bottoni Approva/Rifiuta: si decide solo dalla PWA, vedendo il testo completo. Prompt e contesto finiscono nella notifica solo se il server ntfy è privato; con `ntfy.sh` pubblico la notifica dice solo chi ha scritto.
 
-1. Avvia ntfy sul muletto, raggiungibile solo in locale:
+1. Avvia ntfy sul server, raggiungibile solo in locale:
    ```bash
    docker run -d --name ntfy --restart unless-stopped \
      -p 127.0.0.1:2586:80 -v ntfy-cache:/var/cache/ntfy -v ntfy-etc:/etc/ntfy \
-     -e NTFY_BASE_URL=https://muletto.tail1234.ts.net:8443 \
+     -e NTFY_BASE_URL=https://server.tail1234.ts.net:8443 \
      -e NTFY_UPSTREAM_BASE_URL=https://ntfy.sh \
      -e NTFY_AUTH_FILE=/etc/ntfy/user.db -e NTFY_AUTH_DEFAULT_ACCESS=deny-all \
      binwiederhier/ntfy serve
@@ -147,8 +147,8 @@ La notifica annuncia la richiesta e apre la PWA. Non ha bottoni Approva/Rifiuta:
    ```bash
    tailscale serve --bg --https=8443 http://127.0.0.1:2586
    ```
-4. Nell'app ntfy per iOS aggiungi il server `https://muletto.tail1234.ts.net:8443` con il tuo utente e iscriviti al topic.
-5. Imposta `PLACET_NTFY_URL=https://muletto.tail1234.ts.net:8443`, `PLACET_NTFY_TOPIC`, `PLACET_NTFY_TOKEN` e `PLACET_BASE_URL`.
+4. Nell'app ntfy per iOS aggiungi il server `https://server.tail1234.ts.net:8443` con il tuo utente e iscriviti al topic.
+5. Imposta `PLACET_NTFY_URL=https://server.tail1234.ts.net:8443`, `PLACET_NTFY_TOPIC`, `PLACET_NTFY_TOKEN` e `PLACET_BASE_URL`.
 
 ---
 
