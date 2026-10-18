@@ -112,6 +112,9 @@ class RequestCreate(BaseModel):
     # Deliver to this session of the recipient agent (default: any of its
     # reachable sessions, or its tmux session).
     recipient_session_id: Optional[str] = None
+    # RFC-08: the relation type the sender means; needed when A -> B has
+    # relations of several types.
+    relation_type_id: Optional[int] = None
     # Lifetime of the request, independent of how long the caller waits for it.
     expires_in_seconds: int = Field(
         DEFAULT_EXPIRES_IN_SECONDS, ge=10, le=MAX_EXPIRES_IN_SECONDS
@@ -168,6 +171,8 @@ class RequestModel(BaseModel):
     allow_auto_return: bool = False
     return_decision: Optional[str] = None
     return_text: Optional[str] = None
+    # RFC-04: the relation the request travelled on, if any.
+    relation_id: Optional[int] = None
     id: int
     sender_id: str
     recipient_id: str
@@ -298,6 +303,28 @@ class NodeModel(BaseModel):
     created_at: datetime
     # The attached session seen most recently, if any.
     session_id: Optional[str] = None
+
+
+class RelationTypeModel(BaseModel):
+    """RFC-03: why one session contacts another; agents read the description."""
+    id: int
+    name: str
+    description: str = ""
+    created_at: datetime
+
+
+class RelationModel(BaseModel):
+    """RFC-04: a directed relation A -> B of one type, with its approval policy."""
+    id: int
+    from_node: int
+    to_node: int
+    type_id: int
+    approval: Literal["manual", "automatic"]
+    created_at: datetime
+    from_name: str
+    to_name: str
+    type_name: str
+    type_description: str = ""
 
 
 class RequestEvent(BaseModel):

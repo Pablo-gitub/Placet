@@ -128,7 +128,12 @@
     "releaseUnavailable": "La richiesta non sta trattenendo la sessione.",
     "nodeNameTaken": "Un altro nodo ha già questo nome.",
     "nodeOtherProvider": "Quel nodo appartiene a un'altra app.",
-    "nodeSave": "Impossibile salvare il nodo. Controlla la connessione."
+    "nodeSave": "Impossibile salvare il nodo. Controlla la connessione.",
+    "relationTypeTaken": "Un altro tipo di relazione ha già questo nome.",
+    "relationTypeInUse": "Esistono ancora relazioni di questo tipo.",
+    "relationExists": "Questa relazione esiste già.",
+    "relationSelf": "Un nodo non può avere una relazione con se stesso.",
+    "relationSave": "Impossibile salvare la relazione. Controlla la connessione."
   },
   "sessions": {
     "closed": "Chiusa",
@@ -383,5 +388,33 @@
     "detach": "Sgancia",
     "delete": "Elimina nodo",
     "deleteConfirm": "Eliminare il nodo “{{name}}”? Le sue sessioni restano, senza nome."
+  },
+  "relations": {
+    "title": "Relazioni",
+    "none": "Ancora nessuna relazione.",
+    "add": "Nuova relazione",
+    "otherNode": "Altro nodo…",
+    "incoming": "Dall'altro nodo verso questo",
+    "from": "Da",
+    "to": "A",
+    "nameSession": "{{label}}: dai un nome alla sessione “{{session}}”",
+    "type": "Tipo",
+    "chooseType": "Scegli un tipo…",
+    "newType": "Nuovo tipo…",
+    "typeName": "Nome del tipo (es. review)",
+    "typeDescription": "Quando e perché contattare l'altra sessione: l'agente lo legge.",
+    "policy": "Approvazione",
+    "manual": "Manuale: rivedo, modifico o rifiuto ogni prompt",
+    "automatic": "Automatica: consegnato senza la mia revisione",
+    "manualShort": "Manuale",
+    "automaticShort": "Automatica",
+    "automaticHint": "I prompt su questa relazione arrivano direttamente all'altra sessione. Le risposte tornano senza revisione solo se anche la relazione inversa è automatica.",
+    "create": "Crea relazione",
+    "cancel": "Annulla",
+    "delete": "Elimina relazione",
+    "deleteConfirm": "Eliminare questa relazione? I prossimi prompt richiederanno la tua revisione.",
+    "createFromRequest": "Crea relazione",
+    "explanation": "Questa richiesta prosegue come sempre. La relazione vale per le prossime richieste tra queste due sessioni.",
+    "created": "Relazione creata: vale per le prossime richieste."
   }
 }

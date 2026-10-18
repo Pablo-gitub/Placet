@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Tag, X } from "lucide-react";
 import { apiErrorDescriptor } from "./i18n/errors";
+import { NodeRelations } from "./Relations";
 
 // Same rule as the backend: letters, digits, spaces, dots, dashes, underscores.
 const NODE_NAME = /^[\p{L}\p{N}_][\p{L}\p{N}_ .-]{0,39}$/u;
@@ -80,6 +81,7 @@ function NodeDialog({ session, onClose }) {
                 && run(() => call("DELETE", `/api/nodes/${session.node_id}`))}>{t("node.delete")}</button>
           </div>}
           {error && <p role="alert">{t(error.key, error.params)}</p>}
+          {session.node_id && <NodeRelations node={{ id: session.node_id, name: session.node_name }} />}
         </div>
       </div>
     </div>, document.body,

@@ -4,6 +4,7 @@ import { ArrowRight, CheckCircle, XCircle, Pencil, Eye, MessagesSquare } from "l
 import Markdown from "./Markdown";
 import { OTHER, buildDecision, canApprove, needsReturnApproval } from "./decisions";
 import { sessionName, sessionOrigin, sessionStatus } from "./sessionInfo";
+import { CreateRelation } from "./Relations";
 
 /** Where a request comes from: the sender's session, when known; opens its conversation. */
 export function Origin({ req, sessions, onOpenSession }) {
@@ -182,6 +183,10 @@ function PromptCard({ req, submitting, highlighted, onDecide, sessions = [], onO
                 ))}
               </select>
             </>
+          )}
+          {req.recipient_id !== "human" && !req.relation_id && (
+            <CreateRelation sender={sessions.find((s) => s.id === req.sender_session_id)}
+              recipient={sessions.find((s) => s.id === (targetSession || req.recipient_session_id))} />
           )}
           {canSteer && (
             <fieldset className="request-section" data-testid={`delivery-mode-${req.id}`} disabled={submitting}>

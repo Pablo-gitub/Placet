@@ -1281,3 +1281,15 @@ body.chat-open { overflow: hidden; }
 .dialog-body .session-select { width: 100%; margin-bottom: 0.6rem; }
 .dialog-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem; }
 .field-hint { font-size: 0.75rem; color: var(--text-muted); margin: -0.3rem 0 0.6rem; }
+
+/* RFC-04: relations in the node dialog and from a request card. */
+.relation-form { border: 0; padding: 0; margin: 0.5rem 0 0; min-width: 0; }
+.relation-side { margin: 0 0 0.4rem; }
+.relation-side small { color: var(--text-muted); margin-right: 0.3rem; }
+.relation-description { min-height: 4rem; margin-bottom: 0.6rem; }
+.node-relations { margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color); }
+.relation-list { list-style: none; padding: 0; margin: 0 0 0.5rem; display: grid; gap: 0.4rem; }
+.relation-row { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.relation-route { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 0.25rem; flex-wrap: wrap; }
+.relation-route small { color: var(--text-muted); margin-left: 0.3rem; }
+.relation-row .session-select { width: auto; margin: 0; }

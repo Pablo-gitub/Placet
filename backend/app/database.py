@@ -19,6 +19,8 @@ from backend.app.models import (
     QuestionType,
     ResponseModel,
     NodeModel,
+    RelationModel,
+    RelationTypeModel,
     SessionModel,
     WAITER_TTL_SECONDS,
     is_settled,
@@ -78,8 +80,11 @@ SESSIONS_WITH_NODE = (
 REATTACH_SECONDS = 120.0
 
 
-class NodeNameTaken(ValueError):
-    """Another node already has this name (names ignore case)."""
+class NameTaken(ValueError):
+    """Another node or relation type already has this name (names ignore case)."""
+
+
+NodeNameTaken = NameTaken
 
 
 def _new_attempt() -> str:
@@ -238,6 +243,26 @@ class Database:
             # RFC-02: the stable named node the session is attached to.
             if "node_id" not in session_cols:
                 cursor.execute("ALTER TABLE sessions ADD COLUMN node_id INTEGER;")
+            # RFC-03/04: reusable relation types and directed relations A -> B.
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS relation_types (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                description TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+            """)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS relations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                from_node INTEGER NOT NULL REFERENCES nodes(id),
+                to_node INTEGER NOT NULL REFERENCES nodes(id),
+                type_id INTEGER NOT NULL REFERENCES relation_types(id),
+                approval TEXT NOT NULL CHECK (approval IN ('manual', 'automatic')),
+                created_at TEXT NOT NULL,
+                UNIQUE (from_node, to_node, type_id)
+            );
+            """)
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS nodes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -293,6 +318,9 @@ class Database:
                     "UPDATE requests SET queue_released_at = COALESCE(updated_at, created_at)"
                     " WHERE status NOT IN ('PENDING', 'APPROVED', 'DELIVERING');"
                 )
+            if "relation_id" not in cols:
+                # RFC-04: the relation a request travelled on (audit, reply policy).
+                cursor.execute("ALTER TABLE requests ADD COLUMN relation_id INTEGER;")
             cursor.execute("PRAGMA table_info(responses);")
             if "implicit" not in [r["name"] for r in cursor.fetchall()]:
                 cursor.execute("ALTER TABLE responses ADD COLUMN implicit INTEGER NOT NULL DEFAULT 0;")
@@ -437,6 +465,7 @@ class Database:
             allow_auto_return=bool(row["allow_auto_return"]),
             return_decision=row["return_decision"],
             return_text=row["return_text"],
+            relation_id=row["relation_id"],
         )
 
     def list_requests(
@@ -1418,9 +1447,10 @@ class Database:
             return cur.rowcount > 0
 
     def delete_node(self, node_id: int) -> List[str]:
-        """Removes the node; its sessions stay, detached. Returns them."""
+        """Removes the node and its relations; its sessions stay, detached. Returns them."""
         with self._get_connection() as conn:
             ids = [r["id"] for r in conn.execute("SELECT id FROM sessions WHERE node_id = ?", (node_id,))]
+            conn.execute("DELETE FROM relations WHERE from_node = ? OR to_node = ?", (node_id, node_id))
             conn.execute("UPDATE sessions SET node_id = NULL WHERE node_id = ?", (node_id,))
             cur = conn.execute("DELETE FROM nodes WHERE id = ?", (node_id,))
             return ids if cur.rowcount else []
@@ -1473,6 +1503,134 @@ class Database:
                 return None
             conn.execute("UPDATE sessions SET node_id = ? WHERE id = ?", (old["node_id"], session_id))
             return old["node_id"]
+
+    # --- Relation types and relations (RFC-03, RFC-04) -----------------------
+
+    @staticmethod
+    def _row_to_type(row: sqlite3.Row) -> RelationTypeModel:
+        return RelationTypeModel(id=row["id"], name=row["name"], description=row["description"],
+                                 created_at=datetime.fromisoformat(row["created_at"]))
+
+    def list_relation_types(self) -> List[RelationTypeModel]:
+        with self._get_connection() as conn:
+            rows = conn.execute("SELECT * FROM relation_types ORDER BY name COLLATE NOCASE").fetchall()
+            return [self._row_to_type(r) for r in rows]
+
+    def get_relation_type(self, type_id: int) -> Optional[RelationTypeModel]:
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT * FROM relation_types WHERE id = ?", (type_id,)).fetchone()
+            return self._row_to_type(row) if row else None
+
+    def create_relation_type(self, name: str, description: str) -> RelationTypeModel:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            try:
+                cur = conn.execute(
+                    "INSERT INTO relation_types (name, description, created_at) VALUES (?, ?, ?)",
+                    (name, description, now))
+            except sqlite3.IntegrityError:
+                raise NameTaken(name) from None
+            type_id = cur.lastrowid
+        return self.get_relation_type(type_id)
+
+    def update_relation_type(self, type_id: int, name: Optional[str], description: Optional[str]) -> bool:
+        with self._get_connection() as conn:
+            try:
+                cur = conn.execute(
+                    "UPDATE relation_types SET name = COALESCE(?, name),"
+                    " description = COALESCE(?, description) WHERE id = ?",
+                    (name, description, type_id))
+            except sqlite3.IntegrityError:
+                raise NameTaken(name) from None
+            return cur.rowcount > 0
+
+    def delete_relation_type(self, type_id: int) -> str:
+        """"ok", "missing", or "in_use" (relations of this type must go first)."""
+        with self._get_connection() as conn:
+            if conn.execute("SELECT 1 FROM relations WHERE type_id = ?", (type_id,)).fetchone():
+                return "in_use"
+            cur = conn.execute("DELETE FROM relation_types WHERE id = ?", (type_id,))
+            return "ok" if cur.rowcount else "missing"
+
+    _RELATIONS_SQL = (
+        "SELECT r.*, f.name AS from_name, t.name AS to_name, y.name AS type_name,"
+        " y.description AS type_description FROM relations r"
+        " JOIN nodes f ON f.id = r.from_node JOIN nodes t ON t.id = r.to_node"
+        " JOIN relation_types y ON y.id = r.type_id"
+    )
+
+    @staticmethod
+    def _row_to_relation(row: sqlite3.Row) -> RelationModel:
+        return RelationModel(
+            id=row["id"], from_node=row["from_node"], to_node=row["to_node"], type_id=row["type_id"],
+            approval=row["approval"], created_at=datetime.fromisoformat(row["created_at"]),
+            from_name=row["from_name"], to_name=row["to_name"], type_name=row["type_name"],
+            type_description=row["type_description"],
+        )
+
+    def list_relations(self, node_id: Optional[int] = None) -> List[RelationModel]:
+        sql, params = self._RELATIONS_SQL, []
+        if node_id is not None:
+            sql += " WHERE r.from_node = ? OR r.to_node = ?"
+            params = [node_id, node_id]
+        with self._get_connection() as conn:
+            rows = conn.execute(sql + " ORDER BY f.name, t.name, y.name", params).fetchall()
+            return [self._row_to_relation(r) for r in rows]
+
+    def get_relation(self, relation_id: int) -> Optional[RelationModel]:
+        with self._get_connection() as conn:
+            row = conn.execute(f"{self._RELATIONS_SQL} WHERE r.id = ?", (relation_id,)).fetchone()
+            return self._row_to_relation(row) if row else None
+
+    def create_relation(self, from_node: int, to_node: int, type_id: int, approval: str) -> str | RelationModel:
+        """The new relation, or "nodes" / "type" (not found), "self", "exists"."""
+        if from_node == to_node:
+            return "self"
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            found = conn.execute("SELECT COUNT(*) AS n FROM nodes WHERE id IN (?, ?)",
+                                 (from_node, to_node)).fetchone()["n"]
+            if found != 2:
+                return "nodes"
+            if conn.execute("SELECT 1 FROM relation_types WHERE id = ?", (type_id,)).fetchone() is None:
+                return "type"
+            try:
+                cur = conn.execute(
+                    "INSERT INTO relations (from_node, to_node, type_id, approval, created_at)"
+                    " VALUES (?, ?, ?, ?, ?)", (from_node, to_node, type_id, approval, now))
+            except sqlite3.IntegrityError:
+                return "exists"
+            relation_id = cur.lastrowid
+        return self.get_relation(relation_id)
+
+    def set_relation_approval(self, relation_id: int, approval: str) -> bool:
+        with self._get_connection() as conn:
+            cur = conn.execute("UPDATE relations SET approval = ? WHERE id = ?", (approval, relation_id))
+            return cur.rowcount > 0
+
+    def delete_relation(self, relation_id: int) -> bool:
+        with self._get_connection() as conn:
+            return conn.execute("DELETE FROM relations WHERE id = ?", (relation_id,)).rowcount > 0
+
+    def find_relation(self, from_node: Optional[int], to_node: Optional[int],
+                      type_id: Optional[int] = None) -> Optional[RelationModel]:
+        """
+        The relation A -> B a request travels on. Without a type, only when
+        A -> B has exactly one relation: Placet never guesses between types.
+        """
+        if from_node is None or to_node is None:
+            return None
+        sql, params = f"{self._RELATIONS_SQL} WHERE r.from_node = ? AND r.to_node = ?", [from_node, to_node]
+        if type_id is not None:
+            sql += " AND r.type_id = ?"
+            params.append(type_id)
+        with self._get_connection() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return self._row_to_relation(rows[0]) if len(rows) == 1 else None
+
+    def set_request_relation(self, request_id: int, relation_id: int) -> None:
+        with self._get_connection() as conn:
+            conn.execute("UPDATE requests SET relation_id = ? WHERE id = ?", (relation_id, request_id))
 
     def set_usage(self, provider: str, data: str) -> None:
         now = datetime.now(timezone.utc).isoformat()

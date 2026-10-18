@@ -49,6 +49,12 @@ export function apiErrorDescriptor(body, status) {
     "node.name_taken": "errors.nodeNameTaken",
     "node.not_found": "errors.notFound",
     "node.other_provider": "errors.nodeOtherProvider",
+    "relation_type.name_taken": "errors.relationTypeTaken",
+    "relation_type.not_found": "errors.notFound",
+    "relation_type.in_use": "errors.relationTypeInUse",
+    "relation.exists": "errors.relationExists",
+    "relation.self": "errors.relationSelf",
+    "relation.not_found": "errors.notFound",
     "return.empty": "errors.returnEmpty",
     "return.unavailable": "errors.returnUnavailable",
   };

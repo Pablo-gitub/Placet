@@ -29,7 +29,7 @@ from backend.app.auth import (
     require_human,
 )
 from backend.app.config import PlacetConfig, load_agents_config
-from backend.app.database import Database, NodeNameTaken
+from backend.app.database import Database, NameTaken, NodeNameTaken
 from backend.app.models import (
     ProviderUsage,
     UsageReport,
@@ -43,6 +43,8 @@ from backend.app.models import (
     OutcomeDecision,
     SessionMessage,
     NodeModel,
+    RelationModel,
+    RelationTypeModel,
     SessionModel,
     BRIDGE_PROVIDERS,
     SUSPENDING_PROVIDERS,
@@ -139,6 +141,27 @@ class NodeRename(BaseModel):
 
 class NodeAttach(BaseModel):
     node_id: Optional[int] = None
+
+
+class RelationTypeCreate(BaseModel):
+    name: str = Field(..., pattern=NODE_NAME)
+    description: str = Field("", max_length=500)
+
+
+class RelationTypeUpdate(BaseModel):
+    name: Optional[str] = Field(None, pattern=NODE_NAME)
+    description: Optional[str] = Field(None, max_length=500)
+
+
+class RelationCreate(BaseModel):
+    from_node: int
+    to_node: int
+    type_id: int
+    approval: Literal["manual", "automatic"] = "manual"
+
+
+class RelationUpdate(BaseModel):
+    approval: Literal["manual", "automatic"]
 
 
 class BridgeJobResult(BaseModel):
@@ -390,6 +413,24 @@ def create_app(
             raise HTTPException(status_code=404, detail="Request not found")
         return req
 
+    def relation_of(sender_session_id: Optional[str], recipient_session_id: Optional[str],
+                    type_id: Optional[int] = None):
+        """The relation between the nodes of two sessions, if there is one (RFC-04)."""
+        if not sender_session_id or not recipient_session_id:
+            return None
+        sender = db.get_session(sender_session_id)
+        recipient = db.get_session(recipient_session_id)
+        if sender is None or recipient is None:
+            return None
+        return db.find_relation(sender.node_id, recipient.node_id, type_id)
+
+    def reverse_is_automatic(relation) -> bool:
+        """RFC-13: a reply goes back on its own only if B -> A of the same type is automatic."""
+        if relation is None:
+            return False
+        back = db.find_relation(relation.to_node, relation.from_node, relation.type_id)
+        return back is not None and back.approval == "automatic"
+
     def created_sender_session(who: Principal) -> Optional[str]:
         """The session about to create a request: the only busy one of the agent."""
         busy = [s for s in db.list_sessions(agent_id=who.id) if s.state == "busy"]
@@ -532,12 +573,25 @@ def create_app(
         if len(busy) == 1 and db.link_sender_session(created.id, busy[0].id, who.id):
             created = db.get_request(created.id)
 
+        # RFC-04/05: the relation between the two nodes decides the policy.
+        relation = None
+        if req.recipient_id != "human":
+            relation = relation_of(created.sender_session_id, created.recipient_session_id,
+                                   req.relation_type_id)
+            if relation is not None:
+                db.set_request_relation(created.id, relation.id)
+                created = db.get_request(created.id)
+                if relation.approval == "automatic":
+                    needs_approval = False
+
         if not needs_approval:
-            # Auto-approval
+            # Auto-approval: AGENTS.md routing, or an automatic relation.
             created = db.update_request_decision(
                 request_id=created.id,
                 status=RequestStatus.APPROVED,
-                actor="system:auto-routing",
+                actor=f"system:relation#{relation.id}" if relation is not None
+                and relation.approval == "automatic" else "system:auto-routing",
+                allow_auto_return=reverse_is_automatic(relation),
             )
         else:
             # Send mobile notification
@@ -642,7 +696,8 @@ def create_app(
             selected_options=decision.selected_options,
             custom_text=decision.custom_text,
             actor=who.actor,
-            allow_auto_return=decision.allow_auto_return,
+            allow_auto_return=decision.allow_auto_return or reverse_is_automatic(
+                db.get_relation(req.relation_id) if req.relation_id else None),
             delivery_mode=decision.delivery_mode if decision.status == RequestStatus.APPROVED and req.recipient_id != "human" else None,
             recipient_session_id=decision.recipient_session_id,
         )
@@ -1169,6 +1224,78 @@ def create_app(
             raise ProductError(409, "node.other_provider", "The node belongs to another provider.")
         notify_session(session_id)
         return db.get_session(session_id)
+
+    # --- Relation types and relations (RFC-03, RFC-04) ------------------------
+
+    @app.get("/api/relation-types", response_model=List[RelationTypeModel])
+    async def list_relation_types(who: Principal = Depends(principal)):
+        require_human(who)
+        return db.list_relation_types()
+
+    @app.post("/api/relation-types", response_model=RelationTypeModel, status_code=201)
+    async def create_relation_type(body: RelationTypeCreate, who: Principal = Depends(principal)):
+        require_human(who)
+        try:
+            return db.create_relation_type(body.name.strip(), body.description.strip())
+        except NameTaken:
+            raise ProductError(409, "relation_type.name_taken", "Another relation type has this name.") from None
+
+    @app.patch("/api/relation-types/{type_id}", response_model=RelationTypeModel)
+    async def update_relation_type(type_id: int, body: RelationTypeUpdate, who: Principal = Depends(principal)):
+        require_human(who)
+        try:
+            found = db.update_relation_type(
+                type_id, body.name.strip() if body.name else None,
+                body.description.strip() if body.description is not None else None)
+        except NameTaken:
+            raise ProductError(409, "relation_type.name_taken", "Another relation type has this name.") from None
+        if not found:
+            raise ProductError(404, "relation_type.not_found", "Relation type not found")
+        return db.get_relation_type(type_id)
+
+    @app.delete("/api/relation-types/{type_id}", status_code=204)
+    async def delete_relation_type(type_id: int, who: Principal = Depends(principal)):
+        require_human(who)
+        outcome = db.delete_relation_type(type_id)
+        if outcome == "missing":
+            raise ProductError(404, "relation_type.not_found", "Relation type not found")
+        if outcome == "in_use":
+            raise ProductError(409, "relation_type.in_use", "Relations of this type exist.")
+        return Response(status_code=204)
+
+    @app.get("/api/relations", response_model=List[RelationModel])
+    async def list_relations(node_id: Optional[int] = None, who: Principal = Depends(principal)):
+        require_human(who)
+        return db.list_relations(node_id)
+
+    @app.post("/api/relations", response_model=RelationModel, status_code=201)
+    async def create_relation(body: RelationCreate, who: Principal = Depends(principal)):
+        """A relation A -> B of a type; `automatic` delivers without review (RFC-05)."""
+        require_human(who)
+        outcome = db.create_relation(body.from_node, body.to_node, body.type_id, body.approval)
+        if outcome == "nodes":
+            raise ProductError(404, "node.not_found", "Node not found")
+        if outcome == "type":
+            raise ProductError(404, "relation_type.not_found", "Relation type not found")
+        if outcome == "self":
+            raise ProductError(422, "relation.self", "A node cannot have a relation with itself.")
+        if outcome == "exists":
+            raise ProductError(409, "relation.exists", "This relation already exists.")
+        return outcome
+
+    @app.patch("/api/relations/{relation_id}", response_model=RelationModel)
+    async def update_relation(relation_id: int, body: RelationUpdate, who: Principal = Depends(principal)):
+        require_human(who)
+        if not db.set_relation_approval(relation_id, body.approval):
+            raise ProductError(404, "relation.not_found", "Relation not found")
+        return db.get_relation(relation_id)
+
+    @app.delete("/api/relations/{relation_id}", status_code=204)
+    async def delete_relation(relation_id: int, who: Principal = Depends(principal)):
+        require_human(who)
+        if not db.delete_relation(relation_id):
+            raise ProductError(404, "relation.not_found", "Relation not found")
+        return Response(status_code=204)
 
     async def bridge_call(kind: str, params: dict, local, errors: Dict[str, tuple]):
         """

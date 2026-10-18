@@ -128,7 +128,12 @@
     "releaseUnavailable": "This request is no longer holding the session queue.",
     "nodeNameTaken": "Another node already has this name.",
     "nodeOtherProvider": "That node belongs to another app.",
-    "nodeSave": "Unable to save the node. Check your connection."
+    "nodeSave": "Unable to save the node. Check your connection.",
+    "relationTypeTaken": "Another relation type already has this name.",
+    "relationTypeInUse": "Relations of this type still exist.",
+    "relationExists": "This relation already exists.",
+    "relationSelf": "A node cannot have a relation with itself.",
+    "relationSave": "Unable to save the relation. Check your connection."
   },
   "sessions": {
     "closed": "Closed",
@@ -383,5 +388,33 @@
     "detach": "Detach",
     "delete": "Delete node",
     "deleteConfirm": "Delete node “{{name}}”? Its sessions stay, without a name."
+  },
+  "relations": {
+    "title": "Relations",
+    "none": "No relations yet.",
+    "add": "New relation",
+    "otherNode": "Other node…",
+    "incoming": "From the other node to this one",
+    "from": "From",
+    "to": "To",
+    "nameSession": "{{label}}: name session “{{session}}”",
+    "type": "Type",
+    "chooseType": "Choose a type…",
+    "newType": "New type…",
+    "typeName": "Type name (e.g. review)",
+    "typeDescription": "When and why to contact the other session: the agent reads this.",
+    "policy": "Approval",
+    "manual": "Manual: I review, edit or reject each prompt",
+    "automatic": "Automatic: delivered without my review",
+    "manualShort": "Manual",
+    "automaticShort": "Automatic",
+    "automaticHint": "Prompts on this relation reach the other session directly. Replies come back without review only if the reverse relation is automatic too.",
+    "create": "Create relation",
+    "cancel": "Cancel",
+    "delete": "Delete relation",
+    "deleteConfirm": "Delete this relation? Future prompts will need your review.",
+    "createFromRequest": "Create relation",
+    "explanation": "This request continues as usual. The relation applies to future requests between these two sessions.",
+    "created": "Relation created: it applies to future requests."
   }
 }
