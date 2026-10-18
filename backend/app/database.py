@@ -1335,7 +1335,8 @@ class Database:
     _INJECTIONS_SQL = """
         SELECT id FROM requests
         WHERE status = ? AND recipient_id = ?
-          AND (recipient_session_id = ? OR recipient_session_id IS NULL)
+          -- the last parameter: 1 = only requests addressed to this very session
+          AND (recipient_session_id = ? OR (recipient_session_id IS NULL AND ? = 0))
           -- a session never receives its own request (agent -> same agent)
           AND (sender_session_id IS NULL OR sender_session_id != ?)
         ORDER BY (recipient_session_id IS NULL) ASC, id ASC
@@ -1424,10 +1425,8 @@ class Database:
             cursor.execute(self._OUTCOMES_SQL, (session.id, RequestStatus.PENDING.value))
             outcome_ids = [r["id"] for r in cursor.fetchall()]
             cursor.execute(
-                (self._INJECTIONS_SQL.replace(
-                    "(recipient_session_id = ? OR recipient_session_id IS NULL)",
-                    "recipient_session_id = ?") if explicit_only else self._INJECTIONS_SQL),
-                (RequestStatus.APPROVED.value, session.agent_id, session.id, session.id),
+                self._INJECTIONS_SQL,
+                (RequestStatus.APPROVED.value, session.agent_id, session.id, int(explicit_only), session.id),
             )
             if cursor.fetchone() is not None and self.request_in_flight(session.id) is None:
                 return True
@@ -1485,7 +1484,7 @@ class Database:
             cursor = conn.cursor()
             cursor.execute(
                 self._INJECTIONS_SQL,
-                (RequestStatus.APPROVED.value, session.agent_id, session.id, session.id),
+                (RequestStatus.APPROVED.value, session.agent_id, session.id, 0, session.id),
             )
             candidates = [r["id"] for r in cursor.fetchall()]
             for req_id in candidates:

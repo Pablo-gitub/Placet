@@ -123,3 +123,6 @@ async def test_unavailable_or_untargeted_sessions_do_not_trigger_open(setup, con
         db.confirm_injection(req_id, actor='bridge', via='test')
         await write(app, SID, 'second message')
     assert db.claude_sessions_to_wake() == []
+    if condition == 'generic':
+        # Not a reason to open the app, but still for the session's waiter.
+        assert db.inbox_has_message(db.get_session(SID))
