@@ -111,10 +111,55 @@ def antigravity_usage(summary: dict, now: Optional[datetime] = None) -> Optional
             "observed_at": (now or datetime.now(timezone.utc)).isoformat(), "buckets": buckets}
 
 
-def read_all(antigravity=None, home: Optional[Path] = None) -> List[dict]:
+CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+# Claude's usage is asked to Anthropic: less often than the local readers.
+CLAUDE_EVERY_SECONDS = 300.0
+CLAUDE_WINDOWS = (("five_hour", "5h", None), ("seven_day", "7d", None),
+                  ("seven_day_opus", "7d", "Opus"), ("seven_day_sonnet", "7d", "Sonnet"))
+
+
+def claude_usage(home: Optional[Path] = None, get=None) -> Optional[dict]:
+    """
+    Claude's usage windows, asked to Anthropic as Claude Code's `/usage` does,
+    with the OAuth token Claude Code keeps in ~/.claude/.credentials.json
+    (undocumented endpoint). The token goes only to Anthropic, and is never
+    refreshed here: if Claude Code has not refreshed it, nothing is read.
+    """
+    path = Path(home or Path.home()) / ".claude" / ".credentials.json"
+    try:
+        oauth = json.loads(path.read_text()).get("claudeAiOauth") or {}
+    except (OSError, ValueError):
+        return None
+    token, expires = oauth.get("accessToken"), oauth.get("expiresAt")
+    if not token or (expires and expires / 1000 <= datetime.now(timezone.utc).timestamp()):
+        return None
+    if get is None:
+        import httpx
+        get = lambda: httpx.get(CLAUDE_USAGE_URL, timeout=15.0, headers={  # noqa: E731
+            "Authorization": f"Bearer {token}", "anthropic-beta": "oauth-2025-04-20"})
+    resp = get()
+    if resp.status_code != 200:
+        return None
+    data = resp.json()
+    buckets = []
+    for key, window, group in CLAUDE_WINDOWS:
+        item = data.get(key)
+        if not isinstance(item, dict) or item.get("utilization") is None:
+            continue
+        buckets.append({"id": key, "group": group, "window": window,
+                        "used_percent": min(100.0, max(0.0, float(item["utilization"]))),
+                        "resets_at": item.get("resets_at")})
+    if not buckets:
+        return None
+    return {"provider": "claude-code", "plan": oauth.get("subscriptionType"),
+            "observed_at": datetime.now(timezone.utc).isoformat(), "buckets": buckets}
+
+
+def read_all(antigravity=None, home: Optional[Path] = None, claude=None) -> List[dict]:
     """Every provider that has something to report; a failing reader is skipped."""
     out: List[dict] = []
     readers: Iterable = (
+        lambda: claude() if claude is not None else None,
         lambda: codex_usage(home),
         lambda: antigravity_usage(antigravity.quota_summary()) if antigravity is not None else None,
     )

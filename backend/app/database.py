@@ -1506,6 +1506,8 @@ class Database:
         """Whether take_inbox_message would hand something out now (read only)."""
         if session.state != "idle" or session.ended_at is not None or session.excluded:
             return False
+        if session.provider in self.limited_providers():
+            return False
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(self._OUTCOMES_SQL, (session.id, RequestStatus.PENDING.value))
@@ -1554,6 +1556,9 @@ class Database:
         takes it for the session (its waiter, or the bridge).
         """
         if session.state != "idle" or session.ended_at is not None or session.excluded:
+            return None
+        # A provider at its usage limit would lose the message (RF-60).
+        if session.provider in self.limited_providers():
             return None
         actor = actor or f"agent:{session.agent_id}"
         with self._get_connection() as conn:

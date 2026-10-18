@@ -113,3 +113,53 @@ async def test_messages_wait_while_the_provider_is_at_its_limit(setup):  # noqa:
     db.set_usage("antigravity", json.dumps({"provider": "antigravity", "buckets": [
         {"id": "g", "group": "Gemini", "window": "5h", "used_percent": 100, "resets_at": soon}]}))
     assert db.limited_providers() == set()
+
+
+def _credentials(home, expires_in_s):
+    from datetime import datetime, timezone
+    folder = home / ".claude"
+    folder.mkdir(parents=True, exist_ok=True)
+    expires = (datetime.now(timezone.utc).timestamp() + expires_in_s) * 1000
+    (folder / ".credentials.json").write_text(json.dumps({"claudeAiOauth": {
+        "accessToken": "tok", "expiresAt": expires, "subscriptionType": "pro"}}))
+
+
+def test_claude_usage_from_anthropic(tmp_path):
+    from bridge.usage import claude_usage
+    _credentials(tmp_path, 3600)
+    answer = MagicMock(status_code=200)
+    answer.json.return_value = {
+        "five_hour": {"utilization": 32.0, "resets_at": "2026-10-18T19:10:00+00:00"},
+        "seven_day": {"utilization": 31.0, "resets_at": "2026-10-23T03:00:00+00:00"},
+        "seven_day_opus": None, "seven_day_sonnet": {"utilization": 5.0, "resets_at": None}}
+    usage = claude_usage(tmp_path, get=lambda: answer)
+    assert usage["provider"] == "claude-code" and usage["plan"] == "pro"
+    assert [(b["window"], b["group"], b["used_percent"]) for b in usage["buckets"]] == [
+        ("5h", None, 32.0), ("7d", None, 31.0), ("7d", "Sonnet", 5.0)]
+
+
+def test_claude_usage_never_uses_an_expired_token_nor_fails_loudly(tmp_path):
+    from bridge.usage import claude_usage
+    asked = []
+    _credentials(tmp_path, -60)
+    assert claude_usage(tmp_path, get=lambda: asked.append(1)) is None and asked == []
+    _credentials(tmp_path, 3600)
+    assert claude_usage(tmp_path, get=lambda: MagicMock(status_code=401)) is None
+    assert claude_usage(tmp_path / "nobody") is None
+
+
+@pytest.mark.asyncio
+async def test_claude_waiter_gets_nothing_at_the_limit(setup):  # noqa: F811
+    from datetime import datetime, timedelta, timezone
+    from tests.test_session_messages import start, write
+    app, db = setup
+    await start(app, "claude", "c1", "claude-code")
+    await write(app, "c1", "ciao")
+    soon = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
+    db.set_usage("claude-code", json.dumps({"provider": "claude-code", "buckets": [
+        {"id": "five_hour", "window": "5h", "used_percent": 100, "resets_at": soon}]}))
+    session = db.get_session("c1")
+    assert not db.inbox_has_message(session) and db.take_inbox_message(session) is None
+    db.set_usage("claude-code", json.dumps({"provider": "claude-code", "buckets": [
+        {"id": "five_hour", "window": "5h", "used_percent": 40, "resets_at": soon}]}))
+    assert db.take_inbox_message(db.get_session("c1")) is not None

@@ -16,7 +16,7 @@ from bridge.attachments import AttachmentError
 from bridge.transcripts import TranscriptError, read_attachment, read_transcript
 from bridge import steer as steer_files
 from bridge.titles import codex_titles
-from bridge.usage import read_all as read_usage
+from bridge.usage import CLAUDE_EVERY_SECONDS, claude_usage, read_all as read_usage
 from bridge.claude_desktop import ClaudeDesktopWake
 from hooks.placet_common import active
 
@@ -65,6 +65,8 @@ class BridgeDaemon:
         self._excluded: Optional[Set[str]] = None
         self._titles_at = -TITLES_EVERY_SECONDS
         self._usage_at = -USAGE_EVERY_SECONDS
+        self._claude_usage_at = -CLAUDE_EVERY_SECONDS
+        self._claude_usage: Optional[dict] = None
         # "now" messages left for a turn that ended, and since when (monotonic)
         self._steer_orphans: Dict[int, float] = {}
 
@@ -283,13 +285,21 @@ class BridgeDaemon:
         if now - self._usage_at < USAGE_EVERY_SECONDS:
             return []
         self._usage_at = now
-        usage = read_usage(antigravity=self.channels.get("antigravity"))
+        usage = read_usage(antigravity=self.channels.get("antigravity"), claude=self._claude_cached)
         if usage:
             try:
                 self.store.report_usage(usage)
             except Exception as e:
                 logger.debug(f"Usage report: {e}")
         return usage
+
+    def _claude_cached(self) -> Optional[dict]:
+        """Claude's usage is asked to Anthropic at most every few minutes; the last answer is reused."""
+        now = time.monotonic()
+        if now - self._claude_usage_at >= CLAUDE_EVERY_SECONDS:
+            self._claude_usage_at = now
+            self._claude_usage = claude_usage()
+        return self._claude_usage
 
     def process_steer(self, steer: List[dict], waiting: List[dict]) -> int:
         """
