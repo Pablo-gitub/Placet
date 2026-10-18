@@ -352,5 +352,14 @@
     "saved": "Salvata. Nuove notifiche e messaggi Placet useranno questa lingua.",
     "loadError": "Impossibile caricare l’impostazione. Chiudi e riapri per riprovare.",
     "saveError": "Impossibile salvare. La scelta resta selezionata: riprova."
+  },
+  "usage": {
+    "title": "Consumi",
+    "window5h": "5h",
+    "window7d": "7g",
+    "resetIn": "reset {{time}}",
+    "minutes": "{{m}} min",
+    "hoursMinutes": "{{h}}h{{m}}",
+    "daysHours": "{{d}}g {{h}}h"
   }
 }

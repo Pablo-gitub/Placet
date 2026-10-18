@@ -31,6 +31,8 @@ from backend.app.auth import (
 from backend.app.config import PlacetConfig, load_agents_config
 from backend.app.database import Database
 from backend.app.models import (
+    ProviderUsage,
+    UsageReport,
     RequestCreate,
     RequestEvent,
     RequestModel,
@@ -88,6 +90,7 @@ class SessionEventPayload(BaseModel):
 
 class TitlesReport(BaseModel):
     titles: Dict[str, str] = Field(default_factory=dict, max_length=500)
+
 
 
 # RF-43: one "turn finished" notification per followed session at most this often.
@@ -204,6 +207,9 @@ def create_app(
                 and req.delivered_at is None and not req.allow_auto_return
                 and req.return_decision is None):
             alert(req_id, "return_waiting")
+
+    def stored_usage() -> List["ProviderUsage"]:
+        return [ProviderUsage.model_validate_json(d) for d in db.list_usage()]
 
     def notify_session(session_id: str):
         for ev in list(inbox_waiters):
@@ -1268,6 +1274,20 @@ def create_app(
             notify_session(session_id)
         return {"changed": changed}
 
+    @app.post("/api/bridge/usage")
+    async def bridge_usage(payload: UsageReport, who: Principal = Depends(principal)):
+        """Usage windows per provider (RF-60), read by the bridge every minute."""
+        require_bridge(who)
+        for item in payload.providers:
+            db.set_usage(item.provider, item.model_dump_json())
+        _broadcast(("usage", None))
+        return {"providers": [p.provider for p in payload.providers]}
+
+    @app.get("/api/usage", response_model=List[ProviderUsage])
+    async def get_usage(who: Principal = Depends(principal)):
+        require_human(who)
+        return stored_usage()
+
     @app.post("/api/bridge/folders")
     async def bridge_folders(payload: FoldersReport, who: Principal = Depends(principal)):
         """Which folders have a `.placet-off` (RF-45), as the bridge found them."""
@@ -1406,6 +1426,10 @@ def create_app(
             try:
                 while True:
                     kind, key = await queue.get()
+                    if kind == "usage":
+                        yield {"event": "usage_update",
+                               "data": json.dumps([u.model_dump(mode="json") for u in stored_usage()])}
+                        continue
                     if kind == "session":
                         session = db.get_session(key)
                         if session:

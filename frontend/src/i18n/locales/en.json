@@ -352,5 +352,14 @@
     "saved": "Saved. New notifications and Placet messages will use this language.",
     "loadError": "Unable to load the setting. Close and reopen to retry.",
     "saveError": "Unable to save. Your choice is still selected; try again."
+  },
+  "usage": {
+    "title": "Usage",
+    "window5h": "5h",
+    "window7d": "7d",
+    "resetIn": "reset {{time}}",
+    "minutes": "{{m}} min",
+    "hoursMinutes": "{{h}}h{{m}}",
+    "daysHours": "{{d}}d {{h}}h"
   }
 }

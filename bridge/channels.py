@@ -190,6 +190,19 @@ class AntigravityChannel:
             f"(Antigravity {self.version})."
         )
 
+    def quota_summary(self) -> dict:
+        """The account's usage windows (RF-60), from any running language server."""
+        for pid, token, version in self._discover():
+            self.version = version
+            for port in self._ports_of(pid):
+                try:
+                    resp = self._call(f"http://127.0.0.1:{port}", token, "RetrieveUserQuotaSummary", {})
+                except httpx.HTTPError:
+                    continue
+                if resp.status_code == 200:
+                    return resp.json()
+        return {}
+
     def titles(self, ids) -> Dict[str, str]:
         """The titles ("summary") Antigravity gave these conversations, from any running server."""
         wanted, titles = set(ids), {}

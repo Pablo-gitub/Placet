@@ -16,6 +16,7 @@ from bridge.attachments import AttachmentError
 from bridge.transcripts import TranscriptError, read_attachment, read_transcript
 from bridge import steer as steer_files
 from bridge.titles import codex_titles
+from bridge.usage import read_all as read_usage
 from bridge.claude_desktop import ClaudeDesktopWake
 from hooks.placet_common import active
 
@@ -32,6 +33,8 @@ FOLDERS_EVERY_SECONDS = 15.0
 STEER_CONFIRM_SECONDS = 120.0
 # How often Codex and Antigravity titles are read (they change on rename).
 TITLES_EVERY_SECONDS = 30.0
+# How often usage windows are read (RF-60).
+USAGE_EVERY_SECONDS = 60.0
 
 
 
@@ -61,6 +64,7 @@ class BridgeDaemon:
         self._folders_at = -FOLDERS_EVERY_SECONDS
         self._excluded: Optional[Set[str]] = None
         self._titles_at = -TITLES_EVERY_SECONDS
+        self._usage_at = -USAGE_EVERY_SECONDS
         # "now" messages left for a turn that ended, and since when (monotonic)
         self._steer_orphans: Dict[int, float] = {}
 
@@ -273,6 +277,20 @@ class BridgeDaemon:
             self.store.report_titles(titles)
         return titles
 
+    def refresh_usage(self) -> List[dict]:
+        """Reads the providers' usage windows and reports them (RF-60)."""
+        now = time.monotonic()
+        if now - self._usage_at < USAGE_EVERY_SECONDS:
+            return []
+        self._usage_at = now
+        usage = read_usage(antigravity=self.channels.get("antigravity"))
+        if usage:
+            try:
+                self.store.report_usage(usage)
+            except Exception as e:
+                logger.debug(f"Usage report: {e}")
+        return usage
+
     def process_steer(self, steer: List[dict], waiting: List[dict]) -> int:
         """
         "Subito" (RF-35). Claude Code: the message is left for the session's
@@ -346,6 +364,7 @@ class BridgeDaemon:
         self.language = work.language
         self.check_folders(work.folders)
         self.refresh_titles(work.titles)
+        self.refresh_usage()
         self.wake_claude_sessions(work.claude_wake_sessions)
         busy_sessions: Set[str] = set()
         busy_agents = set(work.busy_agents)

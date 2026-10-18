@@ -226,6 +226,11 @@ class Database:
                     "UPDATE sessions SET suspended_at = ended_at, ended_at = NULL"
                     " WHERE provider = 'codex' AND ended_at IS NOT NULL;"
                 )
+            # RF-60: usage windows per provider, as last reported by the bridge (JSON).
+            cursor.execute(
+                "CREATE TABLE IF NOT EXISTS provider_usage"
+                " (provider TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at TEXT NOT NULL)"
+            )
             cursor.execute("CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY)")
             migration = 'claude_desktop_end_is_suspension_v1'
             if cursor.execute("SELECT 1 FROM schema_migrations WHERE name = ?", (migration,)).fetchone() is None:
@@ -1327,6 +1332,19 @@ class Database:
                 "UPDATE sessions SET waiter_seen_at = ?, last_seen_at = ? WHERE id = ?",
                 (now, now, session_id),
             )
+
+    def set_usage(self, provider: str, data: str) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            conn.execute(
+                "INSERT INTO provider_usage (provider, data, updated_at) VALUES (?, ?, ?)"
+                " ON CONFLICT(provider) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at",
+                (provider, data, now),
+            )
+
+    def list_usage(self) -> List[str]:
+        with self._get_connection() as conn:
+            return [r["data"] for r in conn.execute("SELECT data FROM provider_usage ORDER BY provider")]
 
     def reopen_session(self, session_id: str) -> None:
         """The session runs again (it started, or a turn began): neither ended nor suspended."""

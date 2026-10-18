@@ -343,3 +343,23 @@ def is_settled(req: RequestModel) -> bool:
     if req.recipient_id == "human":
         return req.status != RequestStatus.PENDING
     return req.status in FINAL_STATUSES
+
+
+class UsageBucket(BaseModel):
+    id: str = Field(max_length=100)
+    group: Optional[str] = Field(default=None, max_length=100)
+    window: Literal["5h", "7d"]
+    used_percent: float = Field(ge=0, le=100)
+    resets_at: Optional[datetime] = None
+
+
+class ProviderUsage(BaseModel):
+    """RF-60: how much of a provider's usage windows is used, as the bridge read it."""
+    provider: Literal["claude-code", "codex", "antigravity"]
+    plan: Optional[str] = Field(default=None, max_length=50)
+    observed_at: Optional[datetime] = None
+    buckets: List[UsageBucket] = Field(max_length=20)
+
+
+class UsageReport(BaseModel):
+    providers: List[ProviderUsage] = Field(default_factory=list, max_length=10)

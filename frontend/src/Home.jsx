@@ -4,6 +4,7 @@ import { CheckCircle, ChevronDown, ChevronRight, Circle, MessageCircleQuestion, 
 import RequestCard from "./RequestCard";
 import { needsReturnApproval } from "./decisions";
 import AddSessionsDialog from "./AddSessionsDialog";
+import UsageBar from "./UsageBar";
 import {
   activityOf,
   byActivity,
@@ -94,6 +95,7 @@ function ProviderGroup({ provider, sessions, questionsOf, collapsed, onToggle, o
 export default function Home({
   requests,
   sessions,
+  usage,
   onDecide,
   submittingId,
   focusId,
@@ -130,6 +132,7 @@ export default function Home({
 
   return (
     <div data-testid="home-section">
+      <UsageBar usage={usage} />
       <section className="home-section">
         <h2 className="home-title">
           <MessageCircleQuestion size={16} /> {t("home.questions")}

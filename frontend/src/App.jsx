@@ -102,6 +102,17 @@ export default function App() {
     }
   }, []);
 
+  // RF-60: usage windows per provider, as the bridge last read them.
+  const [usage, setUsage] = useState([]);
+  const fetchUsage = useCallback(async () => {
+    try {
+      const res = await fetch("/api/usage");
+      if (res.ok) setUsage(await res.json());
+    } catch (e) {
+      console.error("Error fetching usage:", e);
+    }
+  }, []);
+
   const fetchSessions = useCallback(async () => {
     try {
       // Closed sessions too: one the user follows stays in the home, marked closed.
@@ -117,6 +128,7 @@ export default function App() {
     // oxlint-disable-next-line react/set-state-in-effect
     fetchRequests();
     fetchSessions();
+    fetchUsage();
 
     let evtSource = null;
     try {
@@ -125,6 +137,7 @@ export default function App() {
         setConnected(true);
         fetchRequests();
         fetchSessions();
+        fetchUsage();
       };
       evtSource.onerror = () => setConnected(false);
       evtSource.addEventListener("session_update", (event) => {
@@ -144,6 +157,13 @@ export default function App() {
           console.error("Error parsing SSE event:", err);
         }
       });
+      evtSource.addEventListener("usage_update", (event) => {
+        try {
+          setUsage(JSON.parse(event.data));
+        } catch (err) {
+          console.error("Error parsing SSE event:", err);
+        }
+      });
       evtSource.addEventListener("request_update", (event) => {
         try {
           const updated = JSON.parse(event.data);
@@ -156,7 +176,7 @@ export default function App() {
       console.error("SSE initialization error:", e);
     }
     return () => evtSource?.close();
-  }, [fetchRequests, fetchSessions]);
+  }, [fetchRequests, fetchSessions, fetchUsage]);
 
   useEffect(() => {
     const onHashChange = () => {
@@ -304,6 +324,7 @@ export default function App() {
     <Home
       requests={requests}
       sessions={sessions}
+      usage={usage}
       onDecide={handleDecision}
       submittingId={submittingId}
       focusId={focusId}

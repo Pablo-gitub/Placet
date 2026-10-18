@@ -89,6 +89,7 @@ class BridgeStore(Protocol):
     # Which of the folders have a `.placet-off`.
     def report_folders(self, checked: List[str], excluded: List[str]) -> None: ...
     def report_titles(self, titles: Dict[str, str]) -> None: ...
+    def report_usage(self, providers: List[dict]) -> None: ...
     # Takes a "now" message: {"request_id", "session_id", "provider", "text"} or None.
     def take_steer(self, request_id: int) -> Optional[dict]: ...
 
@@ -176,6 +177,11 @@ class LocalStore:
 
     def report_titles(self, titles: Dict[str, str]) -> None:
         self.db.set_session_titles(titles)
+
+    def report_usage(self, providers: List[dict]) -> None:
+        from backend.app.models import UsageReport
+        for item in UsageReport(providers=providers).providers:
+            self.db.set_usage(item.provider, item.model_dump_json())
 
     def take_steer(self, request_id: int) -> Optional[dict]:
         req = self.db.get_request(request_id)
@@ -268,6 +274,10 @@ class HttpStore:
 
     def report_titles(self, titles: Dict[str, str]) -> None:
         resp = self.client.post("/api/bridge/titles", json={"titles": titles})
+        resp.raise_for_status()
+
+    def report_usage(self, providers: List[dict]) -> None:
+        resp = self.client.post("/api/bridge/usage", json={"providers": providers})
         resp.raise_for_status()
 
     def take_steer(self, request_id: int) -> Optional[dict]:
