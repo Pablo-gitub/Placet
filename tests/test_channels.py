@@ -182,7 +182,6 @@ def test_open_failure_after_acceptance_never_releases_or_resends(failure):
     channel.send.assert_called_once()
     channel.open_conversation.assert_called_once()
     store.release_injection.assert_not_called()
-    store.runtime_ready.assert_not_called()
 
 
 def test_codex_waiting_session_is_queued_without_opening_a_window():

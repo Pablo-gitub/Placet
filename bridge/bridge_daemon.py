@@ -177,19 +177,8 @@ class BridgeDaemon:
             channel = self.channels.get(target.get("provider"))
             if channel is None:
                 continue
-            # Optional adapter: observe/load the *desktop's* runtime before
-            # claiming mail. No synthetic start/prompt hook is emitted.
-            adapter = getattr(channel, "desktop", None)
-            if adapter is not None and adapter.enabled(target["id"]):
-                try:
-                    if not channel.prepare(target["id"]):
-                        continue
-                    if target.get("suspended") and not self.store.runtime_ready(target["id"]):
-                        continue
-                except ChannelError as exc:
-                    logger.warning("Cannot prepare desktop session %s: %s", target["id"], exc)
-                    continue
-            elif target.get("suspended") and (adapter is not None or not getattr(channel, 'can_wake_suspended', False)):
+            # A suspended session only if its channel can reopen it after queuing.
+            if target.get("suspended") and not getattr(channel, "can_wake_suspended", False):
                 continue
             mail = self.store.take_session_mail(target["id"])
             if mail is None:

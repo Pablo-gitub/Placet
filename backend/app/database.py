@@ -1285,16 +1285,6 @@ class Database:
                 "UPDATE sessions SET ended_at = NULL, suspended_at = NULL WHERE id = ?", (session_id,)
             )
 
-    def runtime_ready(self, session_id: str) -> bool:
-        """Bridge observed an idle Codex runtime; this is not a turn event."""
-        with self._get_connection() as conn:
-            cursor = conn.execute(
-                "UPDATE sessions SET suspended_at = NULL WHERE id = ? AND provider = 'codex'"
-                " AND ended_at IS NULL AND excluded_at IS NULL AND state = 'idle'",
-                (session_id,),
-            )
-            return cursor.rowcount == 1
-
     def suspend_session(self, session_id: str) -> None:
         """
         The app unloaded the conversation (Codex: idle, restart, update). It

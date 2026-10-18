@@ -69,7 +69,6 @@ class SessionMail:
 
 
 class BridgeStore(Protocol):
-    def runtime_ready(self, session_id: str) -> bool: ...
     def work(self) -> Work: ...
     # Injections: claim before sending, release if sending failed, confirm
     # only for agents without acknowledgements (ack_mode none).
@@ -142,9 +141,6 @@ class LocalStore:
             steer_waiting=[{"request_id": r.id, "session_id": s.id, "provider": s.provider}
                            for r, s in self.db.steers_waiting()],
         )
-
-    def runtime_ready(self, session_id: str) -> bool:
-        return self.db.runtime_ready(session_id)
 
     def take_session_mail(self, session_id: str) -> Optional[SessionMail]:
         session = self.db.get_session(session_id)
@@ -250,9 +246,6 @@ class HttpStore:
         resp.raise_for_status()
         data = resp.json()
         return SessionMail(data["kind"], data["request_id"], data["text"])
-
-    def runtime_ready(self, session_id: str) -> bool:
-        return self._call_ok("POST", f"/api/bridge/sessions/{session_id}/runtime-ready")
 
     def _call_ok(self, method: str, path: str) -> bool:
         resp = self.client.request(method, path)

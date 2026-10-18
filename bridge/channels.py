@@ -43,19 +43,10 @@ CODEX_CANDIDATES = ("/usr/lib/chatgpt/resources/codex", "/opt/codex/codex")
 class CodexChannel:
     can_wake_suspended = True
 
-    def __init__(self, binary: Optional[str] = None, run: Callable = subprocess.run, desktop=None):
-        self.desktop = desktop
+    def __init__(self, binary: Optional[str] = None, run: Callable = subprocess.run):
         self._binary = binary or os.environ.get("PLACET_CODEX_BIN")
         self._run = run
         self._checked: Optional[str] = None
-
-    def prepare(self, session_id: str) -> bool:
-        if self.desktop is None:
-            return False
-        try:
-            return self.desktop.prepare(session_id)
-        except (OSError, ValueError, RuntimeError, KeyError) as exc:
-            raise ChannelError(f'Desktop adapter unavailable: {type(exc).__name__}') from None
 
     def binary(self) -> str:
         """A codex binary that has `queue`: the app's own, else the one in PATH."""
@@ -253,8 +244,4 @@ class AntigravityChannel:
 
 
 def default_channels() -> Dict[str, object]:
-    from bridge.desktop_client import DesktopClient
-    path = os.environ.get('PLACET_DESKTOP_SOCKET')
-    threads = [s.strip() for s in os.environ.get('PLACET_DESKTOP_THREADS', '').split(',') if s.strip()]
-    return {"codex": CodexChannel(desktop=DesktopClient(path, allowed_threads=threads) if path else None),
-            "antigravity": AntigravityChannel()}
+    return {"codex": CodexChannel(), "antigravity": AntigravityChannel()}

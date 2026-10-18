@@ -20,9 +20,9 @@ RF-29b continua a bloccare la richiesta successiva. La sospensione si elimina
 solo con gli eventi della sessione: il link non inventa eventi di esecuzione.
 Dopo accettazione nella coda Codex non è garantita la revoca del messaggio.
 
-Non impostare PLACET_DESKTOP_SOCKET/PLACET_DESKTOP_THREADS nel bridge né
-CODEX_CLI_PATH nel launcher. L'adattatore stdio nella stessa cartella è un
-esperimento accantonato, non richiesto da questo flusso.
+Nessun proxy e nessuna variabile d'ambiente: l'esperimento di interposizione
+fra l'app e il suo app-server è stato tolto da `main` e resta nel branch
+`experiment/desktop-proxy`.
 
 Dopo aggiornamento del codice in /opt/placet basta riavviare il bridge utente.
 Backend, launcher e app Codex non richiedono modifiche ulteriori rispetto al

@@ -20,13 +20,12 @@ revoca garantita degli elementi già accettati da Codex.
 
 ## Esperimento accantonato
 
-`bridge/desktop_proxy.py`, `desktop_client.py` e il wrapper documentano un
-esperimento di interposizione stdio, disabilitato nell'installazione attiva.
-Il socket era stato creato, ma il riconoscimento dell'handshake non funzionava
-con l'app reale. La correzione successiva è stata verificata nei test, non
-validata con il desktop. CODEX_CLI_PATH rimane una dipendenza sperimentale.
-Il percorso nativo non richiede né questo proxy né le sue variabili di ambiente.
-Non confondere i test di protocollo con una validazione del desktop completo.
+L'interposizione stdio fra l'app desktop e il suo app-server (`desktop_proxy.py`,
+`desktop_client.py`, wrapper via CODEX_CLI_PATH) è stata tolta da `main`: il
+riconoscimento dell'handshake non ha mai funzionato con l'app reale, e un
+intermediario nel canale che esegue gli agenti era un rischio sproporzionato.
+Il codice resta nel branch `experiment/desktop-proxy`. Il percorso nativo non
+ne ha bisogno.
 
 ## Claude
 
