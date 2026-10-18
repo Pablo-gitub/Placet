@@ -123,7 +123,7 @@ def test_changing_screen_is_busy():
     with patch.object(controller, "capture_pane", side_effect=[CLAUDE_IDLE, streaming]):
         check = controller.check_idle("s", CLAUDE)
     assert not check.idle
-    assert "cambiando" in check.reason
+    assert "changing" in check.reason
 
 
 def test_stable_screen_is_read_twice():
