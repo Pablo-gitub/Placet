@@ -1,0 +1,5 @@
+#!/bin/sh
+# Set PLACET_ROOT for a checkout; installed default is /opt/placet.
+placet_root=${PLACET_ROOT:-/opt/placet}
+cd "$placet_root" || exit 1
+exec "$placet_root/.venv/bin/python" -m bridge.desktop_proxy "$@"

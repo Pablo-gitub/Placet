@@ -14,6 +14,7 @@ import os
 import re
 import shutil
 import subprocess
+import uuid
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -40,10 +41,21 @@ CODEX_CANDIDATES = ("/usr/lib/chatgpt/resources/codex", "/opt/codex/codex")
 
 
 class CodexChannel:
-    def __init__(self, binary: Optional[str] = None, run: Callable = subprocess.run):
+    can_wake_suspended = True
+
+    def __init__(self, binary: Optional[str] = None, run: Callable = subprocess.run, desktop=None):
+        self.desktop = desktop
         self._binary = binary or os.environ.get("PLACET_CODEX_BIN")
         self._run = run
         self._checked: Optional[str] = None
+
+    def prepare(self, session_id: str) -> bool:
+        if self.desktop is None:
+            return False
+        try:
+            return self.desktop.prepare(session_id)
+        except (OSError, ValueError, RuntimeError, KeyError) as exc:
+            raise ChannelError(f'Desktop adapter unavailable: {type(exc).__name__}') from None
 
     def binary(self) -> str:
         """A codex binary that has `queue`: the app's own, else the one in PATH."""
@@ -72,6 +84,14 @@ class CodexChannel:
             raise ChannelUncertain("codex queue did not answer within 60 s") from None
         if res.returncode != 0:
             raise ChannelError(f"codex queue failed ({res.returncode}): {(res.stderr or res.stdout).strip()[:300]}")
+
+    def open_conversation(self, session_id: str) -> None:
+        """Best effort after durable acceptance; failure must never requeue mail."""
+        thread_id = str(uuid.UUID(session_id))
+        res = self._run(['/usr/bin/chatgpt', f'codex://threads/{thread_id}'],
+                        capture_output=True, text=True, timeout=20)
+        if res.returncode != 0:
+            raise RuntimeError('Codex conversation link was not accepted')
 
 
 # --- Antigravity 2.0 ----------------------------------------------------------------
@@ -233,4 +253,8 @@ class AntigravityChannel:
 
 
 def default_channels() -> Dict[str, object]:
-    return {"codex": CodexChannel(), "antigravity": AntigravityChannel()}
+    from bridge.desktop_client import DesktopClient
+    path = os.environ.get('PLACET_DESKTOP_SOCKET')
+    threads = [s.strip() for s in os.environ.get('PLACET_DESKTOP_THREADS', '').split(',') if s.strip()]
+    return {"codex": CodexChannel(desktop=DesktopClient(path, allowed_threads=threads) if path else None),
+            "antigravity": AntigravityChannel()}

@@ -56,6 +56,8 @@ class Work:
     # before they got in: {"request_id", "session_id", "provider"}.
     steer: List[dict] = field(default_factory=list)
     steer_waiting: List[dict] = field(default_factory=list)
+    # Suspended Codex sessions; considered only by the opt-in desktop adapter.
+    wake_sessions: List[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -66,6 +68,7 @@ class SessionMail:
 
 
 class BridgeStore(Protocol):
+    def runtime_ready(self, session_id: str) -> bool: ...
     def work(self) -> Work: ...
     # Injections: claim before sending, release if sending failed, confirm
     # only for agents without acknowledgements (ack_mode none).
@@ -114,6 +117,9 @@ class LocalStore:
             lambda agent_id: getattr(self.config.get_agent(agent_id), "tmux_session", None),
         )
         return Work(
+            wake_sessions=[{"id": s.id, "provider": s.provider, "suspended": True}
+                           for s in self.db.bridge_sessions_with_mail(include_suspended=True)
+                           if s.suspended_at is not None],
             injections=injections,
             results=results,
             busy_agents=sorted(set(self.db.busy_agents(AGENT_BUSY_TTL_SECONDS)) | set(busy)),
@@ -133,6 +139,9 @@ class LocalStore:
             steer_waiting=[{"request_id": r.id, "session_id": s.id, "provider": s.provider}
                            for r, s in self.db.steers_waiting()],
         )
+
+    def runtime_ready(self, session_id: str) -> bool:
+        return self.db.runtime_ready(session_id)
 
     def take_session_mail(self, session_id: str) -> Optional[SessionMail]:
         session = self.db.get_session(session_id)
@@ -218,6 +227,7 @@ class HttpStore:
         resp.raise_for_status()
         data = resp.json()
         return Work(
+            wake_sessions=list(data.get("wake_sessions", [])),
             injections=[RequestModel(**r) for r in data["injections"]],
             results=[RequestModel(**r) for r in data["results"]],
             busy_agents=list(data.get("busy_agents", [])),
@@ -236,6 +246,9 @@ class HttpStore:
         resp.raise_for_status()
         data = resp.json()
         return SessionMail(data["kind"], data["request_id"], data["text"])
+
+    def runtime_ready(self, session_id: str) -> bool:
+        return self._call_ok("POST", f"/api/bridge/sessions/{session_id}/runtime-ready")
 
     def _call_ok(self, method: str, path: str) -> bool:
         resp = self.client.request(method, path)

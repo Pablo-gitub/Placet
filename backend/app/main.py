@@ -1186,6 +1186,11 @@ def create_app(
                 {"id": s.id, "agent_id": s.agent_id, "provider": s.provider}
                 for s in db.bridge_sessions_with_mail()
             ],
+            "wake_sessions": [
+                {"id": s.id, "provider": s.provider, "suspended": True}
+                for s in db.bridge_sessions_with_mail(include_suspended=True)
+                if s.suspended_at is not None
+            ],
             # Uncertain deliveries: the bridge looks for them in the conversation.
             "uncertain": uncertain_to_reconcile(),
             # Folders of known sessions: the bridge looks for `.placet-off`.
@@ -1242,6 +1247,15 @@ def create_app(
                 out.append({"request_id": req.id, "session_id": session.id,
                             "agent_id": session.agent_id, "provider": session.provider})
         return out
+
+    @app.post("/api/bridge/sessions/{session_id}/runtime-ready")
+    async def bridge_runtime_ready(session_id: str, who: Principal = Depends(principal)):
+        """An authenticated bridge observed idle on the desktop's actual server."""
+        require_bridge(who)
+        if not db.runtime_ready(session_id):
+            raise HTTPException(status_code=409, detail="Session cannot be reactivated")
+        notify_session(session_id)
+        return {"ready": True}
 
     @app.post("/api/bridge/sessions/{session_id}/take")
     async def bridge_take_session_message(session_id: str, who: Principal = Depends(principal)):

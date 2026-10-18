@@ -1274,6 +1274,16 @@ class Database:
                 "UPDATE sessions SET ended_at = NULL, suspended_at = NULL WHERE id = ?", (session_id,)
             )
 
+    def runtime_ready(self, session_id: str) -> bool:
+        """Bridge observed an idle Codex runtime; this is not a turn event."""
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "UPDATE sessions SET suspended_at = NULL WHERE id = ? AND provider = 'codex'"
+                " AND ended_at IS NULL AND excluded_at IS NULL AND state = 'idle'",
+                (session_id,),
+            )
+            return cursor.rowcount == 1
+
     def suspend_session(self, session_id: str) -> None:
         """
         The app unloaded the conversation (Codex: idle, restart, update). It
@@ -1422,14 +1432,16 @@ class Database:
             (req := self.get_request(i)) is not None and is_settled(req) for i in outcome_ids
         )
 
-    def bridge_sessions_with_mail(self) -> List[SessionModel]:
+    def bridge_sessions_with_mail(self, include_suspended: bool = False) -> List[SessionModel]:
         """Open sessions the bridge wakes (Codex, Antigravity) with a message waiting."""
         placeholders = ", ".join("?" for _ in BRIDGE_PROVIDERS)
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                f"SELECT * FROM sessions WHERE ended_at IS NULL AND suspended_at IS NULL"
-                f" AND provider IN ({placeholders})",
+                f"SELECT * FROM sessions WHERE ended_at IS NULL"
+                + (" AND (suspended_at IS NULL OR provider = 'codex')" if include_suspended
+                   else " AND suspended_at IS NULL")
+                + f" AND provider IN ({placeholders})",
                 BRIDGE_PROVIDERS,
             )
             sessions = [self._row_to_session(r, WAITER_TTL_SECONDS) for r in cursor.fetchall()]

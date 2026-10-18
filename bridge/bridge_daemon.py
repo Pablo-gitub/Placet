@@ -173,6 +173,20 @@ class BridgeDaemon:
             channel = self.channels.get(target.get("provider"))
             if channel is None:
                 continue
+            # Optional adapter: observe/load the *desktop's* runtime before
+            # claiming mail. No synthetic start/prompt hook is emitted.
+            adapter = getattr(channel, "desktop", None)
+            if adapter is not None and adapter.enabled(target["id"]):
+                try:
+                    if not channel.prepare(target["id"]):
+                        continue
+                    if target.get("suspended") and not self.store.runtime_ready(target["id"]):
+                        continue
+                except ChannelError as exc:
+                    logger.warning("Cannot prepare desktop session %s: %s", target["id"], exc)
+                    continue
+            elif target.get("suspended") and (adapter is not None or not getattr(channel, 'can_wake_suspended', False)):
+                continue
             mail = self.store.take_session_mail(target["id"])
             if mail is None:
                 continue
@@ -195,6 +209,13 @@ class BridgeDaemon:
                 self.store.confirm_injection(mail.request_id)
             logger.info(f"Queued request #{mail.request_id} ({mail.kind}) into session {target['id']}.")
             delivered += 1
+            if target.get('suspended') and getattr(channel, 'can_wake_suspended', False):
+                try:
+                    channel.open_conversation(target['id'])
+                    logger.info('Requested Codex conversation opening for %s; turn start awaits observation.', target['id'])
+                except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+                    logger.warning('Request #%s already queued; opening failed (%s). No resend; reopen the conversation manually.',
+                                   mail.request_id, type(exc).__name__)
         return delivered
 
     def reconcile_uncertain(self, uncertain: List[dict]) -> int:
@@ -315,7 +336,7 @@ class BridgeDaemon:
         busy_agents = set(work.busy_agents)
         delivered = self.process_pending_results(busy_sessions, work.results, busy_agents)
         delivered += self.process_pending_injections(busy_sessions, work.injections, busy_agents)
-        delivered += self.process_session_mail(work.sessions)
+        delivered += self.process_session_mail(work.sessions + work.wake_sessions)
         delivered += self.process_steer(work.steer, work.steer_waiting)
         self.reconcile_uncertain(work.uncertain)
         return delivered

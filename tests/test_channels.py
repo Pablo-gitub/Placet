@@ -152,3 +152,34 @@ def test_daemon_confirms_or_gives_back():
     store.release_delivery.assert_called_once_with(2)
     store.release_injection.assert_called_once_with(3)
     assert store.take_session_mail.call_count == 3  # nothing taken for an unknown provider
+
+
+def test_codex_native_link_validates_id_and_uses_argv():
+    sid = '01a1467c-2982-78a0-8246-61283d1c3e80'
+    runner = MagicMock(return_value=completed())
+    channel = CodexChannel(run=runner)
+    channel.open_conversation(sid)
+    assert runner.call_args.args[0] == ['/usr/bin/chatgpt', 'codex://threads/' + sid]
+    with pytest.raises(ValueError):
+        channel.open_conversation('bad; shell')
+    assert runner.call_count == 1
+
+
+@pytest.mark.parametrize('failure', [OSError('missing'), subprocess.TimeoutExpired('chatgpt', 20), RuntimeError('failed')])
+def test_open_failure_after_acceptance_never_releases_or_resends(failure):
+    store = MagicMock()
+    store.take_session_mail.side_effect = [SessionMail('injection', 99, 'test'), None]
+    channel = CodexChannel()
+    events = []
+    channel.send = MagicMock(side_effect=lambda *a: events.append('queue'))
+    store.confirm_injection.side_effect = lambda *a: events.append('confirm')
+    channel.open_conversation = MagicMock(side_effect=failure)
+    daemon = BridgeDaemon(store=store, tmux=MagicMock(), channels={'codex': channel})
+    target = [{'id': '01a1467c-2982-78a0-8246-61283d1c3e80', 'provider': 'codex', 'suspended': True}]
+    assert daemon.process_session_mail(target) == 1
+    assert events == ['queue', 'confirm']
+    assert daemon.process_session_mail(target) == 0
+    channel.send.assert_called_once()
+    channel.open_conversation.assert_called_once()
+    store.release_injection.assert_not_called()
+    store.runtime_ready.assert_not_called()
