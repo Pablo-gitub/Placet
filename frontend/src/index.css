@@ -1209,11 +1209,9 @@ body.chat-open { overflow: hidden; }
 @media (max-width: 480px) {
   .app-container > header { flex-wrap: nowrap; }
   .brand { min-width: 0; }
-  .brand-tagline { display: none; }
+  .logo-icon { flex-shrink: 0; }
   .header-controls { gap: 0.35rem; flex-shrink: 0; }
   .header-controls .icon-button { padding: 0.25rem; }
-  .live-indicator { padding: 0.3rem; }
-  .live-indicator .live-label { display: none; }
 }
 
 /* RF-60: usage windows per provider, at the top of the home. */
