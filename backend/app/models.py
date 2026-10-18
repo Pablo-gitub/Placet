@@ -254,7 +254,7 @@ class SessionMessage(BaseModel):
     @model_validator(mode="after")
     def has_content(self):
         if not self.text.strip() and not self.attachments:
-            raise ValueError("Scrivi un messaggio o scegli un allegato.")
+            raise ValueError("Write a message or select an attachment.")
         return self
 
 

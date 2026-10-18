@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { useState } from "react";
 import { X } from "lucide-react";
 import {
@@ -16,6 +17,7 @@ import {
  * home (RF-41). Sessions already added are ticked.
  */
 export default function AddSessionsDialog({ sessions, onToggle, onOpen, onClose }) {
+  const { t } = useTranslation();
   const providers = [
     ...PROVIDERS,
     ...[...new Map(sessions.map((s) => [providerOf(s).key, providerOf(s)])).values()].filter(
@@ -32,13 +34,13 @@ export default function AddSessionsDialog({ sessions, onToggle, onOpen, onClose 
         className="dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="Aggiungi sessioni"
+        aria-label={t("picker.label")}
         data-testid="add-sessions-dialog"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="dialog-header">
-          <h2>Sessioni da seguire</h2>
-          <button type="button" className="icon-button" aria-label="Chiudi" onClick={onClose}>
+          <h2>{t("picker.title")}</h2>
+          <button type="button" className="icon-button" aria-label={t("picker.close")} onClick={onClose}>
             <X size={18} />
           </button>
         </div>
@@ -59,10 +61,10 @@ export default function AddSessionsDialog({ sessions, onToggle, onOpen, onClose 
           ))}
         </div>
         <div className="dialog-body">
-          <p className="empty-hint">La spunta mostra la sessione nella Home, anche se chiusa. Toglila per nasconderla.</p>
+          <p className="empty-hint">{t("picker.hint")}</p>
           {listed.length === 0 && (
             <p className="empty-hint" data-testid="no-open-sessions">
-              Nessuna sessione registrata per questo provider.
+              {t("picker.empty")}
             </p>
           )}
           {listed.map((s) => {
@@ -83,7 +85,7 @@ export default function AddSessionsDialog({ sessions, onToggle, onOpen, onClose 
                   </span>
                 </label>
                 <button type="button" className="link-button" onClick={() => onOpen(s.id)}>
-                  Apri
+                  {t("picker.open")}
                 </button>
               </div>
             );

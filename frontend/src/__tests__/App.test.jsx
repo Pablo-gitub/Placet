@@ -245,13 +245,13 @@ describe("writing from the PWA", () => {
 
   it("says why a message was refused", async () => {
     setup([[(url, o) => url === "/api/sessions/cx1/messages" && o.method === "POST",
-      () => Promise.resolve({ ok: false, status: 409, json: () => Promise.resolve({ detail: "La sessione è chiusa." }) })]]);
+      () => Promise.resolve({ ok: false, status: 409, json: () => Promise.resolve({ code: "session.closed", params: {}, detail: "The session is closed." }) })]]);
     window.location.hash = "#/sessione/cx1";
     render(<App />);
     await waitFor(() => expect(screen.getByTestId("composer-input")).toBeInTheDocument());
     fireEvent.change(screen.getByTestId("composer-input"), { target: { value: "x" } });
     fireEvent.click(screen.getByTestId("composer-send"));
-    await waitFor(() => expect(screen.getByTestId("feedback-banner")).toHaveTextContent("La sessione è chiusa."));
+    await waitFor(() => expect(screen.getByTestId("feedback-banner")).toHaveTextContent("La sessione è chiusa:"));
   });
 });
 

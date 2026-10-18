@@ -975,29 +975,26 @@ def create_app(
         require_human(who)
         session = db.get_session(session_id)
         if session is None:
-            raise HTTPException(status_code=404, detail="Session not found")
+            raise ProductError(404, "session.not_found", "Session not found")
         if session.excluded:
-            raise HTTPException(status_code=409, detail=EXCLUDED_DETAIL)
+            raise ProductError(409, "session.excluded", "This project is excluded from Placet (.placet-off).")
         if session.ended_at is not None:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="La sessione è chiusa.")
+            raise ProductError(409, "session.closed", "The session is closed.")
         if config.get_agent(session.agent_id) is None:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail=f"Unknown agent {session.agent_id}.",
-            )
+            raise ProductError(422, "session.unknown_agent", f"Unknown agent {session.agent_id}.")
         references = []
         mention_tokens = {}
         for mention in body.mentions:
             if mention.token in mention_tokens and mention_tokens[mention.token] != mention.session_id:
-                raise HTTPException(status_code=422, detail="Menzione ambigua: seleziona nuovamente la sessione.")
+                raise ProductError(422, "mention.ambiguous", "Ambiguous mention: select the session again.")
             mention_tokens[mention.token] = mention.session_id
             target = db.get_session(mention.session_id)
             if mention.token not in body.text:
-                raise HTTPException(status_code=422, detail="Menzione non presente nel messaggio.")
+                raise ProductError(422, "mention.missing", "The mention is not present in the message.")
             if target is None or target.excluded or target.ended_at is not None:
-                raise HTTPException(status_code=409, detail="Una sessione menzionata non è più disponibile: rimuovi o sostituisci la menzione.")
+                raise ProductError(409, "mention.unavailable", "A mentioned session is no longer available.")
             if target.id == session.id:
-                raise HTTPException(status_code=422, detail="Non puoi menzionare la sessione corrente.")
+                raise ProductError(422, "mention.self", "You cannot mention the current session.")
             # A human's mention shares a reference, not a routed request.
             # Routing permissions and approval are checked when an agent sends.
             references.append({"mention": mention.token, "target_session": target.id,
@@ -1016,21 +1013,21 @@ def create_app(
             try:
                 validate_uploads(files)
             except AttachmentError as e:
-                raise HTTPException(status_code=413 if e.code == "too_large" else 415,
-                                    detail="Allegati non validi: usa JPEG, PNG, WebP o PDF nei limiti indicati.") from None
+                raise ProductError(413 if e.code == "too_large" else 415, "upload.invalid",
+                                   "Invalid attachments: use JPEG, PNG, WebP or PDF within the stated limits.") from None
             saved = await bridge_call(
                 "upload", {"session_id": session.id, "cwd": session.cwd, "files": files},
                 lambda: save_uploads(session.id, files, cwd=session.cwd),
-                {"excluded": (409, EXCLUDED_DETAIL), "too_large": (413, "Limite di spazio o dimensione degli allegati superato."),
-                 "unsupported": (415, "Formato allegato non supportato."), "forbidden": (403, "Impossibile salvare gli allegati in sicurezza.")},
+                {"excluded": (409, "Project excluded (.placet-off)."), "too_large": (413, "Attachment size or storage limit exceeded."),
+                 "unsupported": (415, "Unsupported attachment format."), "forbidden": (403, "Unable to store attachments safely.")},
             )
             # Recheck after the transfer: the session may have ended or been excluded.
             current = db.get_session(session.id)
             if current is None or current.excluded or current.ended_at is not None:
-                raise HTTPException(status_code=409, detail="Sessione non più disponibile: messaggio non inviato.")
+                raise ProductError(409, "message.unavailable", "The session became unavailable: message not sent.")
             uploaded = saved.get("files") or []
             if len(uploaded) != len(files) or any(not f.get("path") for f in uploaded):
-                raise HTTPException(status_code=502, detail="Trasferimento degli allegati incompleto.")
+                raise ProductError(502, "upload.incomplete", "Attachment transfer was incomplete.")
             prompt = prompt or "Leggi gli allegati che ti ho inviato."
             prompt += "\n\nAllegati: " + ", ".join(a.name for a in body.attachments)
             upload_context = (
@@ -1059,7 +1056,7 @@ def create_app(
         """Adds a session to the PWA home or removes it (RF-41)."""
         require_human(who)
         if not db.set_session_pinned(session_id, body.pinned):
-            raise HTTPException(status_code=404, detail="Session not found")
+            raise ProductError(404, "session.not_found", "Session not found")
         notify_session(session_id)
         return db.get_session(session_id)
 
@@ -1070,6 +1067,10 @@ def create_app(
         as the user too and calls `local` directly.
         """
         def http_error(code, message=None):
+            if kind == "upload":
+                status_code, detail = errors.get(code or "", (502, "Attachment transfer failed."))
+                error_code = code if code in errors else "failed"
+                return ProductError(status_code, f"upload.{error_code}", detail)
             status_code, detail = errors.get(code or "", (502, message or "Errore del bridge."))
             return HTTPException(status_code=status_code, detail=detail)
 
@@ -1083,11 +1084,15 @@ def create_app(
         try:
             result = await bridge_jobs.run(kind, params)
         except BridgeOffline:
+            if kind == "upload":
+                raise ProductError(503, "bridge.offline", "The bridge is offline.") from None
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Il PC non risponde: il bridge non è attivo.",
             ) from None
         except BridgeTimeout:
+            if kind == "upload":
+                raise ProductError(504, "bridge.timeout", "The bridge did not respond in time.") from None
             raise HTTPException(
                 status_code=status.HTTP_504_GATEWAY_TIMEOUT,
                 detail="Il PC non ha risposto in tempo.",

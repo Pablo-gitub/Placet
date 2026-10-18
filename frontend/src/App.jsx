@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import LanguageSelect from "./i18n/LanguageSelect";
-import { apiErrorMessage } from "./i18n/errors";
+import { apiErrorDescriptor } from "./i18n/errors";
 import { needsReturnApproval } from "./decisions";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, CheckCircle, Home as HomeIcon, MessagesSquare, Radio, ShieldCheck } from "lucide-react";
@@ -198,16 +198,16 @@ export default function App() {
       });
       if (res.ok) {
         showFeedback(
-          body.return_decision ? t(body.approve ? "return.approved" : "return.rejected") : t(body.status === "APPROVED" ? "requests.sent" : "requests.rejected", { id: requestId })
+          { key: body.return_decision ? (body.approve ? "return.approved" : "return.rejected") : (body.status === "APPROVED" ? "requests.sent" : "requests.rejected"), params: { id: requestId } }
         );
         await fetchRequests();
       } else {
         const errData = await res.json().catch(() => ({}));
-        showFeedback(apiErrorMessage(errData, res.status, t), true);
+        showFeedback(apiErrorDescriptor(errData, res.status), true);
       }
     } catch (err) {
       console.error("Error deciding request:", err);
-      showFeedback(t("errors.decisionConnection"), true);
+      showFeedback({ key: "errors.decisionConnection" }, true);
     } finally {
       setSubmittingId(null);
     }
@@ -226,7 +226,7 @@ export default function App() {
       setSessions((prev) => upsert(prev, updated));
     } catch {
       setSessions((prev) => upsert(prev, session));
-      showFeedback("Non sono riuscito a salvare la scelta.", true);
+      showFeedback({ key: "errors.pinSave" }, true);
     }
   };
 
@@ -245,14 +245,14 @@ export default function App() {
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        showFeedback(typeof errData.detail === "string" ? errData.detail : `Messaggio non inviato (${res.status}): controlla testo e allegati.`, true);
+        showFeedback(apiErrorDescriptor(errData, res.status), true);
         return false;
       }
       const created = await res.json();
       setRequests((prev) => upsert(prev, created));
       return true;
     } catch {
-      showFeedback("Errore di connessione: messaggio non inviato.", true);
+      showFeedback({ key: "errors.messageConnection" }, true);
       return false;
     }
   };
@@ -380,7 +380,7 @@ export default function App() {
       {feedback && (
         <div data-testid="feedback-banner" className={`feedback-banner${feedback.isError ? " error" : ""}`}>
           {feedback.isError ? <AlertCircle size={16} /> : <CheckCircle size={16} />}
-          <span>{feedback.text}</span>
+          <span>{typeof feedback.text === "string" ? feedback.text : t(feedback.text.key, feedback.text.params)}</span>
         </div>
       )}
 

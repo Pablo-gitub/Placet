@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+import { formatNumber, formattingLocale } from "./i18n/formatters";
 import React, { useEffect, useRef, useState } from "react";
 import { providerOf, sessionName, sessionProject, sessionStatus } from "./sessionInfo";
 import { Paperclip, SendHorizontal, X } from "lucide-react";
@@ -7,6 +9,7 @@ const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
 
 function FilePreview({ file, onRemove, disabled }) {
+  const { t } = useTranslation();
   const image = useRef(null);
   useEffect(() => {
     if (!file.type.startsWith("image/") || !URL.createObjectURL) return;
@@ -16,8 +19,8 @@ function FilePreview({ file, onRemove, disabled }) {
   }, [file]);
   return <li className="composer-file">
     {file.type.startsWith("image/") && <img ref={image} alt="" />}
-    <span>{file.name}<small>{file.size < 1024 * 1024 ? `${Math.max(1, Math.ceil(file.size / 1024))} KB` : `${(file.size / 1024 / 1024).toFixed(1)} MB`}</small></span>
-    <button type="button" className="icon-button" aria-label={`Rimuovi ${file.name}`} disabled={disabled} onClick={onRemove}><X size={16} /></button>
+    <span>{file.name}<small>{file.size < 1024 * 1024 ? `${formatNumber(Math.max(1, Math.ceil(file.size / 1024)))} KB` : `${formatNumber(file.size / 1024 / 1024, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} MB`}</small></span>
+    <button type="button" className="icon-button" aria-label={t("composer.remove", { name: file.name })} disabled={disabled} onClick={onRemove}><X size={16} /></button>
   </li>;
 }
 
@@ -25,7 +28,7 @@ function encodeFile(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve({ name: file.name.slice(0, 200), data: String(reader.result).split(",")[1] });
-    reader.onerror = () => reject(new Error("Non riesco a leggere l’allegato. Selezionalo nuovamente."));
+    reader.onerror = () => reject(Object.assign(new Error("Unable to read the attachment"), { code: "composer.readError" }));
     reader.onabort = reader.onerror;
     reader.readAsDataURL(file);
   });
@@ -45,7 +48,8 @@ function savedMode() {
 }
 
 export default function Composer({ session, sessions = [], onSend, draft }) {
-  // "In coda" (end of the turn) or "Subito" (inside the running turn): the
+  const { t } = useTranslation();
+  // Queue (end of the turn) or Now (inside the running turn): the
   // last choice is the default on this device (RF-35).
   const [mode, setModeState] = useState(savedMode);
   const setMode = (value) => {
@@ -56,7 +60,7 @@ export default function Composer({ session, sessions = [], onSend, draft }) {
       // private mode: the choice lasts for this page
     }
   };
-  // A withdrawn message to correct (Modifica) starts the composer again with
+  // A withdrawn message to edit starts the composer again with
   // its text; its files must be picked again.
   const [text, setText] = useState(draft?.text || "");
   const input = useRef(null);
@@ -66,12 +70,12 @@ export default function Composer({ session, sessions = [], onSend, draft }) {
   const selectFiles = (event) => {
     const selected = [...files, ...Array.from(event.target.files || [])];
     event.target.value = "";
-    if (selected.length > 4) { setFileError("Puoi allegare al massimo 4 file."); return; }
+    if (selected.length > 4) { setFileError("composer.tooMany"); return; }
     if (selected.some((f) => !ALLOWED_TYPES.includes(f.type) && !((!f.type || f.type === "application/octet-stream") && /\.(pdf|png|jpe?g|webp)$/i.test(f.name)))) {
-      setFileError("Scegli immagini JPEG, PNG, WebP o PDF. Per una foto HEIC, esportala prima in JPEG."); return;
+      setFileError("composer.unsupported"); return;
     }
     if (selected.some((f) => f.size > MAX_FILE_BYTES) || selected.reduce((n, f) => n + f.size, 0) > MAX_TOTAL_BYTES) {
-      setFileError("Limite di 10 MB per file e 20 MB complessivi."); return;
+      setFileError("composer.sizeLimit"); return;
     }
     setFiles(selected); setFileError("");
   };
@@ -86,10 +90,10 @@ export default function Composer({ session, sessions = [], onSend, draft }) {
   };
   const candidates = sessions.filter((s) => s.id !== session?.id && !s.ended_at && !s.excluded)
     .filter((s) => !query?.text || `${providerOf(s).label} ${s.agent_id} ${s.cwd || ""} ${sessionName(s)} ${s.id}`
-      .toLocaleLowerCase().includes(query.text.trim().toLocaleLowerCase()));
+      .toLocaleLowerCase(formattingLocale()).includes(query.text.trim().toLocaleLowerCase(formattingLocale())));
   const activeMentions = mentions.filter((m) => text.includes(m.token));
   const choose = (target) => {
-    const token = `@${providerOf(target).label} · ${sessionProject(target) || "senza progetto"} · ${sessionName(target)} [${target.id.slice(0, 8)}]`;
+    const token = `@${providerOf(target).label} · ${sessionProject(target) || t("composer.noProjectToken")} · ${sessionName(target)} [${target.id.slice(0, 8)}]`;
     const next = text.slice(0, query.start) + token + " " + text.slice(query.end);
     const caret = query.start + token.length + 1;
     setText(next);
@@ -116,7 +120,7 @@ export default function Composer({ session, sessions = [], onSend, draft }) {
         setText(""); setMentions([]); setQuery(null); setFiles([]); setRefiles([]);
       }
     } catch (error) {
-      setFileError(error.message || "Trasferimento non riuscito: puoi riprovare.");
+      setFileError(error?.code === "composer.readError" ? error.code : "composer.transferError");
     } finally {
       setSending(false);
     }
@@ -124,83 +128,83 @@ export default function Composer({ session, sessions = [], onSend, draft }) {
 
   return (
     <div className="composer" data-testid="composer">
-      {closed && <p className="composer-note">La sessione è chiusa: non puoi più scriverle.</p>}
+      {closed && <p className="composer-note">{t("composer.closed")}</p>}
       {suspended && (
         <p className="composer-note" data-testid="composer-suspended">
           {session.provider === "claude-code"
-            ? "Claude ha sospeso la conversazione. Quando invii, Placet prova a riaprirla; il messaggio resta in attesa finché torna raggiungibile."
-            : "Codex ha sospeso la conversazione. Quando invii, Placet accoda il messaggio e prova a riaprirla nell’app."}
+            ? t("composer.suspendedClaude")
+            : t("composer.suspendedCodex")}
         </p>
       )}
       {refiles.length > 0 && (
         <p className="composer-note" data-testid="composer-refiles">
-          Allegati da scegliere di nuovo: {refiles.join(", ")}
+          {t("composer.refiles", { names: refiles.join(", ") })}
         </p>
       )}
       {unreachable && (
         <p className="composer-note" data-testid="composer-unreachable">
           {session.provider === "claude-code" && session.entrypoint === "claude-desktop"
-            ? "Quando invii, Placet prova a riaprire la conversazione in Claude. Se resta non raggiungibile, aprila nell’app: il messaggio rimane in attesa."
-            : "La sessione non è raggiungibile ora: il messaggio partirà quando torna attiva."}
+            ? t("composer.unreachableClaude")
+            : t("composer.unreachable")}
         </p>
       )}
       {busy && (
-        <div className="send-mode" role="radiogroup" aria-label="Quando consegnare" data-testid="send-mode">
-          <span className="composer-note">Sta lavorando:</span>
+        <div className="send-mode" role="radiogroup" aria-label={t("composer.when")} data-testid="send-mode">
+          <span className="composer-note">{t("composer.working")}</span>
           <button type="button" role="radio" aria-checked={mode !== "now" || !canSteer}
             className={mode !== "now" || !canSteer ? "active" : ""} data-testid="mode-queue"
             onClick={() => setMode("queue")}>
-            In coda
+            {t("composer.queue")}
           </button>
           <button type="button" role="radio" aria-checked={mode === "now" && canSteer} disabled={!canSteer}
             className={mode === "now" && canSteer ? "active" : ""} data-testid="mode-now"
-            title={canSteer ? "Entra nel turno in corso, dopo la prossima azione" : "Non ancora disponibile per Codex"}
+            title={canSteer ? t("composer.nowTitle") : t("composer.nowUnsupported")}
             onClick={() => setMode("now")}>
-            Subito
+            {t("composer.now")}
           </button>
           <span className="composer-note send-mode-hint">
             {mode === "now" && canSteer
-              ? "entra nel turno in corso, dopo la prossima azione."
-              : canSteer ? "arriva a fine turno." : "arriva a fine turno (Subito non ancora disponibile per Codex)."}
+              ? t("composer.nowHint")
+              : canSteer ? t("composer.queueHint") : t("composer.queueCodexHint")}
           </span>
         </div>
       )}
       {activeMentions.length > 0 && (
-        <p className="composer-note" role="status">Riferimenti: {activeMentions.length === 1 ? "una sessione" : `${activeMentions.length} sessioni`}. Scrivi alla sessione corrente: le richieste agli altri agenti passeranno da Placet.</p>
+        <p className="composer-note" role="status">{t("composer.references", { count: activeMentions.length })}</p>
       )}
       {query && !closed && (
-        <div className="mention-picker" id="session-mentions" role="listbox" aria-label="Sessioni da menzionare">
-          {candidates.length === 0 && <p className="composer-note">Nessuna sessione trovata.</p>}
+        <div className="mention-picker" id="session-mentions" role="listbox" aria-label={t("composer.mentionLabel")}>
+          {candidates.length === 0 && <p className="composer-note">{t("composer.noMatches")}</p>}
           {candidates.map((target, i) => (
             <button type="button" role="option" aria-selected={i === highlight} id={`mention-${i}`}
               key={target.id} onMouseDown={(e) => e.preventDefault()} onClick={() => choose(target)}>
               <strong>{providerOf(target).label} · {sessionName(target)}</strong>
-              <span>{target.cwd || "Senza progetto"} · {sessionStatus(target).label} · {target.id.slice(0, 8)}</span>
+              <span>{target.cwd || t("composer.noProject")} · {sessionStatus(target).label} · {target.id.slice(0, 8)}</span>
             </button>
           ))}
         </div>
       )}
-      {fileError && <p className="composer-note" role="alert">{fileError}</p>}
+      {fileError && <p className="composer-note" role="alert">{t(fileError)}</p>}
       {files.length > 0 && <>
-        <ul className="composer-files" aria-label="Allegati da inviare">
+        <ul className="composer-files" aria-label={t("composer.attachments")}>
           {files.map((file, i) => <FilePreview key={`${file.name}-${i}`} file={file} disabled={sending}
             onRemove={() => { setFiles((prev) => prev.filter((_, n) => n !== i)); setFileError(""); }} />)}
         </ul>
-        <p className="composer-note" role="status">{sending ? "Trasferimento al PC e invio in corso…" : "Gli allegati saranno salvati sul PC prima dell’invio. Max 4 file, 10 MB ciascuno, 20 MB totali."}</p>
+        <p className="composer-note" role="status">{sending ? t("composer.transferring") : t("composer.attachmentHint")}</p>
       </>}
       <input ref={fileInput} type="file" hidden multiple accept={ALLOWED_TYPES.join(",")}
-        aria-label="Scegli allegati" disabled={closed || sending} onChange={selectFiles} />
+        aria-label={t("composer.chooseFiles")} disabled={closed || sending} onChange={selectFiles} />
       <div className="composer-row">
-        <button type="button" className="icon-button attach-button" aria-label="Allega foto o PDF"
+        <button type="button" className="icon-button attach-button" aria-label={t("composer.attach")}
           disabled={closed || sending} onClick={() => fileInput.current?.click()}><Paperclip size={18} /></button>
         <textarea autoFocus={!!draft}
           ref={input}
-          aria-label="Messaggio per la sessione"
+          aria-label={t("composer.message")}
           aria-controls={query ? "session-mentions" : undefined}
           aria-expanded={!!query}
           aria-activedescendant={query && candidates[highlight] ? `mention-${highlight}` : undefined}
           data-testid="composer-input"
-          placeholder={closed ? "Sessione chiusa" : "Scrivi alla sessione… @ per citarne un’altra"}
+          placeholder={t(closed ? "composer.closedPlaceholder" : "composer.placeholder")}
           value={text}
           rows={1}
           disabled={closed || sending}
@@ -224,7 +228,7 @@ export default function Composer({ session, sessions = [], onSend, draft }) {
         <button
           type="button"
           className="icon-button send-button"
-          aria-label="Invia"
+          aria-label={t("composer.send")}
           data-testid="composer-send"
           disabled={closed || sending || (!text.trim() && !files.length)}
           onClick={send}

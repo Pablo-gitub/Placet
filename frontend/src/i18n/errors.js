@@ -1,5 +1,5 @@
 /** Machine codes are translated; arbitrary server details are never rendered. */
-export function apiErrorMessage(body, status, t) {
+export function apiErrorDescriptor(body, status) {
   const codes = {
     "decision.not_pending": "errors.decisionNotPending",
     "decision.prompt_edit_not_allowed": "errors.promptEditNotAllowed",
@@ -14,6 +14,23 @@ export function apiErrorMessage(body, status, t) {
     "decision.now_target": "errors.nowTarget",
     "session.unavailable": "errors.sessionUnavailable",
     "session.excluded": "errors.sessionExcluded",
+    "session.not_found": "errors.notFound",
+    "session.closed": "errors.sessionClosed",
+    "session.unknown_agent": "errors.unknownAgent",
+    "mention.ambiguous": "errors.mentionAmbiguous",
+    "mention.missing": "errors.mentionMissing",
+    "mention.unavailable": "errors.mentionUnavailable",
+    "mention.self": "errors.mentionSelf",
+    "message.unavailable": "errors.messageUnavailable",
+    "upload.invalid": "errors.uploadInvalid",
+    "upload.too_large": "errors.uploadTooLarge",
+    "upload.unsupported": "errors.uploadUnsupported",
+    "upload.forbidden": "errors.uploadForbidden",
+    "upload.excluded": "errors.sessionExcluded",
+    "upload.incomplete": "errors.uploadIncomplete",
+    "upload.failed": "errors.uploadFailed",
+    "bridge.offline": "errors.bridgeOffline",
+    "bridge.timeout": "errors.bridgeTimeout",
     "return.empty": "errors.returnEmpty",
     "return.unavailable": "errors.returnUnavailable",
   };
@@ -22,10 +39,15 @@ export function apiErrorMessage(body, status, t) {
     // Only this documented parameter is interpolated; never pass arbitrary
     // server options such as lng/defaultValue into the translation engine.
     const id = Number.isSafeInteger(body?.params?.id) ? body.params.id : "?";
-    return t(key, { id });
+    return { key, params: { id } };
   }
-  if (status === 401 || status === 403) return t("errors.unauthorized");
-  if (status === 404) return t("errors.notFound");
-  if (status === 422) return t("errors.validation");
-  return t("errors.operation", { status });
+  if (status === 401 || status === 403) return { key: "errors.unauthorized" };
+  if (status === 404) return { key: "errors.notFound" };
+  if (status === 422) return { key: "errors.validation" };
+  return { key: "errors.operation", params: { status } };
+}
+
+export function apiErrorMessage(body, status, t) {
+  const { key, params } = apiErrorDescriptor(body, status);
+  return t(key, params);
 }

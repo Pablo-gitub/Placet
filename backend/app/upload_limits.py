@@ -19,7 +19,7 @@ class MessageBodyLimit:
                 return
             size += len(message.get("body", b""))
             if size > self.limit:
-                response = JSONResponse({"detail": "Messaggio troppo grande: massimo 20 MB complessivi di allegati."}, status_code=413)
+                response = JSONResponse({"code": "upload.too_large", "params": {}, "detail": "Message too large: attachments may total at most 20 MB."}, status_code=413)
                 return await response(scope, receive, send)
             chunks.append(message)
             if not message.get("more_body", False):
