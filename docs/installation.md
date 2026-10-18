@@ -158,6 +158,16 @@ A notification announces the request and opens the PWA. It has no Approve/Reject
 4. In the ntfy app on iOS add the server `https://server.tail1234.ts.net:8443` with your user and subscribe to the topic.
 5. Set `PLACET_NTFY_URL=https://server.tail1234.ts.net:8443`, `PLACET_NTFY_TOPIC`, `PLACET_NTFY_TOKEN` and `PLACET_BASE_URL`.
 
+### 7. Notifications that open the PWA (Web Push)
+
+On iPhone, tapping an ntfy notification opens Safari, not the installed PWA: iOS does not let another app open a Home Screen web app. Placet can therefore notify the PWA itself through Web Push (iOS 16.4 or later, Android, desktop browsers); tapping such a notification opens Placet on the request.
+
+1. Add Placet to the Home Screen (Share → Add to Home Screen) and open it from there.
+2. Tap the bell in the app bar, then **Enable notifications** and allow them.
+3. **Send a test** from the same dialog.
+
+Nothing to configure on the server: the VAPID keys are generated on first use and kept in Placet's database. `PLACET_BASE_URL` is used as the contact Apple requires. Messages pass through the browser vendor's push service (Apple, Google, Mozilla), encrypted end to end, and carry only a short title, never the text of a request. The backend sends only to those push services. ntfy keeps working alongside, for devices without Web Push.
+
 ---
 
 ## Agent configuration

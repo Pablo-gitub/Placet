@@ -443,5 +443,22 @@
     "maxHops": "Passaggi automatici consecutivi",
     "maxPerHour": "Prompt automatici all'ora per relazione",
     "save": "Salva"
+  },
+  "push": {
+    "title": "Notifiche su questo dispositivo",
+    "install": "Per ricevere notifiche che aprono Placet, aggiungi Placet alla schermata Home (Condividi → Aggiungi alla schermata Home) e aprilo da lì. Su iPhone serve iOS 16.4 o successivo.",
+    "blocked": "Le notifiche di Placet sono bloccate. Consentile nelle impostazioni di sistema (Notifiche → Placet), poi torna qui.",
+    "off": "Placet può avvisare questo dispositivo di domande, prompt da approvare e turni finiti. Toccando una notifica, Placet si apre su quella richiesta.",
+    "on": "Le notifiche sono attive su questo dispositivo.",
+    "enable": "Attiva notifiche",
+    "disable": "Disattiva su questo dispositivo",
+    "test": "Invia una prova",
+    "enabled": "Fatto: questo dispositivo riceverà le notifiche di Placet.",
+    "disabled": "Notifiche disattivate su questo dispositivo.",
+    "denied": "Permesso non concesso: le notifiche restano spente.",
+    "testSent": "Prova inviata: dovrebbe arrivare in pochi secondi.",
+    "testNone": "Nessun dispositivo è iscritto.",
+    "error": "Qualcosa non ha funzionato. Controlla la connessione e riprova.",
+    "privacy": "Le notifiche passano dal servizio push del produttore del browser (Apple su iPhone), cifrate; portano solo un titolo breve, mai il testo delle richieste."
   }
 }

@@ -61,6 +61,7 @@ from backend.app.models import (
 from backend.app import envelopes
 from backend.app.upload_limits import MessageBodyLimit
 from backend.app.bridge_jobs import BridgeJobs, BridgeOffline, BridgeTimeout
+from backend.app.webpush import WebPush, allowed_endpoint
 from backend.app.notifier import NtfyConfig, send_ntfy_alert, send_ntfy_notification, send_ntfy_turn_end, session_label
 
 logger = logging.getLogger(__name__)
@@ -169,6 +170,16 @@ class AutomationLimits(BaseModel):
     max_per_hour: Optional[int] = Field(None, ge=1, le=200)
 
 
+class PushKeys(BaseModel):
+    p256dh: str = Field(..., min_length=1, max_length=200)
+    auth: str = Field(..., min_length=1, max_length=100)
+
+
+class PushSubscription(BaseModel):
+    endpoint: str = Field(..., min_length=1, max_length=1000)
+    keys: Optional[PushKeys] = None
+
+
 class RelationRule(BaseModel):
     rule: str = Field("", max_length=4000)
 
@@ -225,6 +236,7 @@ def create_app(
     cors_origins: Optional[List[str]] = None,
     bridge_token: Optional[str] = None,
     transcripts_local: Optional[bool] = None,
+    web_push: Optional[WebPush] = None,
 ) -> FastAPI:
     # Waiters registered by long-polling calls, keyed by request id.
     request_waiters: Dict[int, Set[asyncio.Event]] = {}
@@ -271,6 +283,17 @@ def create_app(
 
     background_alerts: Set[asyncio.Task] = set()
 
+    def web_push_later(title: str, body: str, url: str, tag: str, urgency: str = "normal") -> None:
+        """Web Push to the installed PWA: the tap opens it on `url` (same origin)."""
+        if web_push is None:
+            return
+        try:
+            task = asyncio.get_running_loop().create_task(web_push.send(title, body, url, tag, urgency))
+        except RuntimeError:
+            return
+        background_alerts.add(task)
+        task.add_done_callback(background_alerts.discard)
+
     def alert(req_id: int, problem: str):
         req = db.get_request(req_id)
         if req is None:
@@ -281,6 +304,9 @@ def create_app(
             return  # no running loop (sync caller): the PWA still shows it
         background_alerts.add(task)
         task.add_done_callback(background_alerts.discard)
+        lang = db.get_background_language()
+        web_push_later(f"Placet #{req.id}: {text(f'alerts.{problem}', lang)}",
+                       f"{req.sender_id} -> {req.recipient_id}", f"/#request-{req.id}", f"alert-{req.id}", "high")
 
     def execution_timeout(agent_id: str) -> float:
         spec = config.get_agent(agent_id)
@@ -389,6 +415,9 @@ def create_app(
     if ntfy is None:
         ntfy = NtfyConfig.from_env()
 
+    if web_push is None:
+        web_push = WebPush(db, subject=os.environ.get("PLACET_BASE_URL", "").rstrip("/"))
+
     if allowed_users is None:
         allowed_users = load_allowed_users()
 
@@ -473,6 +502,9 @@ def create_app(
             session.id, session_label(session.provider, session.title, session.cwd), last_message, replace(ntfy, language=db.get_background_language())))
         background_alerts.add(task)
         task.add_done_callback(background_alerts.discard)
+        lang = db.get_background_language()
+        web_push_later(text("notify.turn_title", lang, label=session_label(session.provider, session.title, session.cwd)),
+                       text("notify.turn_body", lang), f"/#/sessione/{session.id}", f"turn-{session.id}", "low")
 
     def check_target_session(session_id: str, agent_id: str) -> None:
         session = db.get_session(session_id)
@@ -667,6 +699,14 @@ def create_app(
                 cfg=replace(ntfy, language=db.get_background_language()),
                 origin=origin_of(created),
             )
+            lang = db.get_background_language()
+            sender = origin_of(created) or created.sender_id
+            web_push_later(
+                text("notify.question", lang, sender=sender) if created.recipient_id == "human"
+                else text("notify.review", lang, sender=sender, recipient=created.recipient_id),
+                text("notify.public", lang, sender=created.sender_id),
+                f"/#request-{created.id}", f"request-{created.id}",
+                "high" if created.priority in (Priority.HIGH, Priority.URGENT) else "normal")
         notify_change(created.id)
 
         extra: Dict[str, object] = {}
@@ -1380,6 +1420,36 @@ def create_app(
         if outcome == "in_use":
             raise ProductError(409, "relation_type.in_use", "Relations of this type exist.")
         return Response(status_code=204)
+
+    # --- Web Push to the installed PWA ---------------------------------------------
+
+    @app.get("/api/push/key")
+    async def push_key(who: Principal = Depends(principal)):
+        require_human(who)
+        return {"key": await asyncio.to_thread(web_push.public_key)}
+
+    @app.post("/api/push/subscription", status_code=204)
+    async def push_subscribe(body: PushSubscription, request: Request, who: Principal = Depends(principal)):
+        require_human(who)
+        if body.keys is None or not allowed_endpoint(body.endpoint):
+            raise ProductError(422, "push.invalid", "Not a browser push subscription.")
+        db.add_push_subscription(body.endpoint, body.keys.p256dh, body.keys.auth,
+                                 request.headers.get("user-agent"))
+        return Response(status_code=204)
+
+    @app.delete("/api/push/subscription", status_code=204)
+    async def push_unsubscribe(body: PushSubscription, who: Principal = Depends(principal)):
+        require_human(who)
+        db.delete_push_subscription(body.endpoint)
+        return Response(status_code=204)
+
+    @app.post("/api/push/test")
+    async def push_test(who: Principal = Depends(principal)):
+        require_human(who)
+        lang = db.get_background_language()
+        sent = await web_push.send(text("notify.test_title", lang), text("notify.test_body", lang),
+                                   "/", "test", "normal")
+        return {"sent": sent}
 
     # --- Automation limits and Stop all (RFC-14) --------------------------------
 

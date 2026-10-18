@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import LanguageSelect from "./i18n/LanguageSelect";
 import BackgroundLanguage from "./i18n/BackgroundLanguage";
+import PushControl from "./PushControl";
 import { apiErrorDescriptor } from "./i18n/errors";
 import { needsReturnApproval } from "./decisions";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -399,6 +400,7 @@ export default function App() {
             <>
               <LanguageSelect />
               <BackgroundLanguage />
+              <PushControl />
             </>
           )}
           <div className="live-indicator" data-testid="live-indicator" title={t(connected ? "app.live" : "app.reconnecting")}>

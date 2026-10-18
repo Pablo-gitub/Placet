@@ -443,5 +443,22 @@
     "maxHops": "Consecutive automatic hops",
     "maxPerHour": "Automatic prompts per hour per relation",
     "save": "Save"
+  },
+  "push": {
+    "title": "Notifications on this device",
+    "install": "To receive notifications that open Placet, add Placet to the Home Screen (Share → Add to Home Screen) and open it from there. On iPhone this needs iOS 16.4 or later.",
+    "blocked": "Notifications are blocked for Placet. Allow them in the system settings (Notifications → Placet), then come back here.",
+    "off": "Placet can notify this device about questions, prompts to approve and finished turns. Tapping a notification opens Placet on that request.",
+    "on": "Notifications are active on this device.",
+    "enable": "Enable notifications",
+    "disable": "Disable on this device",
+    "test": "Send a test",
+    "enabled": "Done: this device will receive Placet's notifications.",
+    "disabled": "Notifications disabled on this device.",
+    "denied": "Permission not granted: notifications stay off.",
+    "testSent": "Test sent: it should arrive in a few seconds.",
+    "testNone": "No device is subscribed.",
+    "error": "Something went wrong. Check your connection and try again.",
+    "privacy": "Notifications travel through the browser vendor's push service (Apple on iPhone), encrypted; they carry only a short title, never the text of the requests."
   }
 }

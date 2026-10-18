@@ -125,6 +125,33 @@ class Database:
             conn.execute("INSERT INTO app_settings (key, value) VALUES ('background_language', ?)"
                          " ON CONFLICT(key) DO UPDATE SET value = excluded.value", (language,))
 
+    def get_setting(self, key: str) -> Optional[str]:
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT value FROM app_settings WHERE key = ?", (key,)).fetchone()
+        return row[0] if row else None
+
+    def set_setting(self, key: str, value: str) -> None:
+        with self._get_connection() as conn:
+            conn.execute("INSERT INTO app_settings (key, value) VALUES (?, ?)"
+                         " ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
+
+    def add_push_subscription(self, endpoint: str, p256dh: str, auth: str, user_agent: Optional[str]) -> None:
+        with self._get_connection() as conn:
+            conn.execute(
+                "INSERT INTO push_subscriptions (endpoint, p256dh, auth, user_agent, created_at)"
+                " VALUES (?, ?, ?, ?, ?) ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh,"
+                " auth = excluded.auth, user_agent = excluded.user_agent",
+                (endpoint, p256dh, auth, (user_agent or "")[:200], datetime.now(timezone.utc).isoformat()))
+
+    def delete_push_subscription(self, endpoint: str) -> bool:
+        with self._get_connection() as conn:
+            return conn.execute("DELETE FROM push_subscriptions WHERE endpoint = ?", (endpoint,)).rowcount > 0
+
+    def list_push_subscriptions(self) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            rows = conn.execute("SELECT endpoint, p256dh, auth FROM push_subscriptions").fetchall()
+        return [{"endpoint": r["endpoint"], "keys": {"p256dh": r["p256dh"], "auth": r["auth"]}} for r in rows]
+
     def get_relation_rule(self) -> str:
         """The general rule agents read before each automatic relation (RFC-06)."""
         with self._get_connection() as conn:
@@ -371,6 +398,11 @@ class Database:
                     "UPDATE sessions SET suspended_at = ended_at, ended_at = NULL"
                     " WHERE provider = 'codex' AND ended_at IS NOT NULL;"
                 )
+            # Web Push subscriptions of the PWA, one per device/browser.
+            cursor.execute(
+                "CREATE TABLE IF NOT EXISTS push_subscriptions (endpoint TEXT PRIMARY KEY,"
+                " p256dh TEXT NOT NULL, auth TEXT NOT NULL, user_agent TEXT, created_at TEXT NOT NULL)"
+            )
             # RF-60: usage windows per provider, as last reported by the bridge (JSON).
             cursor.execute(
                 "CREATE TABLE IF NOT EXISTS provider_usage"
