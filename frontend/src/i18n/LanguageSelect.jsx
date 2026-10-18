@@ -10,10 +10,10 @@ export default function LanguageSelect() {
     setPreference(value);
     await setLanguagePreference(value);
   };
-  return <select className="language-select" aria-label={t("language.label")}
+  return <select className="language-select" aria-label={t("language.label")} title={t("language.label")}
     value={preference} onChange={change}>
-    <option value="auto">{t("language.auto")}</option>
-    <option value="en" title="English">EN</option>
-    <option value="it" title="Italiano">IT</option>
+    <option value="auto" title={t("language.auto")}>🌐</option>
+    <option value="en" title="English">🇬🇧</option>
+    <option value="it" title="Italiano">🇮🇹</option>
   </select>;
 }

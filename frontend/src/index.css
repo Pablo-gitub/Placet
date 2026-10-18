@@ -1195,6 +1195,14 @@ body.chat-open { overflow: hidden; }
   padding: 0.25rem;
   max-width: 6.5rem;
   min-width: 0;
+  /* Only a flag: no arrow, square like the icon buttons. */
+  appearance: none;
+  -webkit-appearance: none;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0.3rem 0.4rem;
+  text-align: center;
+  cursor: pointer;
 }
 
 /* Phones: brand, language and status stay on one line. */
