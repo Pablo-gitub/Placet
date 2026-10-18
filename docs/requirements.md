@@ -185,8 +185,8 @@ The interface supports English/Italian, English fallback and a local browser pre
 | 1 | **Laboratory**, completed October 15–16; [results](experiments/provider-integration.md). |
 | 2b | **Reliability:** local spool (RF-28), three request aspects/one request per session (RF-29), exclusions throughout (RF-45). |
 | 2 | **Phone sessions:** chat (RF-30…33), writes/wakeup (RF-34/35), Home/questions/pinned sessions (RF-40…43), provider bridge adapters (RF-24…27). |
-| 3 | **Nodes, relations and types** (RFC-02…10), `send(target, type_id, prompt)`, removal of `context` (RF-05b). |
-| 4 | **Context, effort, compact and usage** (RF-60…63). |
+| 3 | **Nodes, relations and types** (RFC-02…10), `send(target, type_id, prompt)`, removal of `context` (RF-05b). Completed October 18, 2026, with change of recipient (RFC-07b), the general rule (RFC-08b) and loop limits (RFC-14); RFC-09 (projects) and RFC-10 (retiring `AGENTS.md` rules) remain. |
+| 4 | **Context, effort, compact and usage** (RF-60…63). RF-60/61 completed; RF-62 open (not possible through `codex queue`). |
 | 5 | **Session creation and temporary sessions** (RF-50…53). |
 | 6 | **Project graph/editor** (RF-44), `/` skill picker (RF-36). |
 

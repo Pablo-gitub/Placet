@@ -10,7 +10,7 @@ Items marked **planned** are agreed designs, not implemented capabilities. Histo
 
 ```mermaid
 flowchart TB
-    phone["Phone: ntfy questions/turn-end notifications; PWA sessions/chat/projects"]
+    phone["Phone: Web Push / ntfy notifications; PWA sessions/chat/relations"]
     backend["Backend: FastAPI, system user placet; SQLite, routing, long-polling, SSE"]
     mcp["MCP server: stdio per client session"]
     hooks["Provider hooks: turn events, Claude waiter"]
@@ -36,7 +36,7 @@ Three flows:
 
 - Python 3.11+, FastAPI, SQLite WAL, Pydantic, Uvicorn.
 - **Two listeners in one process** (`serve.py`): TCP `127.0.0.1:8000` for agents/bridge; Unix socket `/run/placet/human.sock` in production for the PWA through Tailscale Serve. If either listener stops, the process stops.
-- Requests/lifecycle, hook-driven session registry, per-session inboxes, routing, SSE (`request_update`, `session_update`), ntfy notifications and a 30-second expiration/redelivery sweeper.
+- Requests/lifecycle, hook-driven session registry, per-session inboxes, routing, SSE (`request_update`, `session_update`, `usage_update`, `automation_update`), notifications and a 30-second expiration/redelivery sweeper. Notifications go through Web Push to the installed PWA (VAPID keys generated on first use and kept in the database; only browser vendors' push services are contacted; payloads carry a short title, never request text) and through ntfy when configured.
 - Relays bridge-read conversation pages (§5).
 - **Planned:** nodes, projects and relations/types. Provider usage is now reported by the bridge and shown in the PWA.
 

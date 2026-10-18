@@ -35,9 +35,10 @@ Placet sits between your agents and your phone. Every session registers itself; 
   </tr>
 </table>
 
-- **One inbox for all your agents.** Questions from Claude, Codex and Antigravity arrive as push notifications (via [ntfy](https://ntfy.sh)) and as cards in a PWA you add to your home screen.
+- **One inbox for all your agents.** Questions from Claude, Codex and Antigravity arrive as cards in a PWA you add to your home screen, with push notifications that open it on the request (Web Push) and, optionally, through a self-hosted [ntfy](https://ntfy.sh).
 - **Read and write to any session.** The conversation as you see it on the PC: Markdown, highlighted code, tool calls collapsed into one line. Write a message and it wakes the session, as if you had typed it at the desk.
-- **An approval bus between agents.** `placet_send_to_agent` lets an agent ask another one for a review, a test run or a second opinion. You approve, edit or reject; the reply returns after your separate approval, unless you explicitly allowed automatic return for that request.
+- **An approval bus between agents.** `placet_send_to_agent` lets an agent ask another one for a review, a test run or a second opinion. You approve, edit, reject or send it to another session; the reply returns after your separate approval, or you forward it elsewhere.
+- **Relations and automation.** Name sessions as stable nodes and connect them with typed relations, each `manual` or `automatic`. Agents see the policy, read your general rule before every automatic send, and stop at loop limits; **Stop all** pauses everything.
 - **Attachments both ways.** Images you pasted in the desktop apps, pictures an agent generated, PDFs it shared with `placet_share_file`, and photos or files you attach from the phone.
 - **Reliable by design.** Hooks write to a local queue and never block a turn. Each request tracks *delivery*, *execution* and *reply* separately; an uncertain delivery is never re-sent behind your back. One request at a time per session, and time alone never frees the queue.
 - **Adaptive.** Two columns on the desktop, a bottom bar on the phone, a theme per provider.
@@ -67,7 +68,7 @@ flowchart LR
 - **Backend** — runs as its own system user, keeps requests and the audit log, and is reachable from your phone only through your [Tailscale](https://tailscale.com) network. It never stores your conversations.
 - **Bridge** — runs as you: it reads conversations on demand, wakes sessions, forwards hook events from the local queue and checks which projects are excluded.
 - **Hooks** — every Claude Code, Codex and Antigravity session registers itself and reports when a turn starts and ends. Sessions stay quiet until a Placet message arrives; a `.placet-off` file keeps a project out entirely.
-- **MCP tools** — `placet_ask_human`, `placet_send_to_agent`, `placet_reply`, `placet_share_file` and friends, available to every agent.
+- **MCP tools** — `placet_ask_human`, `placet_send_to_agent`, `placet_list_relations`, `placet_reply`, `placet_share_file` and friends, available to every agent.
 
 | Provider | Registers with | Woken by |
 |---|---|---|
@@ -86,7 +87,7 @@ More in the [architecture](docs/architecture.md).
 
 ## Quick start
 
-Placet targets **Linux** with **Python 3.11+**, **Node.js 22.13+**, [Tailscale](https://tailscale.com) and, for push notifications, an [ntfy](https://ntfy.sh) server.
+Placet targets **Linux** with **Python 3.11+**, **Node.js 22.13+** and [Tailscale](https://tailscale.com). Push notifications work through Web Push with no extra server; a self-hosted [ntfy](https://ntfy.sh) is optional.
 
 ```bash
 git clone <this repository> placet && cd placet
@@ -108,7 +109,9 @@ Placet is **alpha**, used every day by its author on one machine. The interface 
 - ✅ Reliability: local event queue, delivery / execution / reply, one request at a time
 - ✅ Attachments: viewing, `placet_share_file`, uploads from the phone; `@` mentions
 - 🚧 "Right now" messages inside a running turn, distinct notifications, waiter health
-- 🗺️ Typed relations between sessions with per-relation policy (manual / automatic), loop limits, a graph editor
+- ✅ Nodes, typed relations with manual / automatic policy, a general rule for automatic relations, loop limits and Stop all; change of recipient on approval
+- ✅ Web Push to the installed PWA (a tap opens the request)
+- 🗺️ Projects and a graph editor for relations; a local model provider (OpenJarvis/Ollama)
 - ✅ Provider usage windows and session model/context/effort where provider data is available
 - 🗺️ Creating sessions from the phone; remote compact/effort controls
 
