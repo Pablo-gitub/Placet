@@ -11,11 +11,11 @@ Changes that touch approvals, delivery, attachments or the bridge's file access 
 
 ## Setup
 
-Requirements: Linux, Python 3.11+, Node.js 20.19+ or 22.12+.
+Requirements: Linux, Python 3.11+, Node.js 22.13+.
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-cd frontend && npm install && cd ..
+npm --prefix frontend ci
 ```
 
 For a full local run, see [docs/installation.md](docs/installation.md). `run_all.py` starts backend and bridge in one process; it is meant for development only.
@@ -24,10 +24,13 @@ For a full local run, see [docs/installation.md](docs/installation.md). `run_all
 
 ```bash
 .venv/bin/python -m pytest -q          # backend, bridge, hooks
-cd frontend && npx vitest run          # PWA
-cd frontend && npm run lint            # PWA lint
-cd frontend && npm run build           # production build
+python3 scripts/check_docs.py          # local documentation links/anchors
+npm --prefix frontend test             # PWA
+npm --prefix frontend run lint         # PWA lint
+npm --prefix frontend run build        # production build
 ```
+
+GitHub Actions runs the documentation check, both test suites, lint and build on pushes and pull requests. It does not deploy.
 
 Please add tests with behavior changes. For provider integrations, also describe what you verified with the real app and on which version: automated tests cannot prove that an undocumented provider interface still behaves the same.
 

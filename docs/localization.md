@@ -111,3 +111,7 @@ Continue with one user workflow at a time. Complete catalog coverage before clai
 Hook installation (including dry-run, idempotent reinstall and removal), tmux calibration and idle-check reasons use English diagnostic text. Upload validation and private-cache errors also use English diagnostics; their stable error codes continue to select localized PWA messages. The generated fallback filename is `attachment`; filenames supplied by users remain unchanged.
 
 These changes do not alter provider hook configuration, approval requirements, idle detection, transfer limits or filesystem checks. The historical audit reason `progetto escluso` remains unchanged for compatibility, as do bilingual transcript parser patterns and user-authored content. Diagnostic output is intended for developers and is not a localized product interface.
+
+## Migration closure
+
+The [closure review](reviews/2026-10-18-localization-closure.md) records the combined diff review, remaining limits and bilingual narrow-viewport checks. `python3 scripts/check_docs.py` validates local documentation links/anchors. GitHub Actions runs that check, Python/backend catalog tests, frontend/catalog tests, lint and build. English registry prose preserves the parsed routing configuration. Provider model IDs/effort values remain original data; their surrounding controls and numbers use the active UI locale.

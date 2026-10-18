@@ -37,7 +37,7 @@ Placet sits between your agents and your phone. Every session registers itself; 
 
 - **One inbox for all your agents.** Questions from Claude, Codex and Antigravity arrive as push notifications (via [ntfy](https://ntfy.sh)) and as cards in a PWA you add to your home screen.
 - **Read and write to any session.** The conversation as you see it on the PC: Markdown, highlighted code, tool calls collapsed into one line. Write a message and it wakes the session, as if you had typed it at the desk.
-- **An approval bus between agents.** `placet_send_to_agent` lets an agent ask another one for a review, a test run or a second opinion. You approve, edit or reject; the answer goes back to the session that asked.
+- **An approval bus between agents.** `placet_send_to_agent` lets an agent ask another one for a review, a test run or a second opinion. You approve, edit or reject; the reply returns after your separate approval, unless you explicitly allowed automatic return for that request.
 - **Attachments both ways.** Images you pasted in the desktop apps, pictures an agent generated, PDFs it shared with `placet_share_file`, and photos or files you attach from the phone.
 - **Reliable by design.** Hooks write to a local queue and never block a turn. Each request tracks *delivery*, *execution* and *reply* separately; an uncertain delivery is never re-sent behind your back. One request at a time per session, and time alone never frees the queue.
 - **Adaptive.** Two columns on the desktop, a bottom bar on the phone, a theme per provider.
@@ -86,7 +86,7 @@ More in the [architecture](docs/architecture.md).
 
 ## Quick start
 
-Placet targets **Linux** with **Python 3.11+**, **Node.js 20.19+ or 22.12+**, [Tailscale](https://tailscale.com) and, for push notifications, an [ntfy](https://ntfy.sh) server.
+Placet targets **Linux** with **Python 3.11+**, **Node.js 22.13+**, [Tailscale](https://tailscale.com) and, for push notifications, an [ntfy](https://ntfy.sh) server.
 
 ```bash
 git clone <this repository> placet && cd placet
@@ -101,7 +101,7 @@ The complete guide — environment variables, notifications, MCP setup, the tmux
 
 ## Status
 
-Placet is **alpha**, used every day by its author on one machine. English and Italian interface localization is rolling out, covering approvals, history, session selection, chat controls, delivery feedback and image/PDF viewers. Notifications and generated Placet messages have a separate shared language setting. See [localization scope and contributor rules](docs/localization.md).
+Placet is **alpha**, used every day by its author on one machine. The interface supports English and Italian, covering approvals, history, session selection, chat controls, delivery feedback and image/PDF viewers. Notifications and generated Placet messages have a separate shared language setting. See [localization scope and contributor rules](docs/localization.md).
 
 - ✅ Questions and approvals from the phone, push notifications, audit log
 - ✅ Sessions on the phone: read, write, wake (Claude Code, Codex, Antigravity)
@@ -109,7 +109,8 @@ Placet is **alpha**, used every day by its author on one machine. English and It
 - ✅ Attachments: viewing, `placet_share_file`, uploads from the phone; `@` mentions
 - 🚧 "Right now" messages inside a running turn, distinct notifications, waiter health
 - 🗺️ Typed relations between sessions with per-relation policy (manual / automatic), loop limits, a graph editor
-- 🗺️ Usage, context and effort per session; creating sessions from the phone
+- ✅ Provider usage windows and session model/context/effort where provider data is available
+- 🗺️ Creating sessions from the phone; remote compact/effort controls
 
 Documentation: [overview](docs/README.md) · [requirements](docs/requirements.md) · [architecture](docs/architecture.md) · [experiments](docs/experiments/provider-integration.md) · [contributing](CONTRIBUTING.md).
 
@@ -118,7 +119,7 @@ Documentation: [overview](docs/README.md) · [requirements](docs/requirements.md
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m pytest -q                    # backend, bridge, hooks
-cd frontend && npm install && npx vitest run     # PWA
+npm --prefix frontend ci && npm --prefix frontend test  # PWA
 .venv/bin/python run_all.py                      # backend + bridge in one process (development only)
 ```
 

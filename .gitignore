@@ -37,6 +37,19 @@ htmlcov/
 *.db
 *.sqlite
 *.sqlite3
+*.db-*
+*.sqlite-*
+*.sqlite3-*
+
+# Local secrets and tool configuration
+.env
+.env.*
+!.env.example
+.codex/
+.claude/
+.agents/
+.aws/
+.mcp.json
 
 # Node / Frontend
 frontend/node_modules/

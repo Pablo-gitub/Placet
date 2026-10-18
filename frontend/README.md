@@ -1,16 +1,24 @@
-# React + Vite
+# Placet PWA
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React/Vite frontend for human approvals, conversations, session selection, attachments and usage. Production builds are served by the FastAPI backend.
 
-Currently, two official plugins are available:
+Run from the repository root (Node.js 22.13+ is required by the frontend dependencies):
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```bash
+npm --prefix frontend ci
+npm --prefix frontend test
+npm --prefix frontend run lint
+npm --prefix frontend run build
+```
 
-## React Compiler
+For interactive development, run the backend first, then:
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```bash
+PLACET_DEV_LOGIN=you@example.com npm --prefix frontend run dev
+```
 
-## Expanding the Oxlint configuration
+The login must be in the backend's `PLACET_ALLOWED_USERS`. Vite listens on loopback and proxies `/api` to the human Unix socket; set `PLACET_HUMAN_SOCKET` if needed. This development identity proxy must not be exposed to an untrusted network. See [installation](../docs/installation.md) for production isolation.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+Product text belongs in the English/Italian [catalogs](src/i18n/locales/). English is the fallback. Translate controls, not prompts, replies, filenames, model IDs or code. The device-local interface setting and shared background-message language are independent; see [localization](../docs/localization.md).
+
+Tests cover both languages, safe API errors and retention of drafts during language changes. Browser checks do not replace physical iPhone/PWA verification. Crossing the 900px layout breakpoint can still recreate approval forms; see the documented limitation.

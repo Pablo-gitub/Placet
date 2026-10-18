@@ -45,7 +45,7 @@ The full design is in the [architecture](architecture.md).
 ### 1. Prerequisites
 - Linux (macOS and Windows are planned, not supported yet)
 - Python 3.11+
-- Node.js 20.19+ or 22.12+ (required by Vite to build the PWA)
+- Node.js 22.13+ (required by the frontend dependencies)
 - `tmux`, only for the optional tmux channel
 
 ### 2. Installation
@@ -231,7 +231,7 @@ The script acts only in sessions started with `PLACET_HOOK_AGENT` and outside pr
 - **`hook`**: no instruction in the message; the acknowledgement comes only from the hook. Use it once hooks are verified to work.
 - **`none`**: a successful send counts as received (previous behavior).
 
-Without an acknowledgement within 90 seconds the bridge retries, up to 3 attempts. Then the request becomes `DELIVERY_FAILED` and you are notified. If the agent acknowledges but does not reply within `execution_timeout_seconds` (default 30 minutes), the request becomes `STALLED` and you are notified too. In both cases the sender receives the outcome in its session.
+For tmux delivery, missing acknowledgement within 90 seconds permits up to 3 attempts, then `DELIVERY_FAILED`. Waiter/app delivery without confirmation becomes uncertain and is not automatically resent; the user chooses Retry or Cancel. If the agent acknowledges but does not reply within `execution_timeout_seconds` (default 30 minutes), the request becomes `STALLED` and you are notified too. A timeout warns; it does not free the session queue. Technical outcomes can return without response content; collaboration reply text requires separate human approval unless automatic return was explicitly allowed for that request.
 
 The bridge does not write into a tmux session if:
 - the agent has declared a turn in progress;
@@ -283,21 +283,21 @@ Add Placet to your client's MCP configuration (e.g. `claude_desktop_config.json`
    - Asks the human for a decision or a choice on the phone.
    - Without `options` it is a confirmation question (approve/reject) with an optional note. With `options` it is a single choice, or a multiple one with `multiple=True`. The free-text "Other" option is always available and must not be passed among the options. The server waits at least 60 seconds for questions to the human.
 2. `placet_send_to_agent(target_agent, prompt, context, timeout_seconds)`
-   - Sends a task to another registered session or agent (e.g. `codex`).
+   - Sends a task to another registered session or agent (e.g. `codex`). Specify `target_session` with its full ID when addressing a particular conversation; `prompt_file` can supply a Markdown prompt.
 3. `placet_ack(request_id)`
    - Acknowledges a request injected into the session (with `ack_mode: mcp`).
 4. `placet_reply(request_id, response)`
    - Returns the reply once the task is done.
 5. `placet_share_file(path, title)`
-   - Shows the user a PDF or an image from the session's project on the phone.
+   - Shows an allowed PDF or image on the phone. Files must satisfy the home, hidden-folder, ownership, type, size and exclusion checks in the architecture.
 6. `placet_list_agents()`
    - Lists the active agents, their roles and routing rules.
 7. `placet_check_status(request_id)`
    - Checks the state of a request still pending after the timeout.
 
-`timeout_seconds` is only how long the tool waits (5–600 s). The request stays valid until it expires (`expires_at`, default 24 hours), so you can decide even after the tool has returned `PENDING`.
+`timeout_seconds` is only how long the tool waits (5–600 s for agent requests; at least 60 s for human questions). The request stays valid until it expires (`expires_at`, default 24 hours), so you can decide even after the tool has returned `PENDING`.
 
-If the tool's wait ends before the outcome, the agent ends its turn. When the outcome arrives (your decision, another agent's reply, a rejection or an expiry), it is delivered to the sending session through its channel, in a message starting with `[Placet]`. Each outcome is delivered only once, and outcomes older than 6 hours are ignored.
+If the tool's wait ends before the outcome, the agent ends its turn. When the outcome arrives (your decision, an authorized collaboration reply, a rejection or an expiry), it is delivered to the sending session through its channel, in a message starting with `[Placet]`. Each outcome is delivered only once, and outcomes older than 6 hours are ignored.
 
 ---
 
@@ -305,6 +305,6 @@ If the tool's wait ends before the outcome, the agent ends its turn. When the ou
 
 ```bash
 .venv/bin/python -m pytest -q                    # backend, bridge, hooks
-cd frontend && npx vitest run                    # PWA
+npm --prefix frontend test                      # PWA
 ```
 The suites cover configuration and `AGENTS.md` parsing, the SQLite database and state transitions, the REST API, SSE and notifications, the bridge and its provider channels, the hooks, the MCP tools and the PWA.

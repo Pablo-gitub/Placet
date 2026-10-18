@@ -33,3 +33,5 @@ These describe observations at a point in time. Where they differ from the requi
 ## Reviews
 
 - [Public repository readiness](reviews/2026-10-18-public-repository-readiness.md), October 18, 2026.
+
+- [Localization closure review](reviews/2026-10-18-localization-closure.md), October 18, 2026: combined review, verification and retained limitations.

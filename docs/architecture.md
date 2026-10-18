@@ -38,7 +38,7 @@ Three flows:
 - **Two listeners in one process** (`serve.py`): TCP `127.0.0.1:8000` for agents/bridge; Unix socket `/run/placet/human.sock` in production for the PWA through Tailscale Serve. If either listener stops, the process stops.
 - Requests/lifecycle, hook-driven session registry, per-session inboxes, routing, SSE (`request_update`, `session_update`), ntfy notifications and a 30-second expiration/redelivery sweeper.
 - Relays bridge-read conversation pages (§5).
-- **Planned:** nodes, projects, relations/types, per-provider usage display.
+- **Planned:** nodes, projects and relations/types. Provider usage is now reported by the bridge and shown in the PWA.
 
 ### 2.2 MCP server (`mcp_server`)
 
@@ -86,7 +86,7 @@ Sources observed in experiments do not imply all corresponding product controls 
 - **History** (`History.jsx`): per-request timeline and three-aspect state.
 - **Composer** (`Composer.jsx`): `POST /api/sessions/{id}/messages`; pending/delivering/failed state remains visible. Mentions, phone uploads and supported Queue/Now selection are implemented.
 - **Localization:** English/Italian with English fallback and device-local preference; separate shared background-message language. [Full contract](localization.md).
-- **Planned:** usage bar and project graph/editor. No service worker is installed; [cache behavior](experiments/2026-10-18-session-integration.md#pwa-updates-and-cache).
+- **Usage bar:** provider windows, with account-wide exhausted windows holding delivery until reset. **Planned:** project graph/editor. No service worker is installed; [cache behavior](experiments/2026-10-18-session-integration.md#pwa-updates-and-caching).
 
 ## 3. Delivery and wakeup
 
@@ -360,3 +360,11 @@ Direct human decisions and technical outcomes without response content (rejectio
 Future Commands screen exposes only administrator-enabled human-reserved actions, each authorized with a passkey. Ordinary autonomous commits/tests/builds gain no new approval. Chat proposals open the same protected confirmation; shell text is not authorization. Catalog/executor/confirmation are separate from application deployment; backend cannot independently authorize privileged execution.
 
 [Plan, trust boundaries, phases and acceptance checks](plans/reserved-commands.md): isolated deployment first, independent passkey confirmation second, PWA controls and chat proposals afterward. Not installed or enabled by this documentation work.
+
+## 9. Usage and session metadata
+
+The bridge reports normalized 5-hour/weekly windows to `POST /api/bridge/usage`; the human-only `GET /api/usage` and `usage_update` SSE feed the Home usage bar. Claude uses its undocumented OAuth usage endpoint every five minutes, sending Claude Code's existing token only to Anthropic and never refreshing it. Codex reads the latest rollout limits; Antigravity queries its private quota summary, grouped by model family. Local readers run approximately once per minute. Missing data is unavailable, not zero usage.
+
+Account-wide 100% windows with future timezone-aware reset timestamps hold provider delivery until reset. Per-model-group limits do not hold an entire provider. These are observations, not a guarantee that the provider will accept the next request.
+
+Newest transcript pages carry optional model/effort/context metadata for Claude and Codex; Antigravity model comes from hook `modelName`. Unreadable optional metadata does not prevent chat reads. Claude context-window size is not inferred; unavailable values stay absent. Session changes clear previous metadata. Provider model IDs and effort values remain provider data, while surrounding labels and numbers follow the interface locale.
