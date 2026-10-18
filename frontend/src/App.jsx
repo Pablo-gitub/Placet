@@ -258,12 +258,12 @@ export default function App() {
   };
 
   /**
-   * Riprova / Annulla on a message whose delivery is uncertain or still waiting
+   * Retry / Cancel on a message whose delivery is uncertain or still waiting
    * (RF-29); "finished" / "queue_next" move a session's queue past a delivered
    * request whose end Placet cannot see (RF-29b).
    */
   const deliveryAction = async (requestId, action) => {
-    if (action === "retry" && !window.confirm("Il messaggio potrebbe essere già arrivato: inviarlo di nuovo?")) {
+    if (action === "retry" && !window.confirm(t("deliveryUi.retryConfirm"))) {
       return false;
     }
     const release = action === "finished" || action === "queue_next";
@@ -277,21 +277,21 @@ export default function App() {
         : await fetch(`/api/requests/${requestId}/delivery/${action}`, { method: "POST" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        showFeedback(data.detail || `Operazione non riuscita (${res.status})`, true);
+        showFeedback(apiErrorDescriptor(data, res.status), true);
         return false;
       }
       setRequests((prev) => upsert(prev, data));
       showFeedback(
         {
-          retry: "Nuovo tentativo di consegna.",
-          cancel: "Messaggio annullato.",
-          finished: "Segnata come terminata: la sessione riceve il prossimo messaggio.",
-          queue_next: "Il prossimo messaggio parte senza aspettare.",
+          retry: { key: "deliveryUi.retried" },
+          cancel: { key: "deliveryUi.cancelled" },
+          finished: { key: "deliveryUi.markedFinished" },
+          queue_next: { key: "deliveryUi.queuedNext" },
         }[action]
       );
       return true;
     } catch {
-      showFeedback("Errore di connessione.", true);
+      showFeedback({ key: "errors.connection" }, true);
       return false;
     }
   };

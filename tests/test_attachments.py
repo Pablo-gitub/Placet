@@ -91,8 +91,9 @@ def test_antigravity_uploaded_and_generated_images(tmp_path):
     ])
     page = read_transcript("antigravity", SID, home=tmp_path)
     rows = ids(page)
+    assert page["messages"][1]["label_key"] == "generated_image"
     assert rows[0][:2] == ("user", "guarda") and len(rows[0][2]) == 1
-    assert rows[1][:2] == ("media", "Immagine generata") and len(rows[1][2]) == 1
+    assert rows[1][:2] == ("media", "Generated image") and len(rows[1][2]) == 1
     assert rows[2][2] == []  # a path written in a message stays text
     assert str(brain) not in json.dumps(page)
     assert read_attachment("antigravity", SID, rows[0][2][0], home=tmp_path) == ("image/png", png())
@@ -281,7 +282,8 @@ def test_each_provider_records_the_share_call(tmp_path):
                                  "input": {"path": path, "title": "Rapporto"}}]}}])
     page = read_transcript("claude-code", SID, home=home)
     media = [m for m in page["messages"] if m["role"] == "media"][0]
-    assert media["text"] == "File condiviso" and media["attachments"][0]["name"] == "Rapporto"
+    assert media["label_key"] == "shared_file"
+    assert media["text"] == "Shared file" and media["attachments"][0]["name"] == "Rapporto"
     assert media["attachments"][0]["kind"] == "pdf" and path not in json.dumps(page)
     assert read_attachment("claude-code", SID, media["attachments"][0]["id"], home=home)[0] == "application/pdf"
     # Codex

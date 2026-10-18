@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Download, X } from "lucide-react";
@@ -12,6 +13,7 @@ const MAX_PAGE_WIDTH = 900;
  * only when a PDF is opened, and never runs the PDF's scripts.
  */
 export default function PdfViewer({ url, name, onClose }) {
+  const { t } = useTranslation();
   const pages = useRef(null);
   const [state, setState] = useState({ status: "loading", count: 0 });
 
@@ -63,20 +65,20 @@ export default function PdfViewer({ url, name, onClose }) {
       <div className="attachment-viewer-bar">
         <span>
           {name}
-          {state.count > 1 && ` · ${state.count} pagine`}
+          {state.count > 1 && ` · ${t("viewer.pages", { count: state.count })}`}
         </span>
-        <a href={url} download={name} className="icon-button" aria-label="Scarica">
+        <a href={url} download={name} className="icon-button" aria-label={t("viewer.download")}>
           <Download size={18} />
         </a>
-        <button type="button" className="icon-button" aria-label="Chiudi" onClick={onClose}>
+        <button type="button" className="icon-button" aria-label={t("viewer.close")} onClick={onClose}>
           <X size={18} />
         </button>
       </div>
       <div className="pdf-pages" ref={pages}>
-        {state.status === "loading" && <p className="chat-status">Carico il PDF…</p>}
+        {state.status === "loading" && <p className="chat-status">{t("viewer.pdfLoading")}</p>}
         {state.status === "error" && (
           <p className="chat-status" data-testid="pdf-error">
-            Il PDF non si apre: il PC non risponde o il file non è più disponibile.
+            {t("viewer.pdfError")}
           </p>
         )}
       </div>

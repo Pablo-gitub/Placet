@@ -1,3 +1,4 @@
+import { apiErrorDescriptor } from "./i18n/errors";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { mergeEntries } from "./chatEntries";
 
@@ -8,7 +9,7 @@ async function fetchPage(sessionId, params) {
   const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/transcript?${query}`);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail || `Errore ${res.status}`);
+    throw Object.assign(new Error("Transcript request failed"), { display: apiErrorDescriptor(body, res.status) });
   }
   return res.json();
 }
@@ -46,7 +47,7 @@ export function useTranscript(sessionId, refreshKey) {
       })
       .catch((e) => {
         if (cancelled) return;
-        setError(e.message);
+        setError(e.display || { key: "errors.transcriptConnection" });
         setStatus("error");
       });
     return () => {
@@ -79,10 +80,11 @@ export function useTranscript(sessionId, refreshKey) {
       const page = await fetchPage(sessionId, { before: String(before) });
       cursors.current.before = page.before;
       setEntries((prev) => mergeEntries(page.messages, prev));
+      setError(null);
       setHasOlder(page.before !== null && page.before !== undefined);
       return true;
     } catch (e) {
-      setError(e.message);
+      setError(e.display || { key: "errors.transcriptConnection" });
       return false;
     } finally {
       busy.current = false;

@@ -96,7 +96,7 @@ describe("SessionView", () => {
   it("says when the PC does not answer, and retries", async () => {
     let fail = true;
     mockFetch([[transcriptOf("s1"), () =>
-      fail ? json({ detail: "Il PC non risponde: il bridge non è attivo." }, 503) : json(latest)]]);
+      fail ? json({ code: "bridge.offline", detail: "The bridge is offline." }, 503) : json(latest)]]);
     renderView();
     await waitFor(() => expect(screen.getByTestId("chat-error")).toHaveTextContent("Il PC non risponde"));
     fail = false;

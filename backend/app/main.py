@@ -103,7 +103,7 @@ class FoldersReport(BaseModel):
     excluded: List[str] = Field(default_factory=list, max_length=1000)
 
 
-EXCLUDED_DETAIL = "Questo progetto è escluso da Placet (file .placet-off)."
+EXCLUDED_DETAIL = "This project is excluded from Placet (.placet-off)."
 
 
 class QueueRelease(BaseModel):
@@ -124,17 +124,17 @@ class BridgeJobResult(BaseModel):
 
 # Conversation pages (RF-30): what the bridge's error codes mean for the PWA.
 TRANSCRIPT_ERRORS = {
-    "not_found": (404, "La conversazione non si trova su questo PC."),
-    "unsupported": (422, "Lettura della conversazione non supportata per questo provider."),
-    "invalid": (400, "Sessione non valida."),
-    "excluded": (409, "Questo progetto è escluso da Placet (file .placet-off)."),
+    "not_found": (404, "The conversation was not found on this PC."),
+    "unsupported": (422, "Reading conversations is not supported for this provider."),
+    "invalid": (400, "Invalid session."),
+    "excluded": (409, "This project is excluded from Placet (.placet-off)."),
 }
 ATTACHMENT_ERRORS = {
     **TRANSCRIPT_ERRORS,
-    "not_found": (404, "Il file non è più disponibile sul PC."),
-    "forbidden": (403, "Questo file non si può mostrare."),
-    "unsupported": (415, "Formato non supportato: si mostrano immagini JPEG, PNG e WebP e file PDF."),
-    "too_large": (413, "Immagine troppo grande."),
+    "not_found": (404, "The file is no longer available on the PC."),
+    "forbidden": (403, "This file cannot be displayed."),
+    "unsupported": (415, "Unsupported format: use JPEG, PNG, WebP images or PDF files."),
+    "too_large": (413, "The attachment is too large."),
 }
 ATTACHMENT_ID_PATTERN = r"^\d+:\d+:\d+$"
 TRANSCRIPT_MAX_LIMIT = 200
@@ -697,8 +697,7 @@ def create_app(
         require_human(who)
         get_or_404(request_id)
         if not db.retry_delivery(request_id, actor=who.actor):
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT,
-                                detail="La consegna non è più incerta.")
+            raise ProductError(409, "delivery.retry_unavailable", "Delivery is no longer uncertain.")
         notify_change(request_id)
         return get_or_404(request_id)
 
@@ -708,8 +707,7 @@ def create_app(
         require_human(who)
         get_or_404(request_id)
         if not db.cancel_delivery(request_id, actor=who.actor):
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT,
-                                detail="Il messaggio non si può più annullare.")
+            raise ProductError(409, "delivery.cancel_unavailable", "This message can no longer be cancelled.")
         notify_change(request_id)
         return get_or_404(request_id)
 
@@ -722,8 +720,7 @@ def create_app(
         require_human(who)
         get_or_404(request_id)
         if not db.release_queue(request_id, actor=who.actor, reason=payload.reason):
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT,
-                                detail="La richiesta non sta trattenendo la sessione.")
+            raise ProductError(409, "delivery.release_unavailable", "This request is no longer holding the session queue.")
         notify_change(request_id)
         return get_or_404(request_id)
 
@@ -1066,13 +1063,11 @@ def create_app(
         conversation files). In single-process development the backend runs
         as the user too and calls `local` directly.
         """
-        def http_error(code, message=None):
-            if kind == "upload":
-                status_code, detail = errors.get(code or "", (502, "Attachment transfer failed."))
-                error_code = code if code in errors else "failed"
-                return ProductError(status_code, f"upload.{error_code}", detail)
-            status_code, detail = errors.get(code or "", (502, message or "Errore del bridge."))
-            return HTTPException(status_code=status_code, detail=detail)
+        def http_error(code):
+            # Unknown diagnostics from the bridge are not product UI text.
+            status_code, detail = errors.get(code or "", (502, "Bridge operation failed."))
+            error_code = code if code in errors else "failed"
+            return ProductError(status_code, f"{kind}.{error_code}", detail)
 
         if transcripts_local:
             from bridge.attachments import AttachmentError
@@ -1084,21 +1079,11 @@ def create_app(
         try:
             result = await bridge_jobs.run(kind, params)
         except BridgeOffline:
-            if kind == "upload":
-                raise ProductError(503, "bridge.offline", "The bridge is offline.") from None
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Il PC non risponde: il bridge non è attivo.",
-            ) from None
+            raise ProductError(503, "bridge.offline", "The bridge is offline.") from None
         except BridgeTimeout:
-            if kind == "upload":
-                raise ProductError(504, "bridge.timeout", "The bridge did not respond in time.") from None
-            raise HTTPException(
-                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-                detail="Il PC non ha risposto in tempo.",
-            ) from None
+            raise ProductError(504, "bridge.timeout", "The bridge did not respond in time.") from None
         if not result.get("ok"):
-            raise http_error(result.get("error"), result.get("message"))
+            raise http_error(result.get("error"))
         return result.get("page") or {}
 
     @app.get("/api/sessions/{session_id}/transcript")
@@ -1117,9 +1102,9 @@ def create_app(
         require_human(who)
         session = db.get_session(session_id)
         if session is None:
-            raise HTTPException(status_code=404, detail="Session not found")
+            raise ProductError(404, "session.not_found", "Session not found")
         if session.excluded:
-            raise HTTPException(status_code=409, detail=EXCLUDED_DETAIL)
+            raise ProductError(409, "session.excluded", EXCLUDED_DETAIL)
         params = {
             "session_id": session.id, "provider": session.provider, "agent_id": session.agent_id,
             "before": before, "after": after, "limit": limit,
@@ -1145,9 +1130,9 @@ def create_app(
         require_human(who)
         session = db.get_session(session_id)
         if session is None:
-            raise HTTPException(status_code=404, detail="Session not found")
+            raise ProductError(404, "session.not_found", "Session not found")
         if session.excluded:
-            raise HTTPException(status_code=409, detail=EXCLUDED_DETAIL)
+            raise ProductError(409, "session.excluded", EXCLUDED_DETAIL)
         params = {"session_id": session.id, "provider": session.provider, "agent_id": session.agent_id,
                   "attachment_id": attachment_id}
 
@@ -1159,7 +1144,7 @@ def create_app(
         result = await bridge_call("attachment", {**params, "cwd": session.cwd}, local, ATTACHMENT_ERRORS)
         mime = result.get("mime")
         if mime not in ("image/jpeg", "image/png", "image/webp", "application/pdf"):
-            raise HTTPException(status_code=415, detail=ATTACHMENT_ERRORS["unsupported"][1])
+            raise ProductError(415, "attachment.unsupported", ATTACHMENT_ERRORS["unsupported"][1])
         headers = {
             # Not kept by the browser or the service worker: the PC is the source.
             "Cache-Control": "no-store",

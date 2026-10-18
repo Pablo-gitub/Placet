@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Download, FileText, ImageOff, X } from "lucide-react";
@@ -10,15 +11,16 @@ const attachmentUrl = (sessionId, id) =>
 
 /** A PDF the agent shared: opened in Placet's own viewer, or downloaded. */
 function FileCard({ sessionId, attachment, onOpen }) {
+  const { t } = useTranslation();
   const url = attachmentUrl(sessionId, attachment.id);
   return (
     <div className="attachment-file" data-testid={`attachment-${attachment.id}`}>
-      <button type="button" className="attachment-file-open" aria-label={`Apri ${attachment.name}`}
+      <button type="button" className="attachment-file-open" aria-label={t("viewer.open", { name: attachment.name })}
         data-testid={`attachment-open-${attachment.id}`} onClick={() => onOpen(attachment)}>
         <FileText size={22} />
         <span className="attachment-file-name">{attachment.name}</span>
       </button>
-      <a href={url} download={attachment.name} className="icon-button" aria-label="Scarica">
+      <a href={url} download={attachment.name} className="icon-button" aria-label={t("viewer.download")}>
         <Download size={16} />
       </a>
     </div>
@@ -27,13 +29,14 @@ function FileCard({ sessionId, attachment, onOpen }) {
 
 /** One thumbnail: read from the PC on demand; says so when it cannot be. */
 function Thumb({ sessionId, attachment, onOpen }) {
+  const { t } = useTranslation();
   const [failed, setFailed] = useState(false);
   const url = attachmentUrl(sessionId, attachment.id);
   if (failed) {
     return (
       <div className="attachment-missing" data-testid={`attachment-missing-${attachment.id}`}>
         <ImageOff size={18} />
-        <span>Immagine non disponibile: PC non raggiungibile o file non più presente.</span>
+        <span>{t("viewer.imageMissing")}</span>
       </div>
     );
   }
@@ -43,7 +46,7 @@ function Thumb({ sessionId, attachment, onOpen }) {
       className="attachment-thumb"
       data-testid={`attachment-${attachment.id}`}
       onClick={() => onOpen(attachment)}
-      aria-label={`Apri ${attachment.name}`}
+      aria-label={t("viewer.open", { name: attachment.name })}
     >
       <img src={url} alt={attachment.name} loading="lazy" onError={() => setFailed(true)} />
     </button>
@@ -51,6 +54,7 @@ function Thumb({ sessionId, attachment, onOpen }) {
 }
 
 function Viewer({ sessionId, attachment, onClose }) {
+  const { t } = useTranslation();
   const url = attachmentUrl(sessionId, attachment.id);
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && onClose();
@@ -62,10 +66,10 @@ function Viewer({ sessionId, attachment, onClose }) {
       onClick={onClose}>
       <div className="attachment-viewer-bar" onClick={(e) => e.stopPropagation()}>
         <span>{attachment.name}</span>
-        <a href={url} download={attachment.name} className="icon-button" aria-label="Scarica" data-testid="attachment-download">
+        <a href={url} download={attachment.name} className="icon-button" aria-label={t("viewer.download")} data-testid="attachment-download">
           <Download size={18} />
         </a>
-        <button type="button" className="icon-button" aria-label="Chiudi" onClick={onClose}>
+        <button type="button" className="icon-button" aria-label={t("viewer.close")} onClick={onClose}>
           <X size={18} />
         </button>
       </div>

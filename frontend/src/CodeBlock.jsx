@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { useState } from "react";
 import { Check, Copy } from "lucide-react";
 import hljs from "highlight.js/lib/core";
@@ -41,6 +42,7 @@ function languageOf(className) {
  * highlight.js escapes the source, so its output is safe to insert.
  */
 export default function CodeBlock({ className, children }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const source = String(children ?? "").replace(/\n$/, "");
   const language = languageOf(className);
@@ -60,10 +62,10 @@ export default function CodeBlock({ className, children }) {
   return (
     <div className="code-block" data-testid="code-block">
       <div className="code-block-bar">
-        <span>{language || "testo"}</span>
-        <button type="button" onClick={copy} aria-label="Copia il codice" data-testid="code-copy">
+        <span>{language || t("viewer.codeText")}</span>
+        <button type="button" onClick={copy} aria-label={t("viewer.copyCode")} data-testid="code-copy">
           {copied ? <Check size={13} /> : <Copy size={13} />}
-          {copied ? "Copiato" : "Copia"}
+          {t(copied ? "viewer.copied" : "viewer.copy")}
         </button>
       </div>
       <pre>

@@ -1,3 +1,4 @@
+import i18n from "./i18n";
 import { formatDateTime } from "./i18n/formatters";
 /**
  * Helpers for the entries of a session's conversation, as returned by
@@ -13,27 +14,27 @@ export function actionLabel(entry) {
     case "command":
       return `$ ${detail}`;
     case "read":
-      return `Legge ${basename(detail)}`;
+      return i18n.t("actions.read", { name: basename(detail) });
     case "edit":
-      return `Modifica ${basename(detail)}`;
+      return i18n.t("actions.edit", { name: basename(detail) });
     case "write":
-      return `Scrive ${basename(detail)}`;
+      return i18n.t("actions.write", { name: basename(detail) });
     case "search":
-      return `Cerca ${detail}`;
+      return i18n.t("actions.search", { detail });
     case "web":
-      return `Web: ${detail}`;
+      return i18n.t("actions.web", { detail });
     case "mcp":
       return detail ? `${entry.tool} (${detail})` : entry.tool;
     case "skill":
-      return `Skill ${detail}`;
+      return i18n.t("actions.skill", { detail });
     case "agent":
-      return `Agente: ${detail}`;
+      return i18n.t("actions.agent", { detail });
     case "tools":
-      return "Carica strumenti";
+      return i18n.t("actions.tools");
     case "plan":
-      return "Aggiorna il piano";
+      return i18n.t("actions.plan");
     default:
-      return detail ? `${entry.tool}: ${detail}` : entry.tool || "Azione";
+      return detail ? `${entry.tool}: ${detail}` : entry.tool || i18n.t("actions.fallback");
   }
 }
 

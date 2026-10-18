@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { needsReturnApproval } from "./decisions";
 import React, { useLayoutEffect, useRef, useState } from "react";
 import Attachments from "./Attachments";
@@ -44,6 +45,7 @@ const FOLLOW_PX = 120;
 const LONG_PLACET_CHARS = 400;
 
 function ActionLine({ entry }) {
+  useTranslation();
   const Icon = ACTION_ICONS[entry.kind] || Wrench;
   return (
     <li className="action-line">
@@ -54,6 +56,7 @@ function ActionLine({ entry }) {
 }
 
 function ActionGroup({ entries }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   if (entries.length <= 2) {
     return (
@@ -68,7 +71,7 @@ function ActionGroup({ entries }) {
     <div className="chat-actions" data-testid="chat-actions">
       <button type="button" className="actions-toggle" onClick={() => setOpen((v) => !v)}>
         {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-        {entries.length} azioni
+        {t("chat.actions", { count: entries.length })}
         {!open && <span className="actions-last"> · {actionLabel(entries[entries.length - 1])}</span>}
       </button>
       {open && (
@@ -83,6 +86,7 @@ function ActionGroup({ entries }) {
 }
 
 function PlacetMessage({ entry }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const long = entry.text.length > LONG_PLACET_CHARS;
   return (
@@ -91,7 +95,7 @@ function PlacetMessage({ entry }) {
       <div className={`placet-text${long && !open ? " clamped" : ""}`}>{entry.text}</div>
       {long && (
         <button type="button" className="link-button" onClick={() => setOpen((v) => !v)}>
-          {open ? "Mostra meno" : "Mostra tutto"}
+          {t(open ? "chat.showLess" : "chat.showAll")}
         </button>
       )}
     </div>
@@ -99,6 +103,7 @@ function PlacetMessage({ entry }) {
 }
 
 function ChatEntry({ entry, sessionId }) {
+  const { t } = useTranslation();
   const images = <Attachments sessionId={sessionId} items={entry.attachments} />;
   switch (entry.role) {
     case "user":
@@ -108,7 +113,7 @@ function ChatEntry({ entry, sessionId }) {
           {images}
           <time>
             {timeOf(entry.at)}
-            {entry.via === "placet" && " · dal telefono"}
+            {entry.via === "placet" && t("chat.phone")}
           </time>
         </div>
       );
@@ -126,7 +131,7 @@ function ChatEntry({ entry, sessionId }) {
       // An image an agent's tool produced (e.g. Antigravity's generate_image).
       return (
         <div className="msg msg-media" data-testid="chat-media">
-          <span className="media-label">{entry.text}</span>
+          <span className="media-label">{entry.label_key === "shared_file" ? t("chat.sharedFile") : entry.label_key === "generated_image" ? t("chat.generatedImage") : entry.text}</span>
           {images}
           <time>{timeOf(entry.at)}</time>
         </div>
@@ -140,7 +145,7 @@ function ChatEntry({ entry, sessionId }) {
     case "compact":
       return (
         <div className="chat-divider" data-testid="chat-compact">
-          Conversazione compattata
+          {t("chat.compacted")}
         </div>
       );
     case "notice":
@@ -157,18 +162,19 @@ function ChatEntry({ entry, sessionId }) {
 /** A session's conversation with its open questions at the bottom (RF-30, RF-33). */
 // The user's messages not yet in the conversation: waiting, or failed.
 const OUTGOING_STATES = {
-  APPROVED: "In attesa che la sessione sia libera",
-  NOW: "Subito: entra dopo la prossima azione",
-  DELIVERING: "In consegna…",
-  DELIVERY_FAILED: "Non consegnato",
-  EXECUTING: "Consegnato: il turno non è ancora iniziato",
-  EXPIRED: "Non consegnato: scaduto",
+  APPROVED: "deliveryUi.waiting",
+  NOW: "deliveryUi.now",
+  DELIVERING: "deliveryUi.delivering",
+  DELIVERY_FAILED: "deliveryUi.failed",
+  EXECUTING: "deliveryUi.accepted",
+  EXPIRED: "deliveryUi.expired",
 };
 
 // Delivered, but its turn not seen yet: still shown as the user's message.
 const notStarted = (req) => req.status !== "EXECUTING" || req.execution === "unobserved";
 
 function Outgoing({ req, session, onDelivery, onEdit }) {
+  const { t } = useTranslation();
   const uncertain = isUncertain(req);
   const failed = req.status === "DELIVERY_FAILED" || req.status === "EXPIRED";
   return (
@@ -179,31 +185,31 @@ function Outgoing({ req, session, onDelivery, onEdit }) {
       <div className="bubble">{req.prompt}</div>
       <time>
         {uncertain
-          ? "Consegna incerta: forse è già arrivato, ma non c'è conferma"
+          ? t("deliveryUi.uncertain")
           : req.delivery_mode === "now" && ["APPROVED", "DELIVERING"].includes(req.status)
-            ? OUTGOING_STATES.NOW
+            ? t(OUTGOING_STATES.NOW)
             : req.status === "APPROVED" && session?.suspended_at
               ? session.provider === "claude-code"
-                ? "In attesa: Placet prova a riaprire la conversazione in Claude"
-                : "In attesa dell’accodamento e della riapertura in Codex"
+                ? t("deliveryUi.suspendedClaude")
+                : t("deliveryUi.suspendedCodex")
               : req.status === "EXECUTING" && session?.provider === "codex"
-                ? "Accodato in Codex: esecuzione non ancora vista, non si può più ritirare"
-                : OUTGOING_STATES[req.status]}
+                ? t("deliveryUi.queuedCodex")
+                : t(OUTGOING_STATES[req.status])}
       </time>
       {onDelivery && (uncertain || req.status === "APPROVED") && (
         <div className="outgoing-actions">
           {uncertain && (
             <button type="button" data-testid={`retry-${req.id}`} onClick={() => onDelivery(req.id, "retry")}>
-              Riprova
+              {t("deliveryUi.retry")}
             </button>
           )}
           {req.status === "APPROVED" && onEdit && (
             <button type="button" data-testid={`edit-${req.id}`} onClick={() => onEdit(req)}>
-              Modifica
+              {t("deliveryUi.edit")}
             </button>
           )}
           <button type="button" data-testid={`cancel-${req.id}`} onClick={() => onDelivery(req.id, "cancel")}>
-            Annulla
+            {t("deliveryUi.cancel")}
           </button>
         </div>
       )}
@@ -212,8 +218,9 @@ function Outgoing({ req, session, onDelivery, onEdit }) {
 }
 
 function QueueHold({ req, waiting, onDelivery }) {
+  const { t } = useTranslation();
   const cancel = () => {
-    if (window.confirm("L'agente potrebbe continuare a lavorarci: Placet smette solo di aspettarlo. Annullare?")) {
+    if (window.confirm(t("deliveryUi.cancelConfirm"))) {
       onDelivery(req.id, "cancel");
     }
   };
@@ -221,22 +228,22 @@ function QueueHold({ req, waiting, onDelivery }) {
     <div className="queue-hold" data-testid={`queue-hold-${req.id}`}>
       <p>
         {req.execution === "started"
-          ? "Il turno è iniziato ma Placet non ne vede la fine."
-          : "Consegnato. Placet non riesce a verificare l'esecuzione."}{" "}
-        {waiting > 0 ? "I messaggi successivi restano in attesa." : "I prossimi messaggi aspetteranno."}
+          ? t("deliveryUi.startedUnseen")
+          : t("deliveryUi.acceptedUnseen")}{" "}
+        {waiting > 0 ? t("deliveryUi.waitingNext") : t("deliveryUi.willWait")}
       </p>
       <div className="outgoing-actions">
         <button type="button" data-testid={`finished-${req.id}`} onClick={() => onDelivery(req.id, "finished")}>
-          Confermo che è terminata
+          {t("deliveryUi.finished")}
         </button>
         {waiting > 0 && (
           <button type="button" data-testid={`queue-next-${req.id}`} onClick={() => onDelivery(req.id, "queue_next")}>
-            Accoda comunque il prossimo
+            {t("deliveryUi.queueNext")}
           </button>
         )}
         {req.status !== "COMPLETED" && (
           <button type="button" data-testid={`cancel-${req.id}`} onClick={cancel}>
-            Annulla
+            {t("deliveryUi.cancel")}
           </button>
         )}
       </div>
@@ -256,6 +263,7 @@ export default function SessionView({
   submittingId,
   focusId,
 }) {
+  const { t } = useTranslation();
   const refreshKey = session ? `${session.state}|${session.activity_at}` : undefined;
   const { entries, status, error, hasOlder, loadingOlder, loadOlder, retry } = useTranscript(
     sessionId,
@@ -270,7 +278,7 @@ export default function SessionView({
       && r.status in OUTGOING_STATES && notStarted(r))
     .sort((a, b) => a.id - b.id);
   const held = requests.filter((r) => r.recipient_session_id === sessionId && holdsQueueUnseen(r));
-  // Modifica: withdraws a waiting message and puts it back in the composer.
+  // Editing withdraws a waiting message and puts it back in the composer.
   const [draft, setDraft] = useState(null);
   const edit = async (req) => {
     if (await onDelivery(req.id, "cancel")) setDraft({ ...splitPrompt(req.prompt, sessions), nonce: req.id });
@@ -307,7 +315,7 @@ export default function SessionView({
   return (
     <div className={`session-view${session ? ` ${providerClass(session)}` : ""}`} data-testid="session-view">
       <div className="session-view-header">
-        <button type="button" className="icon-button" aria-label="Indietro" onClick={onBack}>
+        <button type="button" className="icon-button" aria-label={t("chat.back")} onClick={onBack}>
           <ArrowLeft size={18} />
         </button>
         <div className="session-view-title">
@@ -328,12 +336,12 @@ export default function SessionView({
       </div>
 
       <div className="chat-scroll" ref={scrollRef} onScroll={onScroll} data-testid="chat-scroll">
-        {status === "loading" && <p className="chat-status">Carico la conversazione…</p>}
+        {status === "loading" && <p className="chat-status">{t("chat.loading")}</p>}
         {status === "error" && (
           <div className="chat-error" data-testid="chat-error">
-            <p>{error}</p>
+            <p>{error && t(error.key, error.params)}</p>
             <button type="button" className="btn btn-secondary" onClick={retry}>
-              <RefreshCw size={14} /> Riprova
+              <RefreshCw size={14} /> {t("chat.retry")}
             </button>
           </div>
         )}
@@ -347,12 +355,20 @@ export default function SessionView({
                 disabled={loadingOlder}
                 onClick={() => loadOlder()}
               >
-                {loadingOlder ? "Carico…" : "Messaggi precedenti"}
+                {t(loadingOlder ? "chat.loadingOlder" : "chat.older")}
               </button>
             ) : (
-              <p className="chat-status">Inizio della conversazione</p>
+              <p className="chat-status">{t("chat.start")}</p>
             )}
-            {entries.length === 0 && <p className="chat-status">Nessun messaggio.</p>}
+            {error && (
+              <div className="chat-error" role="alert" data-testid="older-error">
+                <p>{t(error.key, error.params)}</p>
+                <button type="button" className="btn btn-secondary" disabled={loadingOlder} onClick={() => loadOlder()}>
+                  {t("chat.retry")}
+                </button>
+              </div>
+            )}
+            {entries.length === 0 && <p className="chat-status">{t("chat.empty")}</p>}
             {groupEntries(entries).map((item) =>
               item.type === "actions" ? (
                 <ActionGroup key={item.key} entries={item.entries} />

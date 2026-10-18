@@ -50,7 +50,7 @@ def _shared_entry(tool: Optional[str], args, at: Optional[str]) -> List[dict]:
     if tool != att.SHARE_TOOL or not isinstance(args, dict) or not isinstance(args.get("path"), str):
         return []
     title = args.get("title") if isinstance(args.get("title"), str) else None
-    return [_entry("media", "File condiviso", at, attachments=[att.shared(args["path"], title)])]
+    return [_entry("media", "Shared file", at, label_key="shared_file", attachments=[att.shared(args["path"], title)])]
 
 
 class TranscriptError(Exception):
@@ -287,7 +287,7 @@ def parse_antigravity(obj: dict) -> List[dict]:
     if kind == "GENERIC":
         generated = _GENERATED.search(content)
         if generated:
-            return [_entry("media", "Immagine generata", at, attachments=[att.file(generated.group(1))])]
+            return [_entry("media", "Generated image", at, label_key="generated_image", attachments=[att.file(generated.group(1))])]
         return []
     if kind == "PLANNER_RESPONSE":
         out = [_entry("assistant", _clip(content), at)] if content.strip() else []

@@ -101,7 +101,7 @@ The complete guide — environment variables, notifications, MCP setup, the tmux
 
 ## Status
 
-Placet is **alpha**, used every day by its author on one machine. English and Italian interface localization is rolling out, covering initial request approvals, reply approvals, history, the session picker and composer. Other screens and the design documents still contain Italian. See [localization scope and contributor rules](docs/localization.md).
+Placet is **alpha**, used every day by its author on one machine. English and Italian interface localization is rolling out, covering approvals, history, session selection, chat controls, delivery feedback and image/PDF viewers. Other screens and the design documents still contain Italian. See [localization scope and contributor rules](docs/localization.md).
 
 - ✅ Questions and approvals from the phone, push notifications, audit log
 - ✅ Sessions on the phone: read, write, wake (Claude Code, Codex, Antigravity)
