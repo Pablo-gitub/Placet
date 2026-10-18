@@ -1,0 +1,153 @@
+{
+  "app": {
+    "title": "Placet — Supervisione umana & Agent Bus",
+    "home": "Home",
+    "history": "Storico",
+    "live": "LIVE",
+    "reconnecting": "RICONNESSIONE…",
+    "openSession": "Apri una sessione per leggere la conversazione e scriverle.",
+    "tagline": "Supervisione umana & Agent Bus"
+  },
+  "language": {
+    "label": "Lingua",
+    "auto": "Automatica"
+  },
+  "home": {
+    "questions": "Domande",
+    "emptyQuestions": "Nessuna domanda in attesa.",
+    "sessions": "Le tue sessioni",
+    "emptySessions": "Aggiungi le sessioni che vuoi seguire da qui.",
+    "busy": "{{count}} al lavoro",
+    "pendingQuestions_one": "{{count}} domanda in attesa",
+    "pendingQuestions_other": "{{count}} domande in attesa",
+    "addSessions": "Aggiungi / vedi tutte"
+  },
+  "return": {
+    "title": "Risposta di {{recipient}} a {{sender}} · #{{id}}",
+    "explanation": "Compito completato. La risposta attende il tuo consenso prima di raggiungere l’agente richiedente.",
+    "originalRequest": "Richiesta originale",
+    "label": "Risposta da inoltrare",
+    "approve": "Inoltra risposta",
+    "reject": "Non inoltrare",
+    "approved": "Risposta autorizzata per l’inoltro.",
+    "rejected": "Risposta non inoltrata.",
+    "delivered": "Risposta inoltrata",
+    "withheld": "Risposta non inoltrata per tua scelta",
+    "queued": "Inoltro autorizzato, in attesa di consegna",
+    "pending": "Risposta in attesa del tuo consenso",
+    "authorizedVersion": "Versione autorizzata:",
+    "implicit": "Risposta implicita: ultimo messaggio del turno."
+  },
+  "requests": {
+    "sent": "Richiesta #{{id}} inviata.",
+    "rejected": "Richiesta #{{id}} rifiutata."
+  },
+  "errors": {
+    "returnEmpty": "La risposta non può essere vuota.",
+    "returnUnavailable": "Risposta già decisa, inoltrata o non disponibile.",
+    "unauthorized": "La sessione non è autorizzata. Controlla la connessione e accedi nuovamente.",
+    "notFound": "L’elemento richiesto non è stato trovato.",
+    "validation": "Controlla i valori inseriti e riprova.",
+    "operation": "Operazione non riuscita ({{status}}).",
+    "decisionConnection": "Errore di connessione durante l’invio della decisione."
+  },
+  "sessions": {
+    "closed": "Chiusa",
+    "suspended": "Sospesa",
+    "busy": "Al lavoro",
+    "idle": "In attesa",
+    "tmux": "In attesa (tmux)",
+    "unreachable": "Non raggiungibile",
+    "desktop": "app desktop",
+    "terminal": "terminale",
+    "opened": "{{project}} · aperta {{time}}"
+  },
+  "history": {
+    "title": "Storico Decisioni & Log",
+    "empty": "Nessuna richiesta completata nello storico.",
+    "delivery": "Consegna",
+    "execution": "Esecuzione",
+    "reply": "Risposta",
+    "context": "Contesto",
+    "question": "Domanda",
+    "editedPrompt": "Prompt inviato a {{agent}} (modificato da te)",
+    "prompt": "Prompt per {{agent}}",
+    "answer": "Risposta:",
+    "responder": "Risposta ({{agent}}):",
+    "implicit": "implicita",
+    "implicitHint": "Ultimo messaggio dell’agente, non inviato con placet_reply",
+    "created": "Creato:",
+    "other": "Altro: {{text}}",
+    "note": "Nota: {{text}}"
+  },
+  "status": {
+    "APPROVED": "Approvata",
+    "REJECTED": "Rifiutata",
+    "DELIVERING": "In consegna",
+    "EXECUTING": "In esecuzione",
+    "COMPLETED": "Completata",
+    "DELIVERY_FAILED": "Consegna fallita",
+    "STALLED": "Bloccata",
+    "CANCELLED": "Annullata",
+    "EXPIRED": "Scaduta"
+  },
+  "delivery": {
+    "waiting": "in attesa",
+    "in_progress": "in corso",
+    "accepted": "accettata",
+    "uncertain": "incerta",
+    "failed": "fallita",
+    "cancelled": "annullata"
+  },
+  "execution": {
+    "unobserved": "non osservata",
+    "started": "iniziata",
+    "completed": "completata",
+    "interrupted": "interrotta"
+  },
+  "reply": {
+    "none": "nessuna",
+    "explicit": "esplicita",
+    "implicit": "implicita (ultima risposta del turno)",
+    "ambiguous": "ambigua (nel turno c'erano altri messaggi)"
+  },
+  "timeline": {
+    "title": "Cronologia",
+    "error": "Impossibile caricare la cronologia.",
+    "loading": "Caricamento…",
+    "system": "sistema",
+    "you": "tu ({{id}})",
+    "edited": "prompt modificato",
+    "direct": "in attesa diretta",
+    "via": "via {{via}}",
+    "attempt": "tentativo {{count}}",
+    "attempts": "{{count}} tentativi",
+    "implicit": "risposta implicita",
+    "events": {
+      "created": "Creata",
+      "decided": "Decisa",
+      "injected": "Inviata al terminale",
+      "replied": "Risposta ricevuta",
+      "delivered": "Esito consegnato al mittente",
+      "delivery_failed": "Consegna dell'esito fallita",
+      "injection_claimed": "Invio al terminale",
+      "injection_released": "Invio non riuscito",
+      "injection_requeued": "Nessuna conferma, nuovo tentativo",
+      "injection_failed": "Consegna fallita",
+      "acked": "Ricezione confermata",
+      "delivery_uncertain": "Consegna incerta",
+      "delivery_retried": "Nuovo tentativo chiesto da te",
+      "execution_started": "Turno iniziato",
+      "execution_completed": "Turno concluso",
+      "execution_interrupted": "Turno interrotto",
+      "start_unconfirmed": "Avvio del turno non confermato",
+      "recipient_unreachable": "Sessione non raggiungibile: in attesa del suo prossimo turno",
+      "marked_finished_by_user": "Segnata da te come terminata",
+      "queue_overridden": "Prossimo messaggio accodato comunque",
+      "stalled": "Bloccata: nessuna risposta",
+      "cancelled": "Annullata",
+      "expired": "Scaduta",
+      "return_decided": "Inoltro della risposta deciso"
+    }
+  }
+}

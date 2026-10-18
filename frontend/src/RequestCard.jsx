@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { useState } from "react";
 import { ArrowRight, CheckCircle, XCircle, Pencil, Eye, MessagesSquare } from "lucide-react";
 import Markdown from "./Markdown";
@@ -26,19 +27,21 @@ export function Origin({ req, sessions, onOpenSession }) {
 }
 
 function ReturnCard({ req, submitting, onDecide }) {
+  const { t } = useTranslation();
   const [text, setText] = useState(req.response.content);
   return <div className="card" id={`request-${req.id}`} data-testid={`return-card-${req.id}`}>
-    <h3>Risposta di {req.recipient_id} a {req.sender_id} · #{req.id}</h3>
-    <p>Compito completato. La risposta attende il tuo consenso prima di raggiungere l’agente richiedente.</p>
-    <details><summary>Richiesta originale</summary><Markdown>{req.edited_prompt || req.prompt}</Markdown></details>
-    <label className="prompt-editor-label" htmlFor={`return-${req.id}`}>Risposta da inoltrare</label>
+    <h3>{t("return.title", { recipient: req.recipient_id, sender: req.sender_id, id: req.id })}</h3>
+    <p>{t("return.explanation")}</p>
+    {req.response.implicit && <p>{t("return.implicit")}</p>}
+    <details><summary>{t("return.originalRequest")}</summary><Markdown>{req.edited_prompt || req.prompt}</Markdown></details>
+    <label className="prompt-editor-label" htmlFor={`return-${req.id}`}>{t("return.label")}</label>
     <textarea id={`return-${req.id}`} className="prompt-textarea" value={text}
       onChange={(e) => setText(e.target.value)} />
     <div className="actions-row">
       <button className="btn btn-primary" disabled={submitting || !text.trim()}
-        onClick={() => onDecide(req.id, { return_decision: true, approve: true, edited_response: text })}>Inoltra risposta</button>
+        onClick={() => onDecide(req.id, { return_decision: true, approve: true, edited_response: text })}>{t("return.approve")}</button>
       <button className="btn btn-danger" disabled={submitting}
-        onClick={() => onDecide(req.id, { return_decision: true, approve: false })}>Non inoltrare</button>
+        onClick={() => onDecide(req.id, { return_decision: true, approve: false })}>{t("return.reject")}</button>
     </div>
   </div>;
 }

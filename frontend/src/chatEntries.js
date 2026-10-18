@@ -1,3 +1,4 @@
+import { formatDateTime } from "./i18n/formatters";
 /**
  * Helpers for the entries of a session's conversation, as returned by
  * GET /api/sessions/{id}/transcript (read by the bridge, RF-30/RF-32).
@@ -61,5 +62,5 @@ export function timeOf(iso) {
   if (!iso) return "";
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
+  return formatDateTime(date, { hour: "2-digit", minute: "2-digit" });
 }

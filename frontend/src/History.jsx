@@ -1,38 +1,29 @@
+import { useTranslation } from "react-i18next";
+import { formatDateTime } from "./i18n/formatters";
 import React from "react";
 import { ArrowRight } from "lucide-react";
 import { Origin } from "./RequestCard";
 import Timeline from "./Timeline";
 import Markdown from "./Markdown";
-import { DELIVERY, EXECUTION, REPLY } from "./aspects";
-
-const STATUS_LABELS = {
-  APPROVED: "Approvata",
-  REJECTED: "Rifiutata",
-  DELIVERING: "In consegna",
-  EXECUTING: "In esecuzione",
-  COMPLETED: "Completata",
-  DELIVERY_FAILED: "Consegna fallita",
-  STALLED: "Bloccata",
-  CANCELLED: "Annullata",
-  EXPIRED: "Scaduta",
-};
+import i18n from "./i18n";
 
 function answerOf(req) {
   return [
     ...(req.selected_options || []),
-    ...(req.custom_text ? [req.options?.length ? `Altro: ${req.custom_text}` : `Nota: ${req.custom_text}`] : []),
+    ...(req.custom_text ? [req.options?.length ? i18n.t("history.other", { text: req.custom_text }) : i18n.t("history.note", { text: req.custom_text })] : []),
   ].join(" · ");
 }
 
 /** Settled requests with their audit timeline (RF-13). */
 export default function History({ requests, sessions, focusId, onOpenSession }) {
+  const { t } = useTranslation();
   const settled = requests.filter((r) => r.status !== "PENDING");
   return (
     <div data-testid="history-section">
-      <h2 style={{ fontSize: "1rem", marginBottom: "1rem", fontWeight: 700 }}>Storico Decisioni & Log</h2>
+      <h2 style={{ fontSize: "1rem", marginBottom: "1rem", fontWeight: 700 }}>{t("history.title")}</h2>
       {settled.length === 0 ? (
         <div className="empty-state" data-testid="empty-history">
-          <p>Nessuna richiesta completata nello storico.</p>
+          <p>{t("history.empty")}</p>
         </div>
       ) : (
         settled.map((req) => (
@@ -49,19 +40,19 @@ export default function History({ requests, sessions, focusId, onOpenSession }) 
                 <span className="agent-badge">{req.recipient_id}</span>
               </div>
               <span className={`status-badge status-${req.status.toLowerCase()}`}>
-                {STATUS_LABELS[req.status] || req.status}
+                {t(`status.${req.status}`, { defaultValue: req.status })}
               </span>
             </div>
             <Origin req={req} sessions={sessions} onOpenSession={onOpenSession} />
             {req.recipient_id !== "human" && req.delivery && (
               <p className="aspects" data-testid={`aspects-${req.id}`}>
-                Consegna {DELIVERY[req.delivery] || req.delivery} · Esecuzione{" "}
-                {EXECUTION[req.execution] || req.execution} · Risposta {REPLY[req.reply] || req.reply}
+                {t("history.delivery")} {t(`delivery.${req.delivery}`, { defaultValue: req.delivery })} · {t("history.execution")}{" "}
+                {t(`execution.${req.execution}`, { defaultValue: req.execution })} · {t("history.reply")} {t(`reply.${req.reply}`, { defaultValue: req.reply })}
               </p>
             )}
             {req.context && (
               <section className="request-section">
-                <h3 className="section-label">Contesto</h3>
+                <h3 className="section-label">{t("history.context")}</h3>
                 <div className="card-context">
                   <Markdown>{req.context}</Markdown>
                 </div>
@@ -70,43 +61,43 @@ export default function History({ requests, sessions, focusId, onOpenSession }) 
             <section className="request-section">
               <h3 className="section-label">
                 {req.recipient_id === "human"
-                  ? "Domanda"
+                  ? t("history.question")
                   : req.edited_prompt
-                    ? `Prompt inviato a ${req.recipient_id} (modificato da te)`
-                    : `Prompt per ${req.recipient_id}`}
+                    ? t("history.editedPrompt", { agent: req.recipient_id })
+                    : t("history.prompt", { agent: req.recipient_id })}
               </h3>
               <Markdown>{req.edited_prompt || req.prompt}</Markdown>
             </section>
             {(req.selected_options?.length > 0 || req.custom_text) && (
               <p data-testid={`history-answer-${req.id}`} style={{ fontSize: "0.85rem", marginBottom: "0.6rem" }}>
-                <strong>Risposta:</strong> {answerOf(req)}
+                <strong>{t("history.answer")}</strong> {answerOf(req)}
               </p>
             )}
             {req.response && (
               <div className="history-response">
-                <strong>Risposta ({req.response.responder_id}):</strong>{" "}
+                <strong>{t("history.responder", { agent: req.response.responder_id })}</strong>{" "}
                 {req.response.implicit && (
                   <span
                     className="status-badge implicit-badge"
                     data-testid={`implicit-${req.id}`}
-                    title="Ultimo messaggio dell'agente, non inviato con placet_reply"
+                    title={t("history.implicitHint")}
                   >
-                    implicita
+                    {t("history.implicit")}
                   </span>
                 )}{" "}
                 {req.response.content}
                 {req.sender_id !== "human" && req.recipient_id !== "human" && (
-                  <p>{req.delivered_at ? "Risposta inoltrata" : req.return_decision === "rejected"
-                    ? "Risposta non inoltrata per tua scelta" : req.allow_auto_return || req.return_decision === "approved"
-                      ? "Inoltro autorizzato, in attesa di consegna" : "Risposta in attesa del tuo consenso"}</p>
+                  <p>{req.delivered_at ? t("return.delivered") : req.return_decision === "rejected"
+                    ? t("return.withheld") : req.allow_auto_return || req.return_decision === "approved"
+                      ? t("return.queued") : t("return.pending")}</p>
                 )}
                 {req.return_text != null && req.return_text !== req.response.content && (
-                  <p><strong>Versione autorizzata:</strong> {req.return_text}</p>
+                  <p><strong>{t("return.authorizedVersion")}</strong> {req.return_text}</p>
                 )}
               </div>
             )}
             <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.6rem" }}>
-              Creato: {new Date(req.created_at).toLocaleString()}
+              {t("history.created")} {formatDateTime(req.created_at)}
             </div>
             <Timeline requestId={req.id} />
           </div>

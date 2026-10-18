@@ -1,0 +1,153 @@
+{
+  "app": {
+    "title": "Placet — Human Supervision & Agent Bus",
+    "home": "Home",
+    "history": "History",
+    "live": "LIVE",
+    "reconnecting": "RECONNECTING…",
+    "openSession": "Open a session to read its conversation and send a message.",
+    "tagline": "Human Supervision & Agent Bus"
+  },
+  "language": {
+    "label": "Language",
+    "auto": "Automatic"
+  },
+  "home": {
+    "questions": "Questions",
+    "emptyQuestions": "No questions waiting.",
+    "sessions": "Your sessions",
+    "emptySessions": "Add the sessions you want to follow here.",
+    "busy": "{{count}} working",
+    "pendingQuestions_one": "{{count}} question waiting",
+    "pendingQuestions_other": "{{count}} questions waiting",
+    "addSessions": "Add / view all"
+  },
+  "return": {
+    "title": "Reply from {{recipient}} to {{sender}} · #{{id}}",
+    "explanation": "Task completed. The reply needs your approval before it reaches the requesting agent.",
+    "originalRequest": "Original request",
+    "label": "Reply to forward",
+    "approve": "Forward reply",
+    "reject": "Do not forward",
+    "approved": "Reply approved for forwarding.",
+    "rejected": "Reply not forwarded.",
+    "delivered": "Reply forwarded",
+    "withheld": "Reply withheld by your choice",
+    "queued": "Forwarding approved, awaiting delivery",
+    "pending": "Reply awaiting your approval",
+    "authorizedVersion": "Approved version:",
+    "implicit": "Implicit reply: the final message of the turn."
+  },
+  "requests": {
+    "sent": "Request #{{id}} sent.",
+    "rejected": "Request #{{id}} rejected."
+  },
+  "errors": {
+    "returnEmpty": "The reply cannot be empty.",
+    "returnUnavailable": "This reply has already been decided, forwarded, or is no longer available.",
+    "unauthorized": "Your session is not authorized. Check your connection and sign in again.",
+    "notFound": "The requested item was not found.",
+    "validation": "Check the entered values and try again.",
+    "operation": "The operation failed ({{status}}).",
+    "decisionConnection": "Connection error while sending the decision."
+  },
+  "sessions": {
+    "closed": "Closed",
+    "suspended": "Suspended",
+    "busy": "Working",
+    "idle": "Waiting",
+    "tmux": "Waiting (tmux)",
+    "unreachable": "Unreachable",
+    "desktop": "desktop app",
+    "terminal": "terminal",
+    "opened": "{{project}} · opened {{time}}"
+  },
+  "history": {
+    "title": "Decision history & log",
+    "empty": "No completed requests in history.",
+    "delivery": "Delivery",
+    "execution": "Execution",
+    "reply": "Reply",
+    "context": "Context",
+    "question": "Question",
+    "editedPrompt": "Prompt sent to {{agent}} (edited by you)",
+    "prompt": "Prompt for {{agent}}",
+    "answer": "Answer:",
+    "responder": "Reply ({{agent}}):",
+    "implicit": "implicit",
+    "implicitHint": "Final agent message, not sent using placet_reply",
+    "created": "Created:",
+    "other": "Other: {{text}}",
+    "note": "Note: {{text}}"
+  },
+  "status": {
+    "APPROVED": "Approved",
+    "REJECTED": "Rejected",
+    "DELIVERING": "Delivering",
+    "EXECUTING": "Executing",
+    "COMPLETED": "Completed",
+    "DELIVERY_FAILED": "Delivery failed",
+    "STALLED": "Stalled",
+    "CANCELLED": "Cancelled",
+    "EXPIRED": "Expired"
+  },
+  "delivery": {
+    "waiting": "waiting",
+    "in_progress": "in progress",
+    "accepted": "accepted",
+    "uncertain": "uncertain",
+    "failed": "failed",
+    "cancelled": "cancelled"
+  },
+  "execution": {
+    "unobserved": "unobserved",
+    "started": "started",
+    "completed": "completed",
+    "interrupted": "interrupted"
+  },
+  "reply": {
+    "none": "none",
+    "explicit": "explicit",
+    "implicit": "implicit (final turn reply)",
+    "ambiguous": "ambiguous (the turn included other messages)"
+  },
+  "timeline": {
+    "title": "Timeline",
+    "error": "Unable to load the timeline.",
+    "loading": "Loading…",
+    "system": "system",
+    "you": "you ({{id}})",
+    "edited": "prompt edited",
+    "direct": "direct polling",
+    "via": "via {{via}}",
+    "attempt": "attempt {{count}}",
+    "attempts": "{{count}} attempts",
+    "implicit": "implicit reply",
+    "events": {
+      "created": "Created",
+      "decided": "Decided",
+      "injected": "Sent to terminal",
+      "replied": "Reply received",
+      "delivered": "Outcome delivered to sender",
+      "delivery_failed": "Outcome delivery failed",
+      "injection_claimed": "Sending to terminal",
+      "injection_released": "Send failed",
+      "injection_requeued": "No acknowledgment, retrying",
+      "injection_failed": "Delivery failed",
+      "acked": "Receipt confirmed",
+      "delivery_uncertain": "Delivery uncertain",
+      "delivery_retried": "Retry requested by you",
+      "execution_started": "Turn started",
+      "execution_completed": "Turn completed",
+      "execution_interrupted": "Turn interrupted",
+      "start_unconfirmed": "Turn start unconfirmed",
+      "recipient_unreachable": "Session unreachable: waiting for its next turn",
+      "marked_finished_by_user": "Marked finished by you",
+      "queue_overridden": "Next message queued anyway",
+      "stalled": "Stalled: no reply",
+      "cancelled": "Cancelled",
+      "expired": "Expired",
+      "return_decided": "Reply forwarding decided"
+    }
+  }
+}

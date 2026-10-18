@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React, { useState } from "react";
 import { CheckCircle, ChevronDown, ChevronRight, Circle, MessageCircleQuestion, Plus } from "lucide-react";
 import RequestCard from "./RequestCard";
@@ -15,6 +16,7 @@ import {
 } from "./sessionInfo";
 
 function SessionRow({ session, questions, onOpen, active }) {
+  const { t } = useTranslation();
   const status = sessionStatus(session);
   return (
     <button
@@ -28,7 +30,7 @@ function SessionRow({ session, questions, onOpen, active }) {
         <span className="provider-chip">{providerOf(session).label}</span>
         <strong className="session-name">{sessionName(session)}</strong>
         {questions > 0 && (
-          <span className="badge-count" title="Domande in attesa" data-testid={`session-questions-${session.id}`}>
+          <span className="badge-count" title={t("home.pendingQuestions", { count: questions })} data-testid={`session-questions-${session.id}`}>
             {questions}
           </span>
         )}
@@ -59,6 +61,7 @@ function loadCollapsed() {
  * closes; providers come in order of their latest activity.
  */
 function ProviderGroup({ provider, sessions, questionsOf, collapsed, onToggle, onOpen, activeId }) {
+  const { t } = useTranslation();
   const busy = sessions.filter((s) => sessionStatus(s).key === "busy").length;
   const questions = sessions.reduce((n, s) => n + questionsOf(s.id), 0);
   return (
@@ -75,7 +78,7 @@ function ProviderGroup({ provider, sessions, questionsOf, collapsed, onToggle, o
         <strong>{provider.label}</strong>
         <span className="provider-group-count">
           {sessions.length}
-          {busy > 0 && ` · ${busy} al lavoro`}
+          {busy > 0 && ` · ${t("home.busy", { count: busy })}`}
         </span>
         {questions > 0 && <span className="badge-count">{questions}</span>}
       </button>
@@ -98,6 +101,7 @@ export default function Home({
   onTogglePin,
   activeSessionId,
 }) {
+  const { t } = useTranslation();
   const [adding, setAdding] = useState(false);
   const [collapsed, setCollapsed] = useState(loadCollapsed);
   const toggleProvider = (key) =>
@@ -128,12 +132,12 @@ export default function Home({
     <div data-testid="home-section">
       <section className="home-section">
         <h2 className="home-title">
-          <MessageCircleQuestion size={16} /> Domande
+          <MessageCircleQuestion size={16} /> {t("home.questions")}
           {pending.length > 0 && <span className="badge-count">{pending.length}</span>}
         </h2>
         {pending.length === 0 ? (
           <div className="empty-hint" data-testid="empty-inbox">
-            <CheckCircle size={16} /> Nessuna domanda in attesa.
+            <CheckCircle size={16} /> {t("home.emptyQuestions")}
           </div>
         ) : (
           pending.map((req) => (
@@ -151,10 +155,10 @@ export default function Home({
       </section>
 
       <section className="home-section">
-        <h2 className="home-title">Le tue sessioni</h2>
+        <h2 className="home-title">{t("home.sessions")}</h2>
         {pinned.length === 0 && (
           <div className="empty-hint" data-testid="empty-sessions">
-            Aggiungi le sessioni che vuoi seguire da qui.
+            {t("home.emptySessions")}
           </div>
         )}
         {groups.map((g) => (
@@ -175,7 +179,7 @@ export default function Home({
           data-testid="open-add-sessions"
           onClick={() => setAdding(true)}
         >
-          <Plus size={16} /> Aggiungi / vedi tutte
+          <Plus size={16} /> {t("home.addSessions")}
         </button>
       </section>
 

@@ -1,3 +1,6 @@
+import { useTranslation } from "react-i18next";
+import LanguageSelect from "./i18n/LanguageSelect";
+import { apiErrorMessage } from "./i18n/errors";
 import { needsReturnApproval } from "./decisions";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, CheckCircle, Home as HomeIcon, MessagesSquare, Radio, ShieldCheck } from "lucide-react";
@@ -23,6 +26,7 @@ function targetOf(req) {
 }
 
 export default function App() {
+  const { t } = useTranslation();
   const [requests, setRequests] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [route, setRoute] = useState(() => routeFromHash(window.location.hash));
@@ -194,16 +198,16 @@ export default function App() {
       });
       if (res.ok) {
         showFeedback(
-          body.return_decision ? (body.approve ? "Risposta autorizzata per l’inoltro." : "Risposta non inoltrata.") : body.status === "APPROVED" ? `Richiesta #${requestId} inviata.` : `Richiesta #${requestId} rifiutata.`
+          body.return_decision ? t(body.approve ? "return.approved" : "return.rejected") : t(body.status === "APPROVED" ? "requests.sent" : "requests.rejected", { id: requestId })
         );
         await fetchRequests();
       } else {
         const errData = await res.json().catch(() => ({}));
-        showFeedback(errData.detail || `Errore durante l'operazione (${res.status})`, true);
+        showFeedback(apiErrorMessage(errData, res.status, t), true);
       }
     } catch (err) {
       console.error("Error deciding request:", err);
-      showFeedback("Errore di connessione durante l'invio della decisione.", true);
+      showFeedback(t("errors.decisionConnection"), true);
     } finally {
       setSubmittingId(null);
     }
@@ -334,7 +338,7 @@ export default function App() {
         onClick={() => navigate("#/")}
       >
         <HomeIcon size={16} />
-        Home
+        {t("app.home")}
         {pendingCount > 0 && (
           <span className="badge-count" data-testid="pending-badge">
             {pendingCount}
@@ -347,7 +351,7 @@ export default function App() {
         onClick={() => navigate("#/storico")}
       >
         <ShieldCheck size={16} />
-        Storico
+        {t("app.history")}
       </button>
     </nav>
   );
@@ -360,13 +364,16 @@ export default function App() {
           <div className="logo-icon">P</div>
           <div>
             <h1>Placet</h1>
-            <p className="brand-tagline">Human Supervision & Agent Bus</p>
+            <p className="brand-tagline">{t("app.tagline")}</p>
           </div>
         </div>
         {wide && navTabs}
-        <div className="live-indicator" data-testid="live-indicator">
-          <Radio size={12} className={connected ? "text-emerald-400 animate-pulse" : "text-amber-400"} />
-          {connected ? "LIVE" : "RICONNESSIONE…"}
+        <div className="header-controls">
+          <LanguageSelect />
+          <div className="live-indicator" data-testid="live-indicator">
+            <Radio size={12} className={connected ? "text-emerald-400 animate-pulse" : "text-amber-400"} />
+            {t(connected ? "app.live" : "app.reconnecting")}
+          </div>
         </div>
       </header>
 
@@ -388,7 +395,7 @@ export default function App() {
             {sessionView || historyView || (
               <div className="pane-empty" data-testid="pane-empty">
                 <MessagesSquare size={28} />
-                <p>Apri una sessione per leggere la conversazione e scriverle.</p>
+                <p>{t("app.openSession")}</p>
               </div>
             )}
           </main>

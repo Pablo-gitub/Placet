@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
+from backend.app.errors import ProductError, product_error_response
 from backend.app.pwa import mount_pwa
 from sse_starlette.sse import EventSourceResponse
 
@@ -315,6 +316,7 @@ def create_app(
         return req
 
     app = FastAPI(title="Placet API", version="1.0.0", lifespan=lifespan)
+    app.add_exception_handler(ProductError, product_error_response)
 
     if db is None:
         db = Database(os.environ.get("PLACET_DB_PATH", "placet.db"))
@@ -612,10 +614,10 @@ def create_app(
         require_human(who)
         get_or_404(request_id)
         if payload.edited_response is not None and not payload.edited_response.strip():
-            raise HTTPException(status_code=422, detail="La risposta non può essere vuota.")
+            raise ProductError(422, "return.empty", "The reply cannot be empty.")
         updated = db.decide_return(request_id, payload.approve, payload.edited_response, who.actor)
         if updated is None:
-            raise HTTPException(status_code=409, detail="Risposta già decisa, inoltrata o non disponibile.")
+            raise ProductError(409, "return.unavailable", "The reply has already been decided, forwarded, or is no longer available.")
         notify_change(request_id)
         return updated
 

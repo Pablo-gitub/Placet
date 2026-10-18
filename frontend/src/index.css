@@ -1179,3 +1179,19 @@ body.chat-open { overflow: hidden; }
 .send-mode button.active { background: var(--prov, var(--primary)); border-color: var(--prov, var(--primary)); color: var(--prov-ink, #fff); }
 .send-mode button:disabled { opacity: 0.45; cursor: not-allowed; }
 .send-mode-hint { flex-basis: 100%; }
+
+/* Allow the header controls to wrap without overflowing a narrow viewport. */
+.app-container > header { flex-wrap: wrap; gap: 0.5rem; }
+.header-controls { display: flex; align-items: center; gap: 0.5rem; margin-left: auto; max-width: 100%; }
+
+.language-select {
+  color: var(--text-muted);
+  background: var(--bg-card, #111827);
+  border: 1px solid var(--border, #334155);
+  border-radius: 0.4rem;
+  font: inherit;
+  font-size: 0.75rem;
+  padding: 0.25rem;
+  max-width: 6.5rem;
+  min-width: 0;
+}

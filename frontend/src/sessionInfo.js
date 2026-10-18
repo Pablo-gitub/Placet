@@ -1,9 +1,11 @@
+import i18n from "./i18n";
+import { formatDateTime, formatRelativeTime } from "./i18n/formatters";
 /** Display helpers for agent sessions. */
 
 const CLIENT_LABELS = {
-  "claude-desktop": "app desktop",
-  "codex-desktop": "app desktop",
-  cli: "terminale",
+  "claude-desktop": "sessions.desktop",
+  "codex-desktop": "sessions.desktop",
+  cli: "sessions.terminal",
 };
 
 /** Supported providers, in the order the PWA shows them. */
@@ -30,7 +32,7 @@ export function sessionProject(session) {
 }
 
 function sessionClient(session) {
-  return session.tmux_session ? `tmux ${session.tmux_session}` : CLIENT_LABELS[session.entrypoint];
+  return session.tmux_session ? `tmux ${session.tmux_session}` : (CLIENT_LABELS[session.entrypoint] ? i18n.t(CLIENT_LABELS[session.entrypoint]) : undefined);
 }
 
 /** "placet-hook-lab · app desktop · <title>" for the session a request came from. */
@@ -48,12 +50,12 @@ export function sessionPlace(session) {
 export function sessionName(session) {
   if (session.title) return session.title;
   const opened = session.started_at
-    ? new Date(session.started_at).toLocaleString("it-IT", {
+    ? formatDateTime(session.started_at, {
         day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
       })
     : null;
   const project = sessionProject(session);
-  if (project) return opened ? `${project} · aperta ${opened}` : project;
+  if (project) return opened ? i18n.t("sessions.opened", { project, time: opened }) : project;
   return session.id.slice(0, 8);
 }
 
@@ -63,12 +65,12 @@ export function providerClass(session) {
 }
 
 export function sessionStatus(session) {
-  if (session.ended_at) return { key: "offline", label: "Chiusa" };
-  if (session.suspended_at) return { key: "offline", label: "Sospesa" };
-  if (session.state === "busy") return { key: "busy", label: "Al lavoro" };
-  if (session.reachable) return { key: "idle", label: "In attesa" };
-  if (session.tmux_session) return { key: "idle", label: "In attesa (tmux)" };
-  return { key: "offline", label: "Non raggiungibile" };
+  if (session.ended_at) return { key: "offline", label: i18n.t("sessions.closed") };
+  if (session.suspended_at) return { key: "offline", label: i18n.t("sessions.suspended") };
+  if (session.state === "busy") return { key: "busy", label: i18n.t("sessions.busy") };
+  if (session.reachable) return { key: "idle", label: i18n.t("sessions.idle") };
+  if (session.tmux_session) return { key: "idle", label: i18n.t("sessions.tmux") };
+  return { key: "offline", label: i18n.t("sessions.unreachable") };
 }
 
 /** When the session last started or finished a turn. */
@@ -84,8 +86,8 @@ export function byActivity(a, b) {
 export function timeAgo(iso, now = Date.now()) {
   if (!iso) return "";
   const seconds = Math.max(0, (now - new Date(iso).getTime()) / 1000);
-  if (seconds < 60) return "ora";
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} min fa`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)} h fa`;
-  return new Date(iso).toLocaleDateString("it-IT");
+  if (seconds < 60) return formatRelativeTime(0, "second");
+  if (seconds < 3600) return formatRelativeTime(-Math.floor(seconds / 60), "minute");
+  if (seconds < 86400) return formatRelativeTime(-Math.floor(seconds / 3600), "hour");
+  return formatDateTime(iso);
 }

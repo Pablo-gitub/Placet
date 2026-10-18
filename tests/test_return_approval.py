@@ -89,3 +89,18 @@ async def test_human_can_preapprove_return_for_one_request_and_migration_preserv
     db.init_db()
     assert not db.get_request(held.id).allow_auto_return
     assert not db.mark_delivered(held.id)
+
+
+@pytest.mark.asyncio
+async def test_return_errors_have_stable_codes_and_english_legacy_details(setup):
+    app, db = setup
+    req = completed(db)
+    async with human_client(app) as human:
+        empty = await human.post(f'/api/requests/{req.id}/return-decision', json={
+            'approve': True, 'edited_response': '   '})
+        assert empty.status_code == 422
+        assert empty.json() == {'code': 'return.empty', 'params': {}, 'detail': 'The reply cannot be empty.'}
+        assert db.get_request(req.id).return_decision is None
+        assert (await human.post(f'/api/requests/{req.id}/return-decision', json={'approve': False})).status_code == 200
+        duplicate = await human.post(f'/api/requests/{req.id}/return-decision', json={'approve': True})
+        assert duplicate.status_code == 409 and duplicate.json()['code'] == 'return.unavailable'
