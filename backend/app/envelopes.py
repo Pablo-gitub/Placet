@@ -42,7 +42,7 @@ def steer(req: RequestModel) -> str:
     """A message the user sends "now", inside the running turn (RF-35)."""
     text = f"[Placet Request #{req.id} dall'utente]: {req.prompt}\n{USER_MESSAGE_NOTE}\n{STEER_NOTE}"
     if req.context:
-        text += f"\n{req.context}"
+        text += f"\n\n{req.context}"
     return text
 
 
@@ -51,7 +51,7 @@ def injection(req: RequestModel, ack_mode: str = "mcp", channel: str = "tmux") -
         # The user's own message (RF-34): no reply tool, the answer is the turn.
         text = f"[Placet Request #{req.id} dall'utente]: {req.prompt}\n{USER_MESSAGE_NOTE}"
         if req.context:
-            text += f"\n{req.context}"
+            text += f"\n\n{req.context}"
         return f"{text}\n{HOOK_PREFACE}" if channel == "hook" else text
     # Only the prompt: the context explains the request to the human and is
     # not part of what the recipient receives.

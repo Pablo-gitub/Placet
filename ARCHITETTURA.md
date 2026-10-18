@@ -303,13 +303,22 @@ Il messaggio continua a essere diretto alla sessione corrente, non ai menzionati
 
 `POST /api/sessions/{id}/messages` accetta `mentions: [{session_id, token}]`.
 Il backend verifica la presenza del token, la disponibilità e non esclusione della
-sessione, l'assenza di autoriferimenti e la route consentita dal registro. I
-riferimenti risolti vengono conservati nel contesto della richiesta e inclusi
-nell'iniezione, con le istruzioni per usare `placet_send_to_agent` con l'ID esatto.
+sessione e l'assenza di autoriferimenti. I permessi di routing si verificano
+sull'effettivo invio dell'agente, non sulla citazione dell'utente. I riferimenti
+risolti vengono conservati nel contesto della richiesta e inclusi nell'iniezione
+come dati JSON, separati dal testo con una riga vuota. Non viene aggiunto il
+paragrafo operativo sull'uso di `placet_send_to_agent`: l'agente distingue dal
+testo dell'utente una semplice citazione da una richiesta di collaborazione.
 Una menzione non crea richieste automaticamente: è l'agente a formulare gli
 incarichi, ciascuno con il normale flusso di approvazione e consegna Placet. Se il
 tool non è disponibile, l'agente deve segnalarlo. La selezione non garantisce che
 il modello esegua la delega: la conferma effettiva resta la richiesta Placet.
+
+Scelta verificata il 18 ottobre 2026: citazione #52 senza invio; incarico #53
+tradotto nella richiesta Codex→Codex #54, approvata e completata con
+`TEST-COLLAB-OK`. Il registro consente anche sessioni dello stesso provider,
+mantenendo l'approvazione umana. I riferimenti strutturati restano necessari
+per identificare senza ambiguità la sessione destinataria.
 
 ### Allegati dal telefono alla sessione
 

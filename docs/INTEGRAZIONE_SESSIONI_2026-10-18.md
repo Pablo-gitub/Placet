@@ -47,12 +47,23 @@ approvazione umana. Resta vietata l'autoconsegna alla stessa sessione.
 Lo script di migrazione aggiorna anche il registro installato creando backup;
 il deploy ordinario non sovrascrive /etc/placet/AGENTS.md.
 La menzione PWA #51 è stata ricevuta correttamente. La collaborazione reale
-Codex→Codex con approvazione non è ancora stata provata end-to-end.
+Codex→Codex è stata verificata con la richiesta #54, approvata e completata
+con risposta TEST-COLLAB-OK.
 
-## Prossimo esperimento concordato
+## Scelta adottata: citazioni senza istruzioni operative aggiunte
 
-Il testo aggiunto alle menzioni è troppo invasivo per la lettura umana.
-Si proverà a rimuovere le istruzioni operative aggiunte al messaggio,
-conservando i riferimenti strutturati necessari per identificare le sessioni.
-Questa modifica non è inclusa nei commit di consolidamento: il formato
-attualmente installato resta invariato.
+Il testo operativo aggiunto alle menzioni rendeva i messaggi poco leggibili.
+È stato rimosso il paragrafo che spiegava come usare placet_send_to_agent:
+restano il testo dell'utente e i riferimenti JSON, separati da una riga vuota.
+Gli ID completi impediscono di confondere sessioni con titoli simili.
+Il breve avviso comune ai messaggi utente e i metadati degli allegati restano.
+
+L'agente interpreta dal messaggio se l'utente sta semplicemente citando una
+sessione oppure chiedendo un incarico. Permessi, approvazioni e routing sono
+comunque applicati da Placet all'invio: non dipendono dal testo rimosso.
+
+Prova reale: #52, citazione della sessione “Rispondi ok”, ricevuta senza
+creare una richiesta; #53, incarico esplicito, tradotto nella richiesta #54
+verso lo stesso ID e completato con TEST-COLLAB-OK. Il risultato valida
+questi due casi in Codex, non garantisce l'interpretazione di ogni messaggio
+ambiguo né costituisce una verifica equivalente sugli altri provider.

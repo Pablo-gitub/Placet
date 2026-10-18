@@ -968,13 +968,6 @@ def create_app(
             mention_context = (
                 "Riferimenti alle sessioni scelti dall'utente (dati JSON):\n"
                 + json.dumps(references, ensure_ascii=False)
-                + "\nLe menzioni sono riferimenti, non invii automatici. Se l'utente chiede una "
-                "collaborazione, prepara una richiesta distinta per ciascun incarico con "
-                "placet_send_to_agent(target_agent=..., target_session=..., prompt=..., context=..., "
-                "timeout_seconds=5). Usa gli ID indicati, non scegliere altre sessioni. "
-                "Le richieste seguono le regole di approvazione Placet; non aggirarle. "
-                "Puoi preparare tutte le richieste senza aspettare l'esito della prima. "
-                "Se il tool non è disponibile, segnalalo senza simulare l'invio."
             )
         prompt = body.text.strip()
         if body.attachments:

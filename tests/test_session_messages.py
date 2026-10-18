@@ -187,7 +187,9 @@ async def test_mentions_resolve_sessions_without_creating_agent_requests(setup):
             message = injection(request, channel=channel)
             assert '"target_session": "cx1"' in message
             assert '"target_session": "ag1"' in message
-            assert "placet_send_to_agent" in message
+            assert "placet_send_to_agent" not in message
+            assert "Le menzioni sono riferimenti" not in message
+            assert "\n\nRiferimenti alle sessioni" in message
         assert db.bridge_sessions_with_mail() == []
         assert request.recipient_session_id == "c1"
     finally:
