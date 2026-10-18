@@ -293,13 +293,25 @@ def live_server(setup):
     thread.join(timeout=5)
 
 
+def waiter_test_command():
+    # Simulate the owning engine only; HTTP polling and locking remain real.
+    code = (
+        "import importlib.util,sys; "
+        "spec=importlib.util.spec_from_file_location('waiter',sys.argv.pop(1)); "
+        "m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); "
+        "m._owner=lambda:(1, 'test-engine'); m._owner_alive=lambda owner:True; "
+        "sys.exit(m.main())"
+    )
+    return [sys.executable, '-c', code, str(WAITER), '--agent', 'gemini']
+
+
 def test_waiter_wakes_the_session_with_exit_code_2(live_server, tmp_path):
     url, db = live_server
     db.upsert_session("g1", "gemini")
     env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "PLACET_API_URL": url,
            "PLACET_API_TOKEN": "tok-gemini"}
     waiter = subprocess.Popen(
-        [sys.executable, str(WAITER), "--agent", "gemini"], env=env,
+        waiter_test_command(), env=env,
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
     waiter.stdin.write(json.dumps({"session_id": "g1", "cwd": str(tmp_path)}))
@@ -313,7 +325,7 @@ def test_waiter_wakes_the_session_with_exit_code_2(live_server, tmp_path):
     err = waiter.stderr.read()
     assert waiter.returncode == 2
     assert f"[Placet Request #{req.id} da claude]" in err
-    assert not list((tmp_path / ".cache" / "placet" / "waiters").glob("*.pid"))  # lock released
+    assert (tmp_path / ".cache" / "placet" / "waiters" / "g1.pid").read_text() == ""  # released inode retained
 
 
 def test_second_waiter_for_the_same_session_steps_aside(live_server, tmp_path):
@@ -322,15 +334,16 @@ def test_second_waiter_for_the_same_session_steps_aside(live_server, tmp_path):
     env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "PLACET_API_URL": url,
            "PLACET_API_TOKEN": "tok-gemini"}
     stdin = json.dumps({"session_id": "g1", "cwd": str(tmp_path)})
-    first = subprocess.Popen([sys.executable, str(WAITER), "--agent", "gemini"], env=env,
+    first = subprocess.Popen(waiter_test_command(), env=env,
                              stdin=subprocess.PIPE, text=True)
     first.stdin.write(stdin)
     first.stdin.close()
     time.sleep(0.8)
-    second = subprocess.run([sys.executable, str(WAITER), "--agent", "gemini"], env=env,
+    second = subprocess.run(waiter_test_command(), env=env,
                             input=stdin, text=True, timeout=10)
     assert second.returncode == 0 and first.poll() is None
     first.kill()
+    first.wait(timeout=5)
 
 
 def test_waiter_ignores_excluded_projects(tmp_path):

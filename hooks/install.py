@@ -54,7 +54,7 @@ def _grouped(hooks: dict, hooks_dir: str) -> dict:
 def claude_hooks(hooks_dir: str) -> dict:
     hook = {"type": "command", "command": _command(hooks_dir, "claude_code.py", "--agent", "claude"), "timeout": 5}
     waiter = {"type": "command", "command": _command(hooks_dir, "placet_waiter.py", "--agent", "claude"),
-              "async": True, "asyncRewake": True}
+              "async": True, "asyncRewake": True, "timeout": 7 * 24 * 3600}
     # "Subito" (RF-35): after every action, but Python starts only when a
     # message is waiting for some session.
     steer = {"type": "command", "timeout": 5, "command": (
