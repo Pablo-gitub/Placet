@@ -142,6 +142,8 @@ class RequestCreate(BaseModel):
 class OutcomeDecision(BaseModel):
     approve: bool
     edited_response: Optional[str] = None
+    # Forward the reply to this session instead of the sender (who gets a notice).
+    forward_session_id: Optional[str] = Field(None, max_length=200)
 
 
 class RequestDecision(BaseModel):
@@ -171,6 +173,8 @@ class RequestModel(BaseModel):
     allow_auto_return: bool = False
     return_decision: Optional[str] = None
     return_text: Optional[str] = None
+    # The reply went, by the user's choice, to another session on this request.
+    return_forward_id: Optional[int] = None
     # RFC-04: the relation the request travelled on, if any.
     relation_id: Optional[int] = None
     id: int

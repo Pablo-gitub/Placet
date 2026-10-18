@@ -28,9 +28,14 @@ export function Origin({ req, sessions, onOpenSession }) {
   );
 }
 
-function ReturnCard({ req, submitting, onDecide }) {
+function ReturnCard({ req, submitting, onDecide, sessions = [] }) {
   const { t } = useTranslation();
   const [text, setText] = useState(req.response.content);
+  // RFC-07b: the reply may go to another session; the sender then gets a notice.
+  const [forwardTo, setForwardTo] = useState("");
+  const others = sessions.filter((s) => typeof s.id === "string" && !s.ended_at && !s.excluded
+    && s.id !== req.sender_session_id && s.id !== req.recipient_session_id);
+  const forward = others.find((s) => s.id === forwardTo);
   return <div className="card" id={`request-${req.id}`} data-testid={`return-card-${req.id}`}>
     <h3>{t("return.title", { recipient: req.recipient_id, sender: req.sender_id, id: req.id })}</h3>
     <p>{t("return.explanation")}</p>
@@ -39,9 +44,23 @@ function ReturnCard({ req, submitting, onDecide }) {
     <label className="prompt-editor-label" htmlFor={`return-${req.id}`}>{t("return.label")}</label>
     <textarea id={`return-${req.id}`} className="prompt-textarea" value={text}
       onChange={(e) => setText(e.target.value)} />
+    {others.length > 0 && <>
+      <label className="prompt-editor-label" htmlFor={`return-to-${req.id}`}>{t("return.to")}</label>
+      <select id={`return-to-${req.id}`} className="session-select" data-testid={`return-to-${req.id}`}
+        value={forwardTo} onChange={(e) => setForwardTo(e.target.value)}>
+        <option value="">{t("return.toSender", { sender: req.sender_id })}</option>
+        {others.map((s) => <option key={s.id} value={s.id}>{s.agent_id} · {sessionName(s)} · {sessionStatus(s).label}</option>)}
+      </select>
+      {forward && <p className="composer-note" data-testid={`return-forward-note-${req.id}`}>
+        {t("return.forwardNote", { sender: req.sender_id, target: forward.agent_id })}
+      </p>}
+    </>}
     <div className="actions-row">
-      <button className="btn btn-primary" disabled={submitting || !text.trim()}
-        onClick={() => onDecide(req.id, { return_decision: true, approve: true, edited_response: text })}>{t("return.approve")}</button>
+      <button className="btn btn-primary" disabled={submitting || !text.trim()} data-testid={`return-approve-${req.id}`}
+        onClick={() => onDecide(req.id, { return_decision: true, approve: true, edited_response: text,
+          ...(forward ? { forward_session_id: forward.id } : {}) })}>
+        {forward ? t("return.forward", { target: forward.agent_id }) : t("return.approve")}
+      </button>
       <button className="btn btn-danger" disabled={submitting}
         onClick={() => onDecide(req.id, { return_decision: true, approve: false })}>{t("return.reject")}</button>
     </div>

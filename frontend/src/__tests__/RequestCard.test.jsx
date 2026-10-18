@@ -289,6 +289,24 @@ describe("delivery timing for agent approvals", () => {
   });
 });
 
+it("forwards a reply to another session instead of the sender", () => {
+  const req = { ...confirm, sender_id: "claude", recipient_id: "gemini", status: "COMPLETED",
+    response: { content: "report" }, sender_session_id: "c1", recipient_session_id: "g1" };
+  const onDecide = vi.fn();
+  const sessions = [
+    { id: "c1", agent_id: "claude", provider: "claude-code", title: "Asker", state: "idle" },
+    { id: "g1", agent_id: "gemini", provider: "antigravity", title: "Replier", state: "idle" },
+    { id: "x9", agent_id: "codex", provider: "codex", title: "Other", state: "idle" },
+  ];
+  render(<RequestCard req={req} sessions={sessions} onDecide={onDecide} />);
+  const select = screen.getByTestId("return-to-12");
+  expect(select.querySelectorAll("option")).toHaveLength(2);
+  fireEvent.change(select, { target: { value: "x9" } });
+  expect(screen.getByTestId("return-forward-note-12")).toHaveTextContent("codex");
+  fireEvent.click(screen.getByTestId("return-approve-12"));
+  expect(onDecide).toHaveBeenCalledWith(12, { return_decision: true, approve: true, edited_response: "report", forward_session_id: "x9" });
+});
+
 it("holds completed answers for human editing and forwarding", () => {
   const req = { ...confirm, sender_id: "claude", recipient_id: "gemini", status: "COMPLETED", response: { content: "original" } };
   const decide = renderCard(req);

@@ -57,6 +57,7 @@ export function apiErrorDescriptor(body, status) {
     "relation.not_found": "errors.notFound",
     "return.empty": "errors.returnEmpty",
     "return.unavailable": "errors.returnUnavailable",
+    "return.forward_invalid": "errors.forwardInvalid",
   };
   const key = Object.hasOwn(codes, body?.code) ? codes[body.code] : null;
   if (key) {

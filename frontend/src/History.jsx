@@ -87,7 +87,8 @@ export default function History({ requests, sessions, focusId, onOpenSession }) 
                 )}{" "}
                 {req.response.content}
                 {req.sender_id !== "human" && req.recipient_id !== "human" && (
-                  <p>{req.delivered_at ? t("return.delivered") : req.return_decision === "rejected"
+                  <p>{req.return_decision === "forwarded" ? t("return.forwardedTo", { id: req.return_forward_id })
+                    : req.delivered_at ? t("return.delivered") : req.return_decision === "rejected"
                     ? t("return.withheld") : req.allow_auto_return || req.return_decision === "approved"
                       ? t("return.queued") : t("return.pending")}</p>
                 )}

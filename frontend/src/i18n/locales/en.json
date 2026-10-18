@@ -36,7 +36,13 @@
     "queued": "Forwarding approved, awaiting delivery",
     "pending": "Reply awaiting your approval",
     "authorizedVersion": "Approved version:",
-    "implicit": "Implicit reply: the final message of the turn."
+    "implicit": "Implicit reply: the final message of the turn.",
+    "to": "Send the reply to",
+    "toSender": "{{sender}} (who asked)",
+    "forward": "Forward to {{target}}",
+    "forwardNote": "{{sender}} only gets a notice that the reply went elsewhere; {{target}} gets it as a new message.",
+    "forwarded": "Reply forwarded to another session.",
+    "forwardedTo": "Reply forwarded by you to another session (#{{id}}); the sender got a notice"
   },
   "requests": {
     "sent": "Request #{{id}} sent.",
@@ -135,7 +141,8 @@
     "relationTypeInUse": "Relations of this type still exist.",
     "relationExists": "This relation already exists.",
     "relationSelf": "A node cannot have a relation with itself.",
-    "relationSave": "Unable to save the relation. Check your connection."
+    "relationSave": "Unable to save the relation. Check your connection.",
+    "forwardInvalid": "Choose an open session other than the sender and the one that replied."
   },
   "sessions": {
     "closed": "Closed",

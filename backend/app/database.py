@@ -318,6 +318,9 @@ class Database:
                     "UPDATE requests SET queue_released_at = COALESCE(updated_at, created_at)"
                     " WHERE status NOT IN ('PENDING', 'APPROVED', 'DELIVERING');"
                 )
+            if "return_forward_id" not in cols:
+                # The request a reply was forwarded on, to another session.
+                cursor.execute("ALTER TABLE requests ADD COLUMN return_forward_id INTEGER;")
             if "relation_id" not in cols:
                 # RFC-04: the relation a request travelled on (audit, reply policy).
                 cursor.execute("ALTER TABLE requests ADD COLUMN relation_id INTEGER;")
@@ -466,6 +469,7 @@ class Database:
             return_decision=row["return_decision"],
             return_text=row["return_text"],
             relation_id=row["relation_id"],
+            return_forward_id=row["return_forward_id"],
         )
 
     def list_requests(
@@ -1140,7 +1144,7 @@ class Database:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "UPDATE requests SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL AND (sender_id = 'human' OR recipient_id = 'human' OR status != 'COMPLETED' OR allow_auto_return = 1 OR return_decision = 'approved')",
+                "UPDATE requests SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL AND (sender_id = 'human' OR recipient_id = 'human' OR status != 'COMPLETED' OR allow_auto_return = 1 OR return_decision IN ('approved', 'forwarded'))",
                 (now, request_id),
             )
             if cursor.rowcount == 0:
@@ -1162,6 +1166,27 @@ class Database:
             self._log(conn.cursor(), request_id, actor, "return_decided",
                       {"approve": approve, "edited_response": text})
         return self.get_request(request_id)
+
+    def claim_return_forward(self, request_id: int, text: str, actor: str) -> bool:
+        """The user forwards a reply elsewhere: the sender gets only a notice."""
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "UPDATE requests SET return_decision = 'forwarded', return_text = NULL, updated_at = ?"
+                " WHERE id = ? AND status = 'COMPLETED' AND sender_id != 'human'"
+                " AND recipient_id != 'human' AND delivered_at IS NULL"
+                " AND allow_auto_return = 0 AND return_decision IS NULL",
+                (datetime.now(timezone.utc).isoformat(), request_id))
+            if not cursor.rowcount:
+                return False
+            self._log(conn.cursor(), request_id, actor, "return_decided",
+                      {"forward": True, "edited_response": text})
+            return True
+
+    def set_return_forward(self, request_id: int, forward_id: int, actor: str) -> None:
+        with self._get_connection() as conn:
+            conn.execute("UPDATE requests SET return_forward_id = ? WHERE id = ?", (forward_id, request_id))
+            self._log(conn.cursor(), request_id, actor, "return_forwarded", {"request_id": forward_id})
+            self._log(conn.cursor(), forward_id, actor, "forwarded_reply", {"request_id": request_id})
 
     def clear_delivered(self, request_id: int, actor: str = "system") -> None:
         """Undoes mark_delivered after a failed delivery, so it is retried."""
@@ -1186,7 +1211,7 @@ class Database:
             cursor.execute(
                 """
                 SELECT id FROM requests
-                WHERE delivered_at IS NULL AND status != ? AND (sender_id = 'human' OR recipient_id = 'human' OR status != 'COMPLETED' OR allow_auto_return = 1 OR return_decision = 'approved')
+                WHERE delivered_at IS NULL AND status != ? AND (sender_id = 'human' OR recipient_id = 'human' OR status != 'COMPLETED' OR allow_auto_return = 1 OR return_decision IN ('approved', 'forwarded'))
                   -- the user's own messages: the outcome is in the conversation
                   AND sender_id != 'human'
                   AND updated_at IS NOT NULL AND updated_at <= ? AND updated_at > ?
@@ -1739,7 +1764,7 @@ class Database:
 
     _OUTCOMES_SQL = """
         SELECT id FROM requests
-        WHERE sender_session_id = ? AND delivered_at IS NULL AND status != ? AND (sender_id = 'human' OR recipient_id = 'human' OR status != 'COMPLETED' OR allow_auto_return = 1 OR return_decision = 'approved')
+        WHERE sender_session_id = ? AND delivered_at IS NULL AND status != ? AND (sender_id = 'human' OR recipient_id = 'human' OR status != 'COMPLETED' OR allow_auto_return = 1 OR return_decision IN ('approved', 'forwarded'))
         ORDER BY updated_at ASC
     """
     _INJECTIONS_SQL = """

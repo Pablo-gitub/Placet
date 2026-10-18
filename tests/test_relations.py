@@ -152,3 +152,44 @@ async def test_the_user_redirects_a_prompt_to_another_agent(env):
     assert out["status"] == "APPROVED" and not out["allow_auto_return"]
     redirected = [e for e in db.list_events(req["id"]) if e.event == "redirected"]
     assert len(redirected) == 1 and redirected[0].details["from"] == "codex"
+
+
+@pytest.mark.asyncio
+async def test_the_user_forwards_a_reply_to_another_session(env):
+    from backend.app import envelopes
+    app, db = env
+    await two_nodes(app, db)
+    await event(app, "claude", "cl2", {"event": "start", "provider": "claude-code", "cwd": "/q"})
+    req = await send(app)
+    async with human_client(app) as human:
+        await human.post(f"/api/requests/{req['id']}/decision", json={"status": "APPROVED"})
+    db.claim_injection(req["id"])
+    db.confirm_injection(req["id"], actor="bridge", via="test")
+    async with agent_client(app, "tok-codex") as client:
+        resp = await client.post(f"/api/requests/{req['id']}/reply", json={"content": "the report"})
+        assert resp.status_code == 200, resp.text
+    async with human_client(app) as human:
+        url = f"/api/requests/{req['id']}/return-decision"
+        # Neither the sender nor the session that replied.
+        for sid in ("cl", "cx"):
+            resp = await human.post(url, json={"approve": True, "forward_session_id": sid})
+            assert resp.status_code == 422
+        resp = await human.post(url, json={"approve": True, "forward_session_id": "cl2",
+                                           "edited_response": "the report, trimmed"})
+        assert resp.status_code == 200, resp.text
+        out = resp.json()
+        assert out["return_decision"] == "forwarded"
+        again = await human.post(url, json={"approve": True})
+        assert again.status_code == 409
+    fwd = db.get_request(out["return_forward_id"])
+    assert (fwd.sender_id, fwd.recipient_id, fwd.recipient_session_id) == ("codex", "claude", "cl2")
+    assert fwd.prompt == "the report, trimmed" and fwd.status.value == "APPROVED"
+    assert fwd.sender_session_id == "cx"
+    # The sender gets a notice, never the content.
+    original = db.get_request(req["id"])
+    notice = envelopes.outcome(original, language="en")
+    assert "forwarded the reply" in notice and "the report" not in notice
+    async with agent_client(app, "tok-claude") as client:
+        seen = (await client.get(f"/api/requests/{req['id']}")).json()
+        assert seen["return_decision"] == "forwarded"
+        assert seen["response"] is None or "report" not in str(seen["response"])

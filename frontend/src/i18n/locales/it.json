@@ -36,7 +36,13 @@
     "queued": "Inoltro autorizzato, in attesa di consegna",
     "pending": "Risposta in attesa del tuo consenso",
     "authorizedVersion": "Versione autorizzata:",
-    "implicit": "Risposta implicita: ultimo messaggio del turno."
+    "implicit": "Risposta implicita: ultimo messaggio del turno.",
+    "to": "Invia la risposta a",
+    "toSender": "{{sender}} (chi ha chiesto)",
+    "forward": "Inoltra a {{target}}",
+    "forwardNote": "{{sender}} riceve solo un avviso che la risposta è andata altrove; {{target}} la riceve come nuovo messaggio.",
+    "forwarded": "Risposta inoltrata a un'altra sessione.",
+    "forwardedTo": "Risposta inoltrata da te a un'altra sessione (#{{id}}); il mittente ha ricevuto un avviso"
   },
   "requests": {
     "sent": "Richiesta #{{id}} inviata.",
@@ -135,7 +141,8 @@
     "relationTypeInUse": "Esistono ancora relazioni di questo tipo.",
     "relationExists": "Questa relazione esiste già.",
     "relationSelf": "Un nodo non può avere una relazione con se stesso.",
-    "relationSave": "Impossibile salvare la relazione. Controlla la connessione."
+    "relationSave": "Impossibile salvare la relazione. Controlla la connessione.",
+    "forwardInvalid": "Scegli una sessione aperta diversa dal mittente e da chi ha risposto."
   },
   "sessions": {
     "closed": "Chiusa",

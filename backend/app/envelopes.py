@@ -55,7 +55,11 @@ def outcome(req: RequestModel, channel="tmux", language=None) -> str:
         note = {RequestStatus.DELIVERY_FAILED: "failed", RequestStatus.STALLED: "stalled", RequestStatus.EXPIRED: "expired"}.get(req.status)
         if note:
             lines.append(text(f"envelope.{note}", language))
-        if req.response is not None:
+        if req.return_decision == "forwarded":
+            # The user sent the reply to another session: only a notice here.
+            lines.append(text("envelope.reply_forwarded", language, responder=req.recipient_id,
+                              request=req.return_forward_id or "?"))
+        elif req.response is not None:
             origin = text("envelope.implicit", language) if req.response.implicit else ""
             content = req.return_text if req.return_text is not None else req.response.content
             lines.append(text("envelope.response", language, responder=req.response.responder_id, origin=origin, content=content))

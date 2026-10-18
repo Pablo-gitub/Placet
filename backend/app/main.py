@@ -728,13 +728,41 @@ def create_app(
         notify_change(request_id)
         return updated
 
+    def forward_reply(req: RequestModel, payload: OutcomeDecision, who: Principal) -> RequestModel:
+        """
+        The user sends an agent's reply to another session instead of the
+        sender: a new prompt from the replying agent, already approved; the
+        sender gets only a notice (RFC-07b).
+        """
+        target = db.get_session(payload.forward_session_id)
+        if not payload.approve or target is None or req.response is None:
+            raise ProductError(422, "return.forward_invalid", "Choose an open session to forward the reply to.")
+        if target.id in (req.sender_session_id, req.recipient_session_id):
+            raise ProductError(422, "return.forward_invalid", "Choose a session other than the sender and the one that replied.")
+        check_target_session(target.id, target.agent_id)
+        content = payload.edited_response if payload.edited_response is not None else req.response.content
+        if not db.claim_return_forward(req.id, content, who.actor):
+            raise ProductError(409, "return.unavailable", "The reply has already been decided, forwarded, or is no longer available.")
+        forward = db.create_request(RequestCreate(
+            sender_id=req.recipient_id, recipient_id=target.agent_id, prompt=content,
+            recipient_session_id=target.id, priority=Priority.NORMAL), actor=who.actor)
+        if req.recipient_session_id:
+            db.link_sender_session(forward.id, req.recipient_session_id, req.recipient_id)
+        db.update_request_decision(forward.id, RequestStatus.APPROVED, actor=who.actor)
+        db.set_return_forward(req.id, forward.id, who.actor)
+        notify_change(forward.id)
+        notify_change(req.id)
+        return db.get_request(req.id)
+
     @app.post("/api/requests/{request_id}/return-decision", response_model=RequestModel)
     async def decide_return(request_id: int, payload: OutcomeDecision,
                             who: Principal = Depends(principal)):
         require_human(who)
-        get_or_404(request_id)
+        req = get_or_404(request_id)
         if payload.edited_response is not None and not payload.edited_response.strip():
             raise ProductError(422, "return.empty", "The reply cannot be empty.")
+        if payload.forward_session_id is not None:
+            return forward_reply(req, payload, who)
         updated = db.decide_return(request_id, payload.approve, payload.edited_response, who.actor)
         if updated is None:
             raise ProductError(409, "return.unavailable", "The reply has already been decided, forwarded, or is no longer available.")

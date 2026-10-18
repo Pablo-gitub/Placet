@@ -219,7 +219,7 @@ export default function App() {
       });
       if (res.ok) {
         showFeedback(
-          { key: body.return_decision ? (body.approve ? "return.approved" : "return.rejected") : (body.status === "APPROVED" ? "requests.sent" : "requests.rejected"), params: { id: requestId } }
+          { key: body.return_decision ? (body.forward_session_id ? "return.forwarded" : body.approve ? "return.approved" : "return.rejected") : (body.status === "APPROVED" ? "requests.sent" : "requests.rejected"), params: { id: requestId } }
         );
         await fetchRequests();
       } else {
