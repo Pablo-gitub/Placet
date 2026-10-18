@@ -1,6 +1,6 @@
 import React from "react";
 import { render, screen } from "@testing-library/react";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import i18n from "../i18n";
 import UsageBar from "../UsageBar";
 import { untilReset, usageRows } from "../usage";
@@ -49,7 +49,11 @@ describe("usage rows", () => {
 });
 
 describe("UsageBar", () => {
+  afterEach(() => vi.useRealTimers());
+
   it("shows each provider's windows and nothing without data", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
     const { rerender } = render(<UsageBar usage={[codex]} />);
     const row = screen.getByTestId("usage-codex:");
     expect(row).toHaveTextContent("Codex");
