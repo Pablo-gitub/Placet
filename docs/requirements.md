@@ -63,7 +63,7 @@ Problems addressed:
 | ID | Requirement | Status |
 | --- | --- | --- |
 | RFC-01 | Agents address a specific **session** (node), not merely a provider. | [Implemented] for sessions; [Decided] for nodes. |
-| RFC-02 | Sessions have **stable named nodes** (name, provider, folder). Real sessions attach and reattach after `/clear` or reopening. | [Decided] |
+| RFC-02 | Sessions have **stable named nodes** (name, provider, folder). Real sessions attach and reattach after `/clear` or reopening. | [Implemented] October 18, 2026: naming, attach/detach and rename from the chat header; automatic reattach after Claude Code `/clear`. Reopening keeps the same session id, so the node stays. Other providers' equivalents of `/clear` attach by hand. |
 | RFC-03 | Reusable **relation types** (ID, name, description); the AI reads the description to understand when and why to contact that session. | [Decided] |
 | RFC-04 | **Global relations** A→B have a type and `manual` or `automatic` approval. Unique by (A, B, type); several types may connect the same sessions. | [Decided] |
 | RFC-05 | `manual`: user approves, edits or rejects. `automatic`: prompt goes directly to B. | [Decided] |

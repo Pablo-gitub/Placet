@@ -265,7 +265,8 @@ bridge → find/read/filter provider file → POST /api/bridge/jobs/{id}/result 
 - **`requests`:** `id`, `sender_id`, `recipient_id`, `question_type`, `prompt`, `edited_prompt`, `prompt_source`, `context`, `options`, `selected_options`, `custom_text`, `status`, `priority`, `created_at`, `expires_at`, `decided_at`, `completed_at`, `updated_at`, `delivered_at`, `delivery_attempts`, `delivering_since`, `executing_since`, `sender_session_id`, `recipient_session_id`; three-aspect columns in §3.7; `delivery_mode`; return policy fields `allow_auto_return`, `return_decision`, `return_text`.
 - **`responses`:** unique `request_id`, `responder_id`, `content`, `implicit`, `created_at`.
 - **`request_events`:** per-request `actor`, `event`, `details`, `at` timeline.
-- **`sessions`:** provider `id`, `agent_id`, `provider`, `entrypoint`, `cwd`, `title`, `tmux_session`, `state`, `turn_request_id`, `started_at`, `last_seen_at`, `waiter_seen_at`, `ended_at`, `activity_at` (turn activity), `pinned_at`, and suspension/exclusion metadata. Closed/suspended/reachable are derived using lifecycle observations, not simply an idle label.
+- **`sessions`:** provider `id`, `agent_id`, `provider`, `entrypoint`, `cwd`, `title`, `tmux_session`, `state`, `turn_request_id`, `started_at`, `last_seen_at`, `waiter_seen_at`, `ended_at`, `activity_at` (turn activity), `pinned_at`, `model`, `node_id`, and suspension/exclusion metadata. Closed/suspended/reachable are derived using lifecycle observations, not simply an idle label.
+- **`nodes`:** `id`, `name` (unique, case-insensitive), `provider`, `cwd`, `created_at` (RFC-02). A node's current session is its attached session seen most recently. The user names a session from the chat header, attaches it to an existing node of the same provider or detaches it. A Claude Code `SessionStart` with source `clear` takes the node of the conversation that ended within two minutes for the same agent, provider, folder and tmux session, unless the node already has an open conversation.
 - **`agent_states`:** per-agent tmux state.
 - **`app_settings`:** persistent key/value settings; `background_language` is human-controlled, independent of local UI preference.
 
@@ -274,8 +275,6 @@ This is a conceptual inventory; `backend/app/database.py` is the schema/migratio
 ### Planned additions
 
 ```text
-nodes                 (id, name, provider, folder)       stable Placet session
-sessions.node_id      → nodes.id                        real session attaches to node
 sessions.transcript_path                                first-hook metadata for bridge
 projects              (id, name)
 project_nodes         (project_id, node_id)              node may belong to several projects

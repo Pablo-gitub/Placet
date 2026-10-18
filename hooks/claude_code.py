@@ -97,7 +97,8 @@ def build_event(event: dict, provider: str = "claude-code"):
         "tmux_session": _tmux_session(),
     }
     if name == "SessionStart":
-        return {"event": "start", **common}
+        # "clear" lets Placet move the node to the new conversation (RFC-02).
+        return {"event": "start", "start_source": event.get("source"), **common}
     if name == "UserPromptSubmit":
         payload = {"event": "prompt", **common}
         match = PLACET_REQUEST.search(event.get("prompt") or "")

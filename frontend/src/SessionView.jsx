@@ -28,6 +28,7 @@ import { actionLabel, groupEntries, timeOf } from "./chatEntries";
 import { providerClass, providerOf, sessionName, sessionPlace, sessionStatus } from "./sessionInfo";
 import { useTranscript } from "./useTranscript";
 import { holdsQueueUnseen, isUncertain } from "./aspects";
+import NodeControl from "./NodeControl";
 
 const ACTION_ICONS = {
   command: Terminal,
@@ -353,6 +354,7 @@ export default function SessionView({
           )}
           <ModelLine meta={{ model: session?.model, ...meta }} />
         </div>
+        <NodeControl session={session} />
         {state && (
           <span className={`session-state state-${state.key}`} data-testid="session-view-state">
             <Circle size={8} fill="currentColor" />

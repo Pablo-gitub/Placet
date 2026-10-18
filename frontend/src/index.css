@@ -1267,3 +1267,17 @@ body.chat-open { overflow: hidden; }
   .usage-row { grid-template-columns: 1fr 1fr; row-gap: 0.15rem; }
   .usage-provider { grid-column: 1 / -1; }
 }
+
+/* RFC-02: the session's node name in the chat header. */
+.node-chip {
+  display: inline-flex; align-items: center; gap: 0.3rem; flex-shrink: 0;
+  max-width: 9rem; padding: 0.25rem 0.45rem;
+  border: 1px dashed var(--border-color); border-radius: 999px;
+  background: transparent; color: var(--text-muted);
+  font: inherit; font-size: 0.75rem; cursor: pointer;
+}
+.node-chip.named { border-style: solid; color: var(--text-main); background: var(--bg-secondary); }
+.node-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dialog-body .session-select { width: 100%; margin-bottom: 0.6rem; }
+.dialog-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem; }
+.field-hint { font-size: 0.75rem; color: var(--text-muted); margin: -0.3rem 0 0.6rem; }

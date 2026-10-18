@@ -46,6 +46,9 @@ export function apiErrorDescriptor(body, status) {
     "delivery.retry_unavailable": "errors.retryUnavailable",
     "delivery.cancel_unavailable": "errors.cancelUnavailable",
     "delivery.release_unavailable": "errors.releaseUnavailable",
+    "node.name_taken": "errors.nodeNameTaken",
+    "node.not_found": "errors.notFound",
+    "node.other_provider": "errors.nodeOtherProvider",
     "return.empty": "errors.returnEmpty",
     "return.unavailable": "errors.returnUnavailable",
   };

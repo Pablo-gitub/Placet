@@ -29,7 +29,7 @@ from backend.app.auth import (
     require_human,
 )
 from backend.app.config import PlacetConfig, load_agents_config
-from backend.app.database import Database
+from backend.app.database import Database, NodeNameTaken
 from backend.app.models import (
     ProviderUsage,
     UsageReport,
@@ -42,6 +42,7 @@ from backend.app.models import (
     RequestDecision,
     OutcomeDecision,
     SessionMessage,
+    NodeModel,
     SessionModel,
     BRIDGE_PROVIDERS,
     SUSPENDING_PROVIDERS,
@@ -87,6 +88,8 @@ class SessionEventPayload(BaseModel):
     request_id: Optional[int] = None
     # stop: the agent's last message, used as implicit reply if needed.
     last_message: Optional[str] = None
+    # start: why the session started (Claude Code: startup, resume, clear, compact).
+    start_source: Optional[str] = Field(None, max_length=32)
 
 
 class TitlesReport(BaseModel):
@@ -119,6 +122,23 @@ class QueueRelease(BaseModel):
 
 class PinPayload(BaseModel):
     pinned: bool
+
+
+# RFC-02: names agents and people use to address a node.
+NODE_NAME = r"^[\w][\w .\-]{0,39}$"
+
+
+class NodeCreate(BaseModel):
+    name: str = Field(..., pattern=NODE_NAME)
+    session_id: str = Field(..., min_length=1, max_length=200)
+
+
+class NodeRename(BaseModel):
+    name: str = Field(..., pattern=NODE_NAME)
+
+
+class NodeAttach(BaseModel):
+    node_id: Optional[int] = None
 
 
 class BridgeJobResult(BaseModel):
@@ -871,6 +891,8 @@ def create_app(
             db.reopen_session(session_id)
         if payload.event == "start":
             db.set_session_state(session_id, "idle")
+            if payload.start_source == "clear":
+                result["node_id"] = db.reattach_after_clear(session_id)
         elif payload.event == "prompt":
             turn_request_id = None
             if payload.request_id is not None:
@@ -1084,6 +1106,67 @@ def create_app(
         require_human(who)
         if not db.set_session_pinned(session_id, body.pinned):
             raise ProductError(404, "session.not_found", "Session not found")
+        notify_session(session_id)
+        return db.get_session(session_id)
+
+    # --- Nodes (RFC-02) -------------------------------------------------------
+
+    def node_name_taken(name: str) -> ProductError:
+        return ProductError(409, "node.name_taken", "Another node already has this name.")
+
+    @app.get("/api/nodes", response_model=List[NodeModel])
+    async def list_nodes(who: Principal = Depends(principal)):
+        require_human(who)
+        return db.list_nodes()
+
+    @app.post("/api/nodes", response_model=NodeModel, status_code=201)
+    async def create_node(body: NodeCreate, who: Principal = Depends(principal)):
+        """Names a session: it becomes a node other sessions can address."""
+        require_human(who)
+        try:
+            node = db.create_node(body.name.strip(), body.session_id)
+        except NodeNameTaken:
+            raise node_name_taken(body.name) from None
+        if node is None:
+            raise ProductError(404, "session.not_found", "Session not found")
+        notify_session(body.session_id)
+        return node
+
+    @app.patch("/api/nodes/{node_id}", response_model=NodeModel)
+    async def rename_node(node_id: int, body: NodeRename, who: Principal = Depends(principal)):
+        require_human(who)
+        try:
+            found = db.rename_node(node_id, body.name.strip())
+        except NodeNameTaken:
+            raise node_name_taken(body.name) from None
+        if not found:
+            raise ProductError(404, "node.not_found", "Node not found")
+        node = db.get_node(node_id)
+        if node.session_id:
+            notify_session(node.session_id)
+        return node
+
+    @app.delete("/api/nodes/{node_id}", status_code=204)
+    async def delete_node(node_id: int, who: Principal = Depends(principal)):
+        """Removes the name; the sessions stay, detached."""
+        require_human(who)
+        if db.get_node(node_id) is None:
+            raise ProductError(404, "node.not_found", "Node not found")
+        for session_id in db.delete_node(node_id):
+            notify_session(session_id)
+        return Response(status_code=204)
+
+    @app.put("/api/sessions/{session_id}/node", response_model=SessionModel)
+    async def attach_session(session_id: str, body: NodeAttach, who: Principal = Depends(principal)):
+        """Attaches a session to an existing node, or detaches it (node_id null)."""
+        require_human(who)
+        outcome = db.attach_session(session_id, body.node_id)
+        if outcome == "session":
+            raise ProductError(404, "session.not_found", "Session not found")
+        if outcome == "node":
+            raise ProductError(404, "node.not_found", "Node not found")
+        if outcome == "provider":
+            raise ProductError(409, "node.other_provider", "The node belongs to another provider.")
         notify_session(session_id)
         return db.get_session(session_id)
 

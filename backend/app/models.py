@@ -284,6 +284,20 @@ class SessionModel(BaseModel):
     # Its project has a `.placet-off` (RF-45): hidden, nothing delivered; the
     # data stays for the audit.
     excluded: bool = False
+    # RFC-02: the stable named node this conversation belongs to.
+    node_id: Optional[int] = None
+    node_name: Optional[str] = None
+
+
+class NodeModel(BaseModel):
+    """A stable named session (RFC-02): survives `/clear` and reopening."""
+    id: int
+    name: str
+    provider: str
+    cwd: Optional[str] = None
+    created_at: datetime
+    # The attached session seen most recently, if any.
+    session_id: Optional[str] = None
 
 
 class RequestEvent(BaseModel):

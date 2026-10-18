@@ -18,6 +18,7 @@ from backend.app.models import (
     Priority,
     QuestionType,
     ResponseModel,
+    NodeModel,
     SessionModel,
     WAITER_TTL_SECONDS,
     is_settled,
@@ -66,6 +67,19 @@ _NOT_EXCLUDED_SQL = (
     "NOT EXISTS (SELECT 1 FROM sessions x WHERE x.excluded_at IS NOT NULL"
     " AND x.id IN (r.sender_session_id, r.recipient_session_id))"
 )
+
+
+# Sessions with the name of their node (RFC-02).
+SESSIONS_WITH_NODE = (
+    "SELECT sessions.*, nodes.name AS node_name FROM sessions"
+    " LEFT JOIN nodes ON nodes.id = sessions.node_id"
+)
+# `/clear` ends one conversation and starts the next within a few seconds.
+REATTACH_SECONDS = 120.0
+
+
+class NodeNameTaken(ValueError):
+    """Another node already has this name (names ignore case)."""
 
 
 def _new_attempt() -> str:
@@ -221,6 +235,18 @@ class Database:
             for col in ("activity_at", "pinned_at", "excluded_at", "suspended_at", "model"):
                 if col not in session_cols:
                     cursor.execute(f"ALTER TABLE sessions ADD COLUMN {col} TEXT;")
+            # RFC-02: the stable named node the session is attached to.
+            if "node_id" not in session_cols:
+                cursor.execute("ALTER TABLE sessions ADD COLUMN node_id INTEGER;")
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS nodes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                provider TEXT NOT NULL,
+                cwd TEXT,
+                created_at TEXT NOT NULL
+            );
+            """)
             if "suspended_at" not in session_cols:
                 # Codex sessions "ended" before were only unloaded by the app.
                 cursor.execute(
@@ -1181,6 +1207,8 @@ class Database:
             pinned=row["pinned_at"] is not None,
             reachable=reachable and row["excluded_at"] is None,
             excluded=row["excluded_at"] is not None,
+            node_id=row["node_id"],
+            node_name=row["node_name"] if "node_name" in row.keys() else None,
         )
 
     def upsert_session(
@@ -1234,7 +1262,7 @@ class Database:
     ) -> Optional[SessionModel]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
+            cursor.execute(f"{SESSIONS_WITH_NODE} WHERE sessions.id = ?", (session_id,))
             row = cursor.fetchone()
             return self._row_to_session(row, waiter_ttl_seconds) if row else None
 
@@ -1247,16 +1275,16 @@ class Database:
     ) -> List[SessionModel]:
         where, params = [], []
         if not include_excluded:
-            where.append("excluded_at IS NULL")
+            where.append("sessions.excluded_at IS NULL")
         if agent_id is not None:
-            where.append("agent_id = ?")
+            where.append("sessions.agent_id = ?")
             params.append(agent_id)
         if not include_ended:
-            where.append("ended_at IS NULL")
-        sql = "SELECT * FROM sessions"
+            where.append("sessions.ended_at IS NULL")
+        sql = SESSIONS_WITH_NODE
         if where:
             sql += " WHERE " + " AND ".join(where)
-        sql += " ORDER BY last_seen_at DESC"
+        sql += " ORDER BY sessions.last_seen_at DESC"
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(sql, params)
@@ -1335,6 +1363,116 @@ class Database:
                 "UPDATE sessions SET waiter_seen_at = ?, last_seen_at = ? WHERE id = ?",
                 (now, now, session_id),
             )
+
+    # --- Nodes (RFC-02): stable named sessions -------------------------------
+
+    @staticmethod
+    def _row_to_node(row: sqlite3.Row) -> NodeModel:
+        return NodeModel(id=row["id"], name=row["name"], provider=row["provider"], cwd=row["cwd"],
+                         created_at=datetime.fromisoformat(row["created_at"]),
+                         session_id=row["session_id"])
+
+    # The node's current session: the attached one seen most recently.
+    _NODES_SQL = (
+        "SELECT nodes.*, (SELECT s.id FROM sessions s WHERE s.node_id = nodes.id"
+        " ORDER BY s.ended_at IS NOT NULL, s.last_seen_at DESC LIMIT 1) AS session_id FROM nodes"
+    )
+
+    def list_nodes(self) -> List[NodeModel]:
+        with self._get_connection() as conn:
+            rows = conn.execute(f"{self._NODES_SQL} ORDER BY nodes.name COLLATE NOCASE").fetchall()
+            return [self._row_to_node(r) for r in rows]
+
+    def get_node(self, node_id: int) -> Optional[NodeModel]:
+        with self._get_connection() as conn:
+            row = conn.execute(f"{self._NODES_SQL} WHERE nodes.id = ?", (node_id,)).fetchone()
+            return self._row_to_node(row) if row else None
+
+    def create_node(self, name: str, session_id: str) -> Optional[NodeModel]:
+        """
+        A node named after the user's choice, with the session attached.
+        None if the session does not exist; NodeNameTaken if the name is used.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            session = conn.execute("SELECT provider, cwd FROM sessions WHERE id = ?",
+                                   (session_id,)).fetchone()
+            if session is None:
+                return None
+            try:
+                cur = conn.execute(
+                    "INSERT INTO nodes (name, provider, cwd, created_at) VALUES (?, ?, ?, ?)",
+                    (name, session["provider"] or "unknown", session["cwd"], now))
+            except sqlite3.IntegrityError:
+                raise NodeNameTaken(name) from None
+            conn.execute("UPDATE sessions SET node_id = ? WHERE id = ?", (cur.lastrowid, session_id))
+            node_id = cur.lastrowid
+        return self.get_node(node_id)
+
+    def rename_node(self, node_id: int, name: str) -> bool:
+        with self._get_connection() as conn:
+            try:
+                cur = conn.execute("UPDATE nodes SET name = ? WHERE id = ?", (name, node_id))
+            except sqlite3.IntegrityError:
+                raise NodeNameTaken(name) from None
+            return cur.rowcount > 0
+
+    def delete_node(self, node_id: int) -> List[str]:
+        """Removes the node; its sessions stay, detached. Returns them."""
+        with self._get_connection() as conn:
+            ids = [r["id"] for r in conn.execute("SELECT id FROM sessions WHERE node_id = ?", (node_id,))]
+            conn.execute("UPDATE sessions SET node_id = NULL WHERE node_id = ?", (node_id,))
+            cur = conn.execute("DELETE FROM nodes WHERE id = ?", (node_id,))
+            return ids if cur.rowcount else []
+
+    def attach_session(self, session_id: str, node_id: Optional[int]) -> str:
+        """
+        Attaches a session to a node (None detaches it). Returns "ok",
+        "session" or "node" (not found) or "provider" (the node belongs to
+        another provider: a node is one conversation of one app).
+        """
+        with self._get_connection() as conn:
+            session = conn.execute("SELECT provider, cwd FROM sessions WHERE id = ?",
+                                   (session_id,)).fetchone()
+            if session is None:
+                return "session"
+            if node_id is not None:
+                node = conn.execute("SELECT provider FROM nodes WHERE id = ?", (node_id,)).fetchone()
+                if node is None:
+                    return "node"
+                if node["provider"] != (session["provider"] or "unknown"):
+                    return "provider"
+                conn.execute("UPDATE nodes SET cwd = COALESCE(?, cwd) WHERE id = ?",
+                             (session["cwd"], node_id))
+            conn.execute("UPDATE sessions SET node_id = ? WHERE id = ?", (node_id, session_id))
+            return "ok"
+
+    def reattach_after_clear(self, session_id: str, seconds: float = REATTACH_SECONDS) -> Optional[int]:
+        """
+        `/clear` ends a conversation and starts a new one with another id:
+        the new session takes the node of the one that just ended in the
+        same folder, for the same agent and provider (and tmux session, if
+        any). Returns the node id, or None.
+        """
+        horizon = (datetime.now(timezone.utc) - timedelta(seconds=seconds)).isoformat()
+        with self._get_connection() as conn:
+            new = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+            if new is None or new["node_id"] is not None or not new["cwd"]:
+                return None
+            old = conn.execute(
+                "SELECT node_id FROM sessions WHERE id != ? AND node_id IS NOT NULL"
+                " AND agent_id = ? AND provider IS ? AND cwd = ? AND tmux_session IS ?"
+                " AND COALESCE(ended_at, suspended_at) >= ?"
+                # A node with an open conversation keeps it.
+                " AND NOT EXISTS (SELECT 1 FROM sessions o WHERE o.node_id = sessions.node_id"
+                " AND o.ended_at IS NULL AND o.suspended_at IS NULL)"
+                " ORDER BY COALESCE(ended_at, suspended_at) DESC LIMIT 1",
+                (session_id, new["agent_id"], new["provider"], new["cwd"], new["tmux_session"], horizon),
+            ).fetchone()
+            if old is None:
+                return None
+            conn.execute("UPDATE sessions SET node_id = ? WHERE id = ?", (old["node_id"], session_id))
+            return old["node_id"]
 
     def set_usage(self, provider: str, data: str) -> None:
         now = datetime.now(timezone.utc).isoformat()

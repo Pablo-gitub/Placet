@@ -125,7 +125,10 @@
     "attachmentFailed": "Impossibile caricare l’allegato. Riprova.",
     "retryUnavailable": "La consegna non è più incerta. Aggiorna lo stato.",
     "cancelUnavailable": "Il messaggio non si può più annullare.",
-    "releaseUnavailable": "La richiesta non sta trattenendo la sessione."
+    "releaseUnavailable": "La richiesta non sta trattenendo la sessione.",
+    "nodeNameTaken": "Un altro nodo ha già questo nome.",
+    "nodeOtherProvider": "Quel nodo appartiene a un'altra app.",
+    "nodeSave": "Impossibile salvare il nodo. Controlla la connessione."
   },
   "sessions": {
     "closed": "Chiusa",
@@ -366,5 +369,19 @@
     "minutes": "{{m}} min",
     "hoursMinutes": "{{h}}h{{m}}",
     "daysHours": "{{d}}g {{h}}h"
+  },
+  "node": {
+    "title": "Nome del nodo",
+    "chip": "Nodo: {{name}}",
+    "explanation": "Un nodo è un nome stabile per questa conversazione: le altre sessioni possono indirizzarlo e, dopo /clear, passa alla nuova conversazione.",
+    "name": "Nome",
+    "nameRule": "Fino a 40 tra lettere, cifre, spazi, punti, trattini o trattini bassi.",
+    "create": "Crea nodo",
+    "rename": "Rinomina",
+    "attachLabel": "Oppure aggancia a un nodo esistente",
+    "attachChoose": "Scegli un nodo…",
+    "detach": "Sgancia",
+    "delete": "Elimina nodo",
+    "deleteConfirm": "Eliminare il nodo “{{name}}”? Le sue sessioni restano, senza nome."
   }
 }

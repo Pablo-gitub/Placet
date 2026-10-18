@@ -125,7 +125,10 @@
     "attachmentFailed": "Unable to load the attachment. Try again.",
     "retryUnavailable": "Delivery is no longer uncertain. Refresh its status.",
     "cancelUnavailable": "This message can no longer be cancelled.",
-    "releaseUnavailable": "This request is no longer holding the session queue."
+    "releaseUnavailable": "This request is no longer holding the session queue.",
+    "nodeNameTaken": "Another node already has this name.",
+    "nodeOtherProvider": "That node belongs to another app.",
+    "nodeSave": "Unable to save the node. Check your connection."
   },
   "sessions": {
     "closed": "Closed",
@@ -366,5 +369,19 @@
     "minutes": "{{m}} min",
     "hoursMinutes": "{{h}}h{{m}}",
     "daysHours": "{{d}}d {{h}}h"
+  },
+  "node": {
+    "title": "Node name",
+    "chip": "Node: {{name}}",
+    "explanation": "A node is a stable name for this conversation: other sessions can address it, and it moves to the new conversation after /clear.",
+    "name": "Name",
+    "nameRule": "Up to 40 letters, digits, spaces, dots, dashes or underscores.",
+    "create": "Create node",
+    "rename": "Rename",
+    "attachLabel": "Or attach to an existing node",
+    "attachChoose": "Choose a node…",
+    "detach": "Detach",
+    "delete": "Delete node",
+    "deleteConfirm": "Delete node “{{name}}”? Its sessions stay, without a name."
   }
 }
