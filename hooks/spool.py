@@ -1,5 +1,5 @@
 """
-Local event queue of the Placet hooks (ARCHITETTURA 3.6, stdlib only).
+Local event queue of the Placet hooks (docs/architecture.md, section 3.6; stdlib only).
 
 Hooks never call the backend: they write the event here and exit, so a
 backend that is down, slow or restarting never delays a turn nor loses its

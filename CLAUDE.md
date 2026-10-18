@@ -1,12 +1,12 @@
-# Istruzioni per Claude
+# Instructions for Claude
 
-## Lingua
+## Language
 
-**Rispondi sempre in italiano.** Vale per ogni messaggio rivolto all'utente: risposte, aggiornamenti di avanzamento, riepiloghi, tabelle e domande. Non passare all'inglese nemmeno dopo lunghe sessioni tecniche o quando citi documentazione, log o output in inglese (riportali, ma commentali in italiano).
+**Always answer the maintainer in Italian.** This applies to every message addressed to the user: answers, progress updates, summaries, tables and questions. Do not switch to English even after long technical sessions or when quoting English documentation, logs or output (quote them, but comment on them in Italian).
 
-Restano in inglese, come nel resto del repository: codice, commenti nel codice, nomi di file e messaggi di commit.
+Everything in the repository stays in English: code, code comments, file names, commit messages and documentation (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 
-## Progetto
+## Project
 
-- Requisiti: [REQUISITI.md](REQUISITI.md) · Architettura: [ARCHITETTURA.md](ARCHITETTURA.md) · Esperimenti: [LABORATORIO.md](LABORATORIO.md).
-- `AGENTS.md` non è un file di istruzioni: è il registro degli agenti letto dal backend Placet (frontmatter YAML). Non va modificato con testo libero, altrimenti il backend non riesce più a leggerlo.
+- Documentation map: [docs/README.md](docs/README.md) · Requirements: [docs/requirements.md](docs/requirements.md) · Architecture: [docs/architecture.md](docs/architecture.md) · Experiments: [docs/experiments/provider-integration.md](docs/experiments/provider-integration.md).
+- `AGENTS.md` is not an instruction file: it is the agent registry read by the Placet backend (YAML front matter). Do not add free text to it, or the backend can no longer read it.

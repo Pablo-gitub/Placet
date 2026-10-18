@@ -1,0 +1,191 @@
+# Placet application requirements
+
+> **Version:** 2.1, 2026-10-16. **Baseline:** consolidated after the multi-provider laboratory and two Codex reviews.
+>
+> **Sources:** ChatGPT discussion on 2026-10-09; Claude Code sessions on October 10–16; `/grill-me` interview on October 14; discussion and laboratory on October 15–16 ([results](experiments/provider-integration.md)).
+>
+> **Documentation migration, 2026-10-18:** requirement IDs and the original baseline are preserved. Later implementation notes below distinguish subsequent changes from the baseline. See [architecture](architecture.md), [provider integration record](experiments/2026-10-18-session-integration.md) and [localization](localization.md) for newer behavior. A status in this document is not a guarantee about an installed deployment or every provider version.
+
+Each requirement has a status:
+
+- **[Implemented]:** present in the code and verified within the stated scope.
+- **[Decided]:** agreed and confirmed, not yet implemented.
+- **[Superseded]:** replaced by the identified newer requirement.
+- **[Future]:** planned for a later version.
+
+## 1. Purpose
+
+Placet is a **single point for human supervision and AI-agent cooperation** and, since v2, a **phone interface for following and directing your sessions**.
+
+1. **Human-in-the-loop supervision:** agents from any provider ask for decisions and approvals; you answer from your phone. Relevant external actions and public messages require your consent.
+2. **Controlled cooperation across sessions:** sessions from Claude Code, Codex and Antigravity/Gemini (and eventually other providers) exchange prompts and tasks through **relations** you define. Each relation specifies human review (`manual`) or direct delivery (`automatic`). Replies return to the calling session subject to the return policy.
+3. **Sessions on your phone:** read a conversation, answer its questions within it, write unsolicited messages and wake the session. Continue on the PC or direct work remotely.
+
+Problems addressed:
+
+- Provider mobile apps do not expose all sessions running on the PC or sessions from other providers.
+- Providers operate in silos; collaboration otherwise requires copying and pasting.
+- Placet combines mobile access, inter-agent messaging and session visibility through MCP and REST.
+
+**Provider priority:** Claude Code (desktop and CLI), Codex (desktop and CLI), Antigravity 2.0 (app and `agy` CLI). Claude Cowork/Projects and ChatGPT Work are desirable but lower priority [Future].
+
+## 2. Actors
+
+| Actor | Role |
+| --- | --- |
+| **User** | Receives phone notifications, reads sessions, approves or edits requests, writes to sessions, defines projects and relations. |
+| **Sessions** | Provider conversations in desktop apps or CLIs. Send and receive requests; each belongs to an agent (`claude`, `codex`, `gemini`). |
+| **Node** | A stable named Placet session (name, provider, folder) to which a real session attaches; survives `/clear` and reopening. |
+| **Placet backend** | FastAPI, SQLite and ntfy over Tailscale; source of truth and coordinator. Never reads provider conversation files in production. |
+| **Placet MCP server** | Tools exposed to each agent through stdio, with identity derived from its token. |
+| **Local bridge** | User daemon on the PC: delivers through provider channels, reads conversations on demand, collects usage and context. |
+| **Executor** | Separate service performing external actions, such as publishing, only after approval [Future]. |
+
+## 3. Functional requirements
+
+### 3.1 Agent requests
+
+| ID | Requirement | Status |
+| --- | --- | --- |
+| RF-01 | Agents contact Placet **through MCP or REST**, never by writing to its database. | [Implemented] |
+| RF-02 | Human questions support **single choice, multiple choice, confirmation and prompt review**. | [Implemented] |
+| RF-03 | Every choice question always includes a free-text **Other** option. | [Implemented] |
+| RF-04 | MCP tools: `placet_ask_human`, `placet_send_to_agent`, `placet_reply`, `placet_ack`, `placet_list_agents`, `placet_check_status`. | [Implemented] |
+| RF-05 | Each request shows sender (including project/session origin), recipient, prompt and options. | [Implemented] |
+| RF-05b | `context` becomes **unnecessary** because context can be read in the sender's chat (RF-30). Remove it from `placet_send_to_agent`; make it optional for `placet_ask_human`. | [Decided], replacing the October 15 mandatory-context decision. Currently still required for human questions. |
+| RF-06 | An agent can cancel a pending request. | [Implemented] |
+| RF-07 | Configurable expiration and notification priority. | [Implemented] |
+| RF-08 | A prompt for another agent may come from a **Markdown file** (`prompt_file`); the PWA renders it and allows text editing. | [Implemented] |
+| RF-09 | Human questions have a **server-enforced minimum wait**; agents cannot choose a few seconds. On timeout the tool explains that the result will arrive through a wakeup. | [Implemented], minimum 60 seconds; `note` in the PENDING result. |
+
+### 3.2 Session communication: projects, relations and types
+
+| ID | Requirement | Status |
+| --- | --- | --- |
+| RFC-01 | Agents address a specific **session** (node), not merely a provider. | [Implemented] for sessions; [Decided] for nodes. |
+| RFC-02 | Sessions have **stable named nodes** (name, provider, folder). Real sessions attach and reattach after `/clear` or reopening. | [Decided] |
+| RFC-03 | Reusable **relation types** (ID, name, description); the AI reads the description to understand when and why to contact that session. | [Decided] |
+| RFC-04 | **Global relations** A→B have a type and `manual` or `automatic` approval. Unique by (A, B, type); several types may connect the same sessions. | [Decided] |
+| RFC-05 | `manual`: user approves, edits or rejects. `automatic`: prompt goes directly to B. | [Decided] |
+| RFC-06 | **Agents see the delivery policy**: automatic delivery without human review, or human review required with possible editing/rejection. Recipients see sender and review/edit provenance. Delivery approval does not authorize everything requested in the prompt. | [Decided], replacing the October 15 hidden-policy design. |
+| RFC-07 | Without a relation, delivery is always `manual`. **Ad hoc requests**, including those prompted by phone `@` mentions (RF-39), remain available. A **Create relation** action on the request card lets the user choose type and policy; the current request proceeds normally and the relation is available for future requests. | [Decided] |
+| RF-39 | **Mentions:** `@` in the composer references other sessions. The agent receives references as data and prepares `placet_send_to_agent` requests under ordinary approval rules. A mention alone sends nothing. | [Implemented] |
+| RFC-08 | Agent API: `send(target, type_id, prompt)`; a tool lists outgoing relations with destination, type, description and delivery policy. | [Decided] |
+| RFC-13 | **Replies** follow the reverse relation's policy: approving A→B does not approve B→A. | [Decided] for relations; current per-request return approval implemented, see below. |
+| RFC-14 | **Loop limits:** at most 3 consecutive automatic hops per chain before asking the user, and 20 automatic messages/hour/relation. Project settings (`⋯`) can override defaults. PWA **Stop all** action. | [Decided] |
+| RFC-09 | **Projects** group nodes and relations; both can belong to multiple projects. Reusing an existing A→B type warns that the relation is shared and suggests another type, with confirmation available. | [Decided] |
+| RFC-10 | Relations replace per-agent-pair rules in `AGENTS.md`; the file keeps agent definitions, tokens and descriptions. | [Decided] |
+| RFC-11 | B receives **only the prompt**, with a preamble whose origin can be verified using a Placet tool. | [Implemented] prompt-only delivery; [Decided] verifiable-origin protocol. |
+| RFC-12 | Sessions never receive their own requests, and a request for one session is never delivered to another. | [Implemented] |
+
+### 3.3 Delivery and wakeup
+
+| ID | Requirement | Status |
+| --- | --- | --- |
+| RF-20 | Long-polling with asynchronous fallback: tool waits, then returns `PENDING` and `request_id`. | [Implemented] |
+| RF-21 | **Waiting callers are woken** when an authorized result arrives, using their provider channel (RF-24); do not depend on a tool still waiting. | [Implemented] for Claude waiter and Codex/Antigravity bridge, subject to provider reachability; generalizes RF-22. |
+| RF-22 | On completion the result is delivered to the calling session, subject to return approval. | [Implemented] |
+| RF-23 | Requests survive agent, bridge and backend restarts through SQLite. | [Implemented] |
+| RF-24 | **Per-provider channels:** Claude hooks and asynchronous waiter; Codex `codex queue`; Antigravity language-server API; CLI tmux `send-keys` fallback. See [architecture §3](architecture.md#3-delivery-and-wakeup). | [Implemented] |
+| RF-25 | Acknowledged delivery and response collection without `placet_reply`, using the turn's final message as an implicit response. | [Implemented]: Claude/Codex Stop hooks; Antigravity conversation file. |
+| RF-26 | Delivery does not depend on an agent session process: bridge runs as a service; dead waiters are detected and replaced. | [Implemented] detection/warning after 2 minutes of waiting for Claude without a waiter; replacement requires a session hook. Desktop recovery details in [Claude wake](providers/claude-wake.md). |
+| RF-27 | Detect and report a **missing MCP connection**, both in the session and PWA. | [Decided] |
+| RF-28 | **Local event spool:** hooks write files and exit without calling the backend. Bridge forwards with retries; backend downtime does not lose events, except disk exhaustion or power loss. Turn overhead is limited to starting the hook script. | [Implemented] since the baseline; [architecture §3.6](architecture.md#36-local-event-spool). |
+| RF-29 | **Three aspects**, each with evidence/timestamps: delivery (waiting, delivering, accepted, uncertain, failed, cancelled); execution (unobserved, started, completed, interrupted); reply (none, explicit, implicit, ambiguous). Uncertain delivery is not automatically retried; PWA offers Retry/Cancel. | [Implemented] |
+| RF-29b | **One request per session until conclusion**: observed turn end or explicit user decision (“Confirm finished”, “Queue the next anyway”). Time only warns. Direct app messages remain possible; mixed turns produce ambiguous implicit replies. **Now** is the explicit exception. | [Implemented] |
+| RF-29c | **Suspended sessions and retractable messages:** desktop Codex `SessionEnd` means unloaded (idle/restart/update), not permanently closed. Keep it listed/readable as **Suspended**; only a start or turn reactivates it, not delayed events. Messages still held by Placet can be cancelled or edited (cancel and restore text/mentions; reselect attachments). Once accepted by Codex, show “Queued in Codex; execution not observed”; retraction is not guaranteed. Never use `codex exec resume` as a headless writer on the desktop thread without exclusive ownership. | [Implemented]. The older wait-for-manual-reopen design was superseded on October 18: queue once, then request native-link opening for suspended sessions; see [Codex wake](providers/codex-wake.md). |
+
+### 3.4 Sessions on the phone
+
+| ID | Requirement | Status |
+| --- | --- | --- |
+| RF-30 | PWA displays the **conversation**, opening at the latest message/question; scroll upward for earlier pages. | [Implemented] |
+| RF-31 | **On-demand reads through the bridge**; no backend copy of provider conversations. | [Implemented] for Claude, Codex and Antigravity. |
+| RF-32 | **Privacy:** show user messages and assistant text; collapse actions to a line (for example, “ran `cmd`”). Hide tool results and internal reasoning. Display compaction separators. | [Implemented] |
+| RF-33 | Answer a question **inside the conversation**. | [Implemented] |
+| RF-34 | **Write to a session** without a pending question; wake it as if typing on the PC. Show the message as the user's in the PWA. | [Implemented], within provider wake limits. |
+| RF-35 | While working: **Queue** (after the turn) or **Now** (within the turn after the next action). Configurable default, overridable per message. | [Implemented] for Claude PostToolUse and Antigravity `NEXT_INVOCATION` (live verification still needed for Antigravity). Codex Now unavailable. If the turn ends first, return to Queue. Default is the device's last selection. |
+| RF-36 | Launch **skills** from the phone, including desktop sessions. `/` lists provider skills/commands with skill highlighting. | [Decided] for picker (useful, optional); Claude desktop skill invocation verified in lab. |
+| RF-37 | Show **PC unreachable** with retry when offline. | [Implemented] |
+| RF-38 | **Conversation attachments:** thumbnails/fullscreen/download for pasted and generated images. Phone sends IDs, never file paths. Only adapter-recognized app/conversation files, real JPEG/PNG/WebP, bounded sizes. Arbitrary paths stay text; images from other tool outputs (such as browser screenshots) remain hidden under RF-32. | [Implemented], including phone uploads since the baseline. |
+| RF-38b | **Agent-shared files:** `placet_share_file(path, title)` presents generated PDFs/images in the conversation. Must be in the user's home, outside hidden folders and excluded projects, regular user-owned files; valid PDF up to 20 MB or permitted image. Tool immediately reports refusal. | [Implemented] |
+
+### 3.5 Home, session list and notifications
+
+| ID | Requirement | Status |
+| --- | --- | --- |
+| RF-10 | Installable phone **PWA**, served through Tailscale. | [Implemented] |
+| RF-40 | **Home:** open questions first, then **pinned sessions** ordered by activity, with most recently finished near the top. | [Implemented] |
+| RF-41 | **Add / view all:** choose a provider and select sessions to pin; others stay off Home. | [Implemented] per session; nodes in phase 3. Closed sessions remain removable from selection. |
+| RF-42 | Sessions that **never used Placet** still register through global hooks, except excluded projects (RF-45). | [Implemented], `hooks/install.py`. |
+| RF-43 | Two notification types: **question** (high priority, sound) and **turn ended** (quiet, pinned sessions only). Title includes provider/session; tap opens session. | [Implemented], at most one turn-end notification/minute/session. |
+| RF-11 | Self-hosted ntfy on tailnet, with only **Open**; decide in the PWA with full text. | [Implemented] in code; ntfy needs separate installation/configuration. |
+| RF-12 | Edit a prompt before approval; sender is informed of the edit. | [Implemented] |
+| RF-13 | Complete history/audit with per-request timeline. | [Implemented] |
+| RF-45 | **Present but quiet:** sessions register, then act only when Placet messages arrive, returning to silence after the turn. `.placet-off` excludes a folder and descendants across hooks, spool, reads, delivery and PWA. Undelivered messages are cancelled with a reason; stored data is **hidden**, retained for audit and shown again if exclusion is removed. | [Implemented] |
+| RF-44 | **Per-project graph:** nodes and typed directed edges; manual/automatic policy visible to the user. Editor for projects, nodes, relations and types. | [Decided] |
+
+### 3.6 Creating sessions
+
+| ID | Requirement | Status |
+| --- | --- | --- |
+| RF-50 | Create a session from the PWA by choosing provider, existing/new folder, model and effort. | [Decided] |
+| RF-51 | Placet-created sessions are **tmux CLIs with Remote Control**: genuine `/compact`/`/effort`, resumable through desktop, phone and web. | [Decided]; verified for Claude. |
+| RF-52 | **Temporary sessions:** work in the originating session's folder with a chosen provider (such as Codex reviewing Claude), return results, close automatically, can be deleted. | [Decided] |
+| RF-53 | Creating a session in a **new folder** requires confirmation. | [Decided] |
+
+### 3.7 Usage, context and controls
+
+| ID | Requirement | Status |
+| --- | --- | --- |
+| RF-60 | **Home usage bar**, one row/provider, e.g. `Gemini 5h 42% · reset 1h20 — 7d 60% · reset 3d5h`. | [Decided] |
+| RF-61 | Session shows **context** (`72.7k / 1M · 7%`), model and effort. | [Decided] |
+| RF-62 | Remote **compact/effort** where supported (tmux CLI; Codex/Antigravity need verification). Claude desktop: “available only on PC”. | [Decided] |
+| RF-63 | Model switching is not planned: rereading context consumes usage. | [Decided] |
+
+### Later implementation: collaboration return approval and localization
+
+Approving a collaboration permits **outbound delivery only** by default. A completed task stays `COMPLETED`, but its explicit/implicit response is withheld until human approval. The PWA allows forwarding, editing or withholding it; the original remains in the audit history. Initial approval may explicitly allow automatic return **for that request only**. Direct human decisions and technical outcomes without response content do not need a second approval. This implements a per-request boundary while typed relations (RFC-13) remain future work. See [return approval](architecture.md#collaboration-return-approval).
+
+The interface supports English/Italian, English fallback and a local browser preference. Background notifications and generated Placet envelopes have a separate shared human-only setting. User content is not translated. See [localization](localization.md) for the implemented scope and known limitations.
+
+## 4. Security requirements
+
+| ID | Requirement | Status |
+| --- | --- | --- |
+| RS-01 | No external action or inter-session forwarding without manual authorization or an explicitly user-created `automatic` relation. | [Decided] for relations; manual request/return enforcement implemented. |
+| RS-02 | Backend/PWA reachable **only over tailnet**, no public IP exposure. | [Implemented] |
+| RS-03 | Agent identity comes from `PLACET_API_TOKEN`, never request body. | [Implemented] |
+| RS-04 | **Proposer is not executor:** agents do not hold credentials for public/destructive actions. | [Decided] target boundary, not a guarantee for a shared desktop user; see [reserved commands plan](plans/reserved-commands.md). |
+| RS-05 | **Writing to or creating a session is remote PC control**, allowed only to the authorized Tailscale identity. | [Decided] overall; existing phone writes enforce the human channel. |
+| RS-06 | Bridge reads only registered providers' conversation files (`~/.claude/projects`, `~/.codex/sessions`, `~/.gemini/antigravity/brain`), never a backend-supplied file path. | [Implemented] |
+| RS-07 | **Undocumented APIs** (Antigravity language server) are isolated behind version-aware adapters, with tmux/CLI as an alternative channel where configured. | [Implemented], `bridge/channels.py`; not a guarantee of automatic failover to a different session. |
+| RS-08 | Use `automatic` relations for low-risk exchanges; all remain visible in history. | [Decided] |
+
+## 5. Technical decisions and stack
+
+| Component | Technology |
+| --- | --- |
+| Backend/API | Python 3.11+, FastAPI, SQLite WAL, SSE |
+| MCP server | Official Python `mcp` SDK over stdio |
+| Local bridge | Python daemon, systemd user service, provider adapters for delivery/reads/usage/commands |
+| Hooks | Claude `~/.claude/settings.json`, Codex `~/.codex/hooks.json`, Antigravity `~/.gemini/config/hooks.json`; project configuration was also used in the laboratory |
+| Notifications | Self-hosted ntfy over tailnet; Open action only |
+| Frontend | React/Vite, `react-markdown` with raw HTML ignored; `react-i18next` and `Intl` |
+| Network | Tailscale Serve HTTPS to the backend Unix socket |
+| Agent registry | `AGENTS.md` definitions/tokens/descriptions; project/node/relation database management is planned |
+| Laboratory | `~/Projects/placet-hook-lab`; [experiment record](experiments/provider-integration.md) |
+
+## 6. Roadmap
+
+| Phase | Scope |
+| --- | --- |
+| 1 | **Laboratory**, completed October 15–16; [results](experiments/provider-integration.md). |
+| 2b | **Reliability:** local spool (RF-28), three request aspects/one request per session (RF-29), exclusions throughout (RF-45). |
+| 2 | **Phone sessions:** chat (RF-30…33), writes/wakeup (RF-34/35), Home/questions/pinned sessions (RF-40…43), provider bridge adapters (RF-24…27). |
+| 3 | **Nodes, relations and types** (RFC-02…10), `send(target, type_id, prompt)`, removal of `context` (RF-05b). |
+| 4 | **Context, effort, compact and usage** (RF-60…63). |
+| 5 | **Session creation and temporary sessions** (RF-50…53). |
+| 6 | **Project graph/editor** (RF-44), `/` skill picker (RF-36). |
+
+After phase 2, acceptance tests cover all provider pairs (Claude, Codex, Antigravity in both directions). Laboratory observations do not establish all those combinations.

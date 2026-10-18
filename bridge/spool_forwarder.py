@@ -1,6 +1,6 @@
 """
 Forwards the hooks' local event queue (hooks/spool.py) to the backend
-(ARCHITETTURA 3.6).
+(docs/architecture.md, section 3.6).
 
 The bridge is the only consumer (an flock on the folder). Events go in the
 order they were observed; a file is deleted only once the backend answered

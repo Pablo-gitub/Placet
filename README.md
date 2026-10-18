@@ -82,11 +82,11 @@ flowchart LR
 - **Attachments are checked.** Only files the provider adapter recognised, inside the folders the app uses for that conversation (symlinks resolved), and real JPEG, PNG, WebP or PDF content. Shared files are never taken from hidden folders like `.ssh`.
 - **Honest limits.** Agents run as your user and could read each other's tokens: tokens identify agents in the audit log, they do not isolate them. Some integrations rely on undocumented app internals and may break on updates; they are isolated in adapters.
 
-More in [ARCHITETTURA.md](ARCHITETTURA.md) (Italian).
+More in the [architecture](docs/architecture.md).
 
 ## Quick start
 
-Placet targets **Linux** with **Python 3.11+**, **Node.js 18+**, [Tailscale](https://tailscale.com) and, for push notifications, an [ntfy](https://ntfy.sh) server.
+Placet targets **Linux** with **Python 3.11+**, **Node.js 20.19+ or 22.12+**, [Tailscale](https://tailscale.com) and, for push notifications, an [ntfy](https://ntfy.sh) server.
 
 ```bash
 git clone <this repository> placet && cd placet
@@ -97,11 +97,11 @@ sudo tailscale serve --bg unix:/run/placet/human.sock
 
 Then add the Placet MCP server to your agents, approve the Codex hooks once with `/hooks`, restart the apps, and open `https://<your-machine>.<tailnet>.ts.net` on your phone.
 
-The complete guide — environment variables, notifications, MCP setup, the tmux channel — is in [docs/INSTALL.it.md](docs/INSTALL.it.md) (Italian).
+The complete guide — environment variables, notifications, MCP setup, the tmux channel — is in [docs/installation.md](docs/installation.md).
 
 ## Status
 
-Placet is **alpha**, used every day by its author on one machine. English and Italian interface localization is rolling out, covering approvals, history, session selection, chat controls, delivery feedback and image/PDF viewers. Notifications and generated Placet messages have a separate shared language setting. The design documents and some legacy diagnostics still contain Italian. See [localization scope and contributor rules](docs/localization.md).
+Placet is **alpha**, used every day by its author on one machine. English and Italian interface localization is rolling out, covering approvals, history, session selection, chat controls, delivery feedback and image/PDF viewers. Notifications and generated Placet messages have a separate shared language setting. See [localization scope and contributor rules](docs/localization.md).
 
 - ✅ Questions and approvals from the phone, push notifications, audit log
 - ✅ Sessions on the phone: read, write, wake (Claude Code, Codex, Antigravity)
@@ -111,7 +111,7 @@ Placet is **alpha**, used every day by its author on one machine. English and It
 - 🗺️ Typed relations between sessions with per-relation policy (manual / automatic), loop limits, a graph editor
 - 🗺️ Usage, context and effort per session; creating sessions from the phone
 
-Design notes: [REQUISITI.md](REQUISITI.md) (requirements) · [ARCHITETTURA.md](ARCHITETTURA.md) (architecture) · [LABORATORIO.md](LABORATORIO.md) (experiments).
+Documentation: [overview](docs/README.md) · [requirements](docs/requirements.md) · [architecture](docs/architecture.md) · [experiments](docs/experiments/provider-integration.md) · [contributing](CONTRIBUTING.md).
 
 ## Development
 
