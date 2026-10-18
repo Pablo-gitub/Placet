@@ -89,3 +89,27 @@ def test_bridge_reads_usage_once_a_minute(monkeypatch):
     daemon.refresh_usage()
     daemon.refresh_usage()
     assert len(reads) == 1 and store.report_usage.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_messages_wait_while_the_provider_is_at_its_limit(setup):  # noqa: F811
+    from datetime import datetime, timedelta, timezone
+    from tests.test_session_messages import start, write
+    app, db = setup
+    await start(app, "codex", "cx1", "codex")
+    await write(app, "cx1", "riprendi")
+    soon = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
+    full = {"provider": "codex", "buckets": [{"id": "5h", "window": "5h", "used_percent": 100, "resets_at": soon}]}
+    db.set_usage("codex", json.dumps(full))
+    async with agent_client(app, "tok-bridge") as bridge:
+        assert (await bridge.get("/api/bridge/work")).json()["sessions"] == []
+        # Once the window has reset, the message goes.
+        later = datetime.now(timezone.utc) + timedelta(hours=1)
+        assert db.limited_providers(now=later) == set()
+        past = {**full, "buckets": [{**full["buckets"][0], "resets_at": "2020-01-01T00:00:00+00:00"}]}
+        db.set_usage("codex", json.dumps(past))
+        assert [s["id"] for s in (await bridge.get("/api/bridge/work")).json()["sessions"]] == ["cx1"]
+    # Per-model limits (Antigravity) never hold messages.
+    db.set_usage("antigravity", json.dumps({"provider": "antigravity", "buckets": [
+        {"id": "g", "group": "Gemini", "window": "5h", "used_percent": 100, "resets_at": soon}]}))
+    assert db.limited_providers() == set()

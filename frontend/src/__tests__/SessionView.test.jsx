@@ -381,3 +381,17 @@ describe("suspended sessions and messages still in Placet", () => {
       .toEqual([{ session_id: "abcdef12-0000", token: "@X · p · T [abcdef12]" }]);
   });
 });
+
+describe("provider at its usage limit", () => {
+  it("says the message waits until the reset", async () => {
+    mockFetch([[transcriptOf("s1"), latest]]);
+    const codex = { ...session, agent_id: "codex", provider: "codex" };
+    const reset = new Date(Date.now() + 30 * 60000).toISOString();
+    const usage = [{ provider: "codex", buckets: [{ id: "5h", group: null, window: "5h", used_percent: 100, resets_at: reset }] }];
+    renderView({ session: codex, usage, onSend: vi.fn(), onDelivery: vi.fn(), requests: [{
+      id: 9, sender_id: "human", recipient_id: "codex", question_type: "message", prompt: "ciao",
+      options: [], status: "APPROVED", created_at: "2026-10-16T10:00:00Z", recipient_session_id: "s1" }] });
+    await waitFor(() => expect(screen.getByTestId("outgoing-9")).toHaveTextContent(/usage limit|limite d'uso/));
+    expect(screen.getByTestId("composer-limited")).toBeInTheDocument();
+  });
+});

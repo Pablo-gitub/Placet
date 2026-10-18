@@ -58,3 +58,18 @@ describe("UsageBar", () => {
     expect(screen.queryByTestId("usage-bar")).toBeNull();
   });
 });
+
+describe("usage limit", () => {
+  it("knows when a provider at its limit takes messages again", async () => {
+    const { limitReset } = await import("../usage");
+    expect(limitReset([{ ...codex, buckets: [{ ...codex.buckets[0], used_percent: 100 }] }], "codex", NOW))
+      .toBe("2026-10-18T19:20:00Z");
+    expect(limitReset([codex], "codex", NOW)).toBeNull(); // 95%: not yet
+    // Per-model groups (Antigravity) do not hold messages.
+    expect(limitReset([{ provider: "antigravity", buckets: [{ ...antigravity.buckets[0], used_percent: 100 }] }],
+      "antigravity", NOW)).toBeNull();
+    // Past the reset: free again.
+    expect(limitReset([{ ...codex, buckets: [{ ...codex.buckets[0], used_percent: 100 }] }], "codex",
+      new Date("2026-10-18T20:00:00Z").getTime())).toBeNull();
+  });
+});

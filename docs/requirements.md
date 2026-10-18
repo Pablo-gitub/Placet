@@ -138,7 +138,7 @@ Problems addressed:
 
 | ID | Requirement | Status |
 | --- | --- | --- |
-| RF-60 | **Home usage bar**, one row/provider, e.g. `Gemini 5h 42% · reset 1h20 — 7d 60% · reset 3d5h`. | [Implemented] Codex (latest rollout `rate_limits`) and Antigravity (`RetrieveUserQuotaSummary`, one row per model group), read by the bridge every minute; Claude [Decided]: no local source for Claude Desktop sessions |
+| RF-60 | **Home usage bar**, one row/provider, e.g. `Gemini 5h 42% · reset 1h20 — 7d 60% · reset 3d5h`. | [Implemented] Codex (latest rollout `rate_limits`) and Antigravity (`RetrieveUserQuotaSummary`, one row per model group), read by the bridge every minute; Claude [Decided]: no local source for Claude Desktop sessions. While an account-wide window is used up, messages to that provider wait in Placet until the reset (a turn started at the limit fails and the app does not retry it); per-model-group limits (Antigravity) do not hold messages |
 | RF-61 | Session shows **context** (`72.7k / 1M · 7%`), model and effort. | [Decided] |
 | RF-62 | Remote **compact/effort** where supported (tmux CLI; Codex/Antigravity need verification). Claude desktop: “available only on PC”. | [Decided] |
 | RF-63 | Model switching is not planned: rereading context consumes usage. | [Decided] |

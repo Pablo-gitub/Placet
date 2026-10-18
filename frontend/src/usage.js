@@ -1,5 +1,6 @@
 // RF-60: usage windows per provider, shaped for the home bar.
 import { PROVIDERS } from "./sessionInfo";
+import { formatDateTime } from "./i18n/formatters";
 
 const order = (provider) => {
   const i = PROVIDERS.findIndex((p) => p.key === provider);
@@ -45,4 +46,24 @@ export function usageRows(providers, now = Date.now()) {
     }
   }
   return rows;
+}
+
+/**
+ * When a provider at its usage limit can take messages again: the latest reset
+ * among its used-up account-wide windows, or null. Mirrors the backend, which
+ * holds that provider's messages until then.
+ */
+export function limitReset(providers, provider, now = Date.now()) {
+  const usage = (Array.isArray(providers) ? providers : []).find((u) => u?.provider === provider);
+  const resets = (Array.isArray(usage?.buckets) ? usage.buckets : [])
+    .filter((b) => !b.group && b.used_percent >= 100 && b.resets_at && new Date(b.resets_at).getTime() > now)
+    .map((b) => b.resets_at)
+    .sort();
+  return resets.length ? resets[resets.length - 1] : null;
+}
+
+/** A reset time as a clock time, with the day when it is not within the next day. */
+export function resetClock(iso, now = Date.now()) {
+  const soon = new Date(iso).getTime() - now < 20 * 3600 * 1000;
+  return formatDateTime(iso, soon ? { hour: "2-digit", minute: "2-digit" } : { weekday: "short", hour: "2-digit", minute: "2-digit" });
 }

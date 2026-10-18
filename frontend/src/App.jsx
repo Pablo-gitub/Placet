@@ -340,6 +340,7 @@ export default function App() {
       session={sessions.find((s) => s.id === route.sessionId)}
       requests={requests}
       sessions={sessions}
+      usage={usage}
       onBack={() => navigate("#/")}
       onDecide={handleDecision}
       onSend={sendMessage}

@@ -270,7 +270,8 @@
     "message": "Messaggio per la sessione",
     "closedPlaceholder": "Sessione chiusa",
     "placeholder": "Scrivi alla sessione… @ per citarne un’altra",
-    "send": "Invia"
+    "send": "Invia",
+    "limited": "{{provider}} ha raggiunto il limite d'uso: il messaggio aspetta in Placet e parte dopo il reset delle {{time}}."
   },
   "chat": {
     "actions_one": "{{count}} azione",
@@ -340,7 +341,8 @@
     "retried": "Nuovo tentativo di consegna.",
     "cancelled": "Messaggio annullato.",
     "markedFinished": "Segnata come terminata: la sessione riceve il prossimo messaggio.",
-    "queuedNext": "Il prossimo messaggio parte senza aspettare."
+    "queuedNext": "Il prossimo messaggio parte senza aspettare.",
+    "limited": "In attesa: {{provider}} ha raggiunto il limite d'uso, parte dopo il reset delle {{time}}"
   },
   "backgroundLanguage": {
     "title": "Lingua di notifiche e messaggi",

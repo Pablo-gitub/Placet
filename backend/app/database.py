@@ -2,7 +2,7 @@ import sqlite3
 import json
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Set, Tuple
 
 import uuid
 from pathlib import Path
@@ -1346,6 +1346,24 @@ class Database:
         with self._get_connection() as conn:
             return [r["data"] for r in conn.execute("SELECT data FROM provider_usage ORDER BY provider")]
 
+    def limited_providers(self, now: Optional[datetime] = None) -> Set[str]:
+        """
+        Providers whose account has used up a usage window (RF-60): a message
+        sent now would start a turn that fails at once, and the app does not
+        retry it. Their mail waits in Placet until the window resets. Only
+        account-wide windows count: Antigravity's limits are per model group,
+        and Placet does not know which model a conversation will use.
+        """
+        from backend.app.models import ProviderUsage
+        now = now or datetime.now(timezone.utc)
+        limited = set()
+        for data in self.list_usage():
+            usage = ProviderUsage.model_validate_json(data)
+            if any(b.group is None and b.used_percent >= 100 and b.resets_at and b.resets_at > now
+                   for b in usage.buckets):
+                limited.add(usage.provider)
+        return limited
+
     def reopen_session(self, session_id: str) -> None:
         """The session runs again (it started, or a turn began): neither ended nor suspended."""
         with self._get_connection() as conn:
@@ -1521,7 +1539,9 @@ class Database:
                 BRIDGE_PROVIDERS,
             )
             sessions = [self._row_to_session(r, WAITER_TTL_SECONDS) for r in cursor.fetchall()]
-        return [s for s in sessions if self.inbox_has_message(s)]
+        # Not for a provider at its usage limit: the message would be lost.
+        limited = self.limited_providers()
+        return [s for s in sessions if s.provider not in limited and self.inbox_has_message(s)]
 
     def take_inbox_message(
         self, session: SessionModel, actor: Optional[str] = None, via: str = "hook"

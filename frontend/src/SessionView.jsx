@@ -3,6 +3,7 @@ import { needsReturnApproval } from "./decisions";
 import React, { useLayoutEffect, useRef, useState } from "react";
 import Attachments from "./Attachments";
 import Composer from "./Composer";
+import { limitReset, resetClock } from "./usage";
 import { splitPrompt } from "./draft";
 import {
   ArrowLeft,
@@ -173,7 +174,7 @@ const OUTGOING_STATES = {
 // Delivered, but its turn not seen yet: still shown as the user's message.
 const notStarted = (req) => req.status !== "EXECUTING" || req.execution === "unobserved";
 
-function Outgoing({ req, session, onDelivery, onEdit }) {
+function Outgoing({ req, session, limitAt, onDelivery, onEdit }) {
   const { t } = useTranslation();
   const uncertain = isUncertain(req);
   const failed = req.status === "DELIVERY_FAILED" || req.status === "EXPIRED";
@@ -188,6 +189,8 @@ function Outgoing({ req, session, onDelivery, onEdit }) {
           ? t("deliveryUi.uncertain")
           : req.delivery_mode === "now" && ["APPROVED", "DELIVERING"].includes(req.status)
             ? t(OUTGOING_STATES.NOW)
+            : req.status === "APPROVED" && limitAt
+              ? t("deliveryUi.limited", { provider: providerOf(session).label, time: resetClock(limitAt) })
             : req.status === "APPROVED" && session?.suspended_at
               ? session.provider === "claude-code"
                 ? t("deliveryUi.suspendedClaude")
@@ -256,6 +259,7 @@ export default function SessionView({
   session,
   requests,
   sessions,
+  usage,
   onBack,
   onDecide,
   onSend,
@@ -264,6 +268,8 @@ export default function SessionView({
   focusId,
 }) {
   const { t } = useTranslation();
+  // RF-60: a provider at its usage limit gets nothing until the reset.
+  const limitAt = session ? limitReset(usage, session.provider) : null;
   const refreshKey = session ? `${session.state}|${session.activity_at}` : undefined;
   const { entries, status, error, hasOlder, loadingOlder, loadOlder, retry } = useTranscript(
     sessionId,
@@ -388,7 +394,7 @@ export default function SessionView({
             />
           ))}
         {outgoing.map((req) => (
-          <Outgoing key={req.id} req={req} session={session} onDelivery={onDelivery} onEdit={onDelivery && edit} />
+          <Outgoing key={req.id} req={req} session={session} limitAt={limitAt} onDelivery={onDelivery} onEdit={onDelivery && edit} />
         ))}
         {questions.map((req) => (
           <RequestCard
@@ -405,6 +411,7 @@ export default function SessionView({
         <Composer
           key={`${sessionId}:${draft?.nonce ?? ""}`}
           session={session}
+          limitAt={limitAt}
           draft={draft}
           sessions={sessions}
           onSend={async (text, mentions, attachments, mode) => {

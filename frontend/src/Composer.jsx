@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import { formatNumber, formattingLocale } from "./i18n/formatters";
 import React, { useEffect, useRef, useState } from "react";
 import { providerOf, sessionName, sessionProject, sessionStatus } from "./sessionInfo";
+import { resetClock } from "./usage";
 import { Paperclip, SendHorizontal, X } from "lucide-react";
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -47,7 +48,7 @@ function savedMode() {
   }
 }
 
-export default function Composer({ session, sessions = [], onSend, draft }) {
+export default function Composer({ session, sessions = [], onSend, draft, limitAt }) {
   const { t } = useTranslation();
   // Queue (end of the turn) or Now (inside the running turn): the
   // last choice is the default on this device (RF-35).
@@ -129,6 +130,11 @@ export default function Composer({ session, sessions = [], onSend, draft }) {
   return (
     <div className="composer" data-testid="composer">
       {closed && <p className="composer-note">{t("composer.closed")}</p>}
+      {limitAt && !closed && (
+        <p className="composer-note" data-testid="composer-limited">
+          {t("composer.limited", { provider: providerOf(session).label, time: resetClock(limitAt) })}
+        </p>
+      )}
       {suspended && (
         <p className="composer-note" data-testid="composer-suspended">
           {session.provider === "claude-code"
