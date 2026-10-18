@@ -959,9 +959,8 @@ def create_app(
                 raise HTTPException(status_code=409, detail="Una sessione menzionata non è più disponibile: rimuovi o sostituisci la menzione.")
             if target.id == session.id:
                 raise HTTPException(status_code=422, detail="Non puoi menzionare la sessione corrente.")
-            source_agent = config.get_agent(session.agent_id)
-            if target.agent_id not in source_agent.allowed_targets:
-                raise HTTPException(status_code=422, detail="La sessione corrente non può contattare questo agente.")
+            # A human's mention shares a reference, not a routed request.
+            # Routing permissions and approval are checked when an agent sends.
             references.append({"mention": mention.token, "target_session": target.id,
                                "target_agent": target.agent_id, "title": target.title, "cwd": target.cwd})
         mention_context = None

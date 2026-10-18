@@ -12,7 +12,7 @@ agents:
     name: "Gemini CLI / Antigravity"
     tmux_session: "agent-gemini"
     token: "${PLACET_TOKEN_GEMINI}"
-    allowed_targets: ["claude", "codex", "human"]
+    allowed_targets: ["claude", "gemini", "codex", "human"]
     default_timeout_seconds: 180
     # Da calibrare con: python -m bridge.calibrate gemini
     idle_patterns: ['^\s*[│|]?\s*>\s*(Type your message.*)?[│|]?\s*$']
@@ -20,7 +20,7 @@ agents:
     name: "OpenAI Codex / ChatGPT CLI"
     tmux_session: "agent-codex"
     token: "${PLACET_TOKEN_CODEX}"
-    allowed_targets: ["claude", "gemini", "human"]
+    allowed_targets: ["claude", "gemini", "codex", "human"]
     default_timeout_seconds: 180
     # Da calibrare con: python -m bridge.calibrate codex
     idle_patterns: ['^\s*›\s*$']
@@ -40,6 +40,11 @@ rules:
     require_approval: true
   codex -> gemini:
     require_approval: true
+  gemini -> gemini:
+    require_approval: true
+  codex -> codex:
+    require_approval: true
+
 ---
 
 # Registro Agenti Placet

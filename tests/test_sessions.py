@@ -382,26 +382,28 @@ async def test_ambiguous_busy_sessions_are_not_guessed(setup):
 
 
 @pytest.mark.asyncio
-async def test_same_agent_sessions_talk_without_self_delivery():
+@pytest.mark.parametrize("agent", ["claude", "codex", "gemini"])
+async def test_same_agent_sessions_talk_without_self_delivery(agent):
     """claude -> claude: the sender session never receives its own request."""
     db = Database(os.path.join(tempfile.mkdtemp(), "placet.db"))
     db.init_db()
-    config = PlacetConfig(agents={"claude": AgentSpec(tmux_session="agent-claude", token="tok-claude",
-                                                      allowed_targets=["claude", "human"])})
+    config = PlacetConfig(agents={agent: AgentSpec(tmux_session="agent-" + agent, token="tok-" + agent,
+                                                      allowed_targets=[agent, "human"])})
     app = create_app(db=db, config=config)
-    async with agent_client(app, "tok-claude") as claude:
+    async with agent_client(app, "tok-" + agent) as claude:
         await _event(claude, "A", event="start")
         await _event(claude, "B", event="start")
         await _event(claude, "A", event="prompt")
-        created = (await claude.post("/api/requests", json={"recipient_id": "claude", "prompt": "Rivedi"})).json()
+        created = (await claude.post("/api/requests", json={"recipient_id": agent, "prompt": "Rivedi"})).json()
         assert created["sender_session_id"] == "A"
+        assert created["status"] == "PENDING"
         self_target = await claude.post("/api/requests", json={
-            "recipient_id": "claude", "prompt": "x", "recipient_session_id": "A"})
+            "recipient_id": agent, "prompt": "x", "recipient_session_id": "A"})
         assert self_target.status_code == 422
         await _event(claude, "A", event="stop")
     async with human_client(app) as human:
         await human.post(f"/api/requests/{created['id']}/decision", json={"status": "APPROVED"})
-    async with agent_client(app, "tok-claude") as claude:
+    async with agent_client(app, "tok-" + agent) as claude:
         assert (await claude.get("/api/sessions/A/inbox")).status_code == 204
         message = (await claude.get("/api/sessions/B/inbox")).json()
         assert message["request_id"] == created["id"]

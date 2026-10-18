@@ -204,11 +204,25 @@ async def test_invalid_mentions_do_not_enqueue_a_message(setup):
             ({"token": "@missing", "session_id": "cx1"}, 422),
             ({"token": "@x", "session_id": "unknown"}, 409),
             ({"token": "@x", "session_id": "c1"}, 422),
-            ({"token": "@x", "session_id": "cx1"}, 422),  # forbidden route
         ]:
             response = await human.post("/api/sessions/c1/messages", json={"text": "chiedi a @x", "mentions": [mention]})
             assert response.status_code == expected
     assert db.inbox_has_message(db.get_session("c1")) is False
+
+
+@pytest.mark.asyncio
+async def test_human_can_reference_same_provider_without_routing_permission(setup):
+    app, db = setup
+    await start(app, 'codex', 'a', 'codex')
+    await start(app, 'codex', 'b', 'codex')
+    async with human_client(app) as human:
+        response = await human.post('/api/sessions/a/messages', json={
+            'text': 'La sessione della prova era @B',
+            'mentions': [{'token': '@B', 'session_id': 'b'}],
+        })
+    assert response.status_code == 201
+    assert '"target_session": "b"' in db.get_request(response.json()['id']).context
+    assert not db.inbox_has_message(db.get_session('b'))
 
 
 @pytest.mark.asyncio
