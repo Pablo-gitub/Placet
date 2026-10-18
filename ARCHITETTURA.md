@@ -155,6 +155,8 @@ Trasformano gli eventi del client in fatti per Placet (`POST /api/sessions/{id}/
 - `GET /api/sessions/{id}/attachments/{offset:voce:n}` (solo umano) passa dal bridge come le pagine e risponde con `Cache-Control: no-store`, `nosniff` e una CSP restrittiva; nessuna copia sul backend, nessun service worker. La PWA mostra "PC non raggiungibile o file non più presente" se l'immagine non arriva.
 
 ### 3.10 "Subito" *(RF-35: `hooks/steer.py`, `bridge/steer.py`)*
+- **Approvazione tra agenti:** la scheda propone “In coda · a fine turno” (default) e “Subito · nel turno in corso” quando è selezionata una sessione specifica Claude/Antigravity al lavoro. Il destinatario automatico e Codex restano in coda. L'utente sceglie la modalità, non viene dedotta dal prompt né applicata retroattivamente alle richieste già approvate.
+- `POST /api/requests/{id}/decision` accetta `delivery_mode: "queue" | "now"`: approvazione, modalità e destinatario selezionato sono salvati nella stessa transazione e nell'audit. Il backend rifiuta “Subito” senza una sessione specifica supportata. Se il turno finisce prima dell'inserimento, vale il ritorno alla coda già previsto. Un prompt tra agenti mantiene mittente, testo modificato dall'umano e istruzioni `placet_reply`, senza diventare un messaggio attribuito all'utente.
 - Il messaggio nasce con `mode: "now"` (`delivery_mode` della richiesta). Il bridge lo prende solo per una sessione **al lavoro** di un provider che lo supporta (`STEER_PROVIDERS`); altrimenti segue la consegna normale a fine turno. Fa eccezione alla regola "una richiesta alla volta".
 - **Claude Code:** il bridge lo lascia in `~/.cache/placet/steer/<sessione>.json` (0600), un messaggio alla volta per sessione. Un hook PostToolUse su tutte le azioni, preceduto da un controllo in shell (12 ms se non c'è nulla), lo prende con un `rename` atomico e lo passa al modello come `additionalContext`; poi mette in coda l'evento `steered`, che segna la consegna accettata e l'esecuzione iniziata. Nella conversazione compare come voce `hook_additional_context`, mostrata come messaggio dell'utente.
 - **Turno finito prima:** il bridge riprende il file con lo stesso `rename` e rimette il messaggio in coda (`APPROVED`), che parte a fine turno come gli altri. Inserito o rimesso in coda, mai entrambi. Se il file è stato preso ma l'evento non arriva entro 2 min, la consegna diventa incerta.
@@ -354,3 +356,17 @@ ancora una bozza persistente a ricaricamenti, cambi chat o chiusure della PWA.
 La conferma HTTP persa dopo la creazione del messaggio resta soggetta alla
 stessa incertezza dei messaggi di testo: la deduplicazione dei file non rende
 idempotente la creazione della richiesta.
+
+### Approvazione del ritorno delle collaborazioni
+
+L'approvazione di una richiesta fra agenti autorizza per impostazione predefinita solo l'andata. Il completamento del compito e l'inoltro della risposta sono distinti: il primo resta `COMPLETED`, mentre il secondo attende il supervisore. La PWA mostra la risposta originale, permette di preparare una versione modificata e offre «Inoltra risposta» / «Non inoltrare». La decisione è monouso, riservata al canale umano e registrata nell'audit; un rifiuto non annulla il lavoro concluso.
+
+Nell'approvazione iniziale il supervisore può abilitare esplicitamente «Consenti anche il ritorno automatico della risposta», disattivato per default e valido solo per quella richiesta. Le risposte esplicite e implicite hanno la stessa regola. Il bridge, le inbox degli hook e la lettura di stato da parte dell'agente rispettano il vincolo: prima dell'autorizzazione il contenuto della risposta non viene restituito al richiedente. In caso di modifica, il testo originale resta nello storico umano e solo la versione autorizzata viene inoltrata. I metadati di completamento restano consultabili.
+
+Le decisioni dell'utente alle domande dirette degli agenti e gli esiti tecnici senza risposta (rifiuto, scadenza, errore) non richiedono un secondo consenso. La migrazione non reinvia risposte già consegnate; le risposte interagente completate ma ancora non consegnate passano invece al controllo umano. Questa separazione riguarda i canali di Placet: non isola processi che condividono lo stesso utente Linux e possono leggere direttamente i rispettivi file.
+
+### Comandi riservati dal telefono *(da implementare)*
+
+La futura schermata «Comandi» espone soltanto un catalogo abilitato dall'amministratore di azioni riservate all'utente, ciascuna autorizzata tramite passkey. Non aggiunge conferme alle attività autonome degli agenti, come commit, test e build. Le proposte in chat apriranno la stessa conferma protetta, senza interpretare testo shell come autorizzazione. Catalogo, esecutore e conferma sono separati dal deploy applicativo; il backend Placet non può autorizzare un'esecuzione privilegiata da solo.
+
+Piano, confini di fiducia, fasi e verifiche: [Comandi riservati](docs/COMANDI_RISERVATI.md). Prima si realizza il deploy isolato, poi la conferma indipendente con passkey, infine la schermata PWA e le scorciatoie nella chat.
