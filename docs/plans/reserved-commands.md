@@ -1,6 +1,46 @@
 # Reserved commands: implementation plan
 
-Status: design agreed, feature not implemented yet.
+Status: proposal persistence and artifact acquisition implemented; execution, protected bootstrap,
+passkey authorization and product integration are not implemented yet.
+
+### Current implementation boundary
+
+`admin_executor/jobs.py` provides strict candidate action parameters and a
+separate SQLite proposal registry. Request IDs deduplicate concurrent retries;
+reusing an ID with different parameters is refused. Proposals always remain
+`awaiting_confirmation`. The digest identifies canonical input; it is not a
+signature or an authorization. The candidate catalogue is not yet a protected,
+administrator-enabled production catalogue.
+
+`admin_executor/artifacts.py` acquires an uncompressed tar into a private staging
+directory under a caller-configured release root. It freezes and checks the
+archive digest before parsing, rejects links, special files, sparse files,
+special permission bits, duplicate/non-normalized paths and resource-limit
+violations. It copies bytes without applying archive ownership or metadata,
+records file hashes and sanitized permissions in a reserved manifest, and
+publishes a new release directory by rename only after validation. Existing
+releases are refused. Failed validation removes the staging directory.
+
+The release root and all its ancestors must be protected from the builder and
+desktop user; acquisitions must be serialized by the future administrative
+service. A digest supplied by a requester proves no authorization. The builder
+must be stopped and its output digest computed through the protected workflow
+before acquisition. This primitive does not provide that workflow or prove
+build isolation. Venv symlinks are refused too: the eventual builder must
+produce a portable runtime with regular files and verify its final release path.
+Copying a default development venv is not an accepted deployment strategy.
+
+The manifest is integrity metadata, not a signature. Published code is not
+executed by acquisition. Filesystem sync errors after the publication rename
+require reconciliation with the manifest; callers must not blindly rerun or
+activate on an exception. Directory publication does not change `/opt/placet`,
+the current release pointer, running services or the database.
+
+There are no HTTP routes, command execution methods, service installs, or
+changes to the current deploy. Production ownership and filesystem protection
+are not provided by these libraries. Next: isolated build supervision, protected
+release activation and recovery, followed by the administrative bootstrap.
+Only after those checks should authorization and the PWA be wired.
 
 ## Goal and scope
 
