@@ -1,6 +1,6 @@
 # Localization
 
-Placet is migrating its product interface to English and Italian. This document describes the implemented foundation and the first migrated flow, not a claim that the whole product has been translated.
+Placet is migrating its product interface to English and Italian. This document describes the implemented foundation and the migrated approval flows, not a claim that the whole product has been translated.
 
 ## Language policy
 
@@ -28,7 +28,9 @@ The first complete migrated workflow is human approval of an agent's completed r
 - Shared navigation, language selector, connection indicator and home headings.
 - Session state/name helpers and shared date/time/number formatting infrastructure.
 
-The initial prompt-approval card, session picker, most composer/chat controls, attachment/PDF UI and other backend errors are not yet migrated. Notifications and provider message wrappers still use their existing language. The new browser preference intentionally does not pretend to configure these server-side surfaces.
+Initial request approval is now migrated too: confirmation questions, single/multiple choices and Other answers, prompt editing/preview, request origin and priority, target session selection, Queue/Now timing and optional automatic reply return. User-provided options, prompts and notes remain unchanged across language switches.
+
+The session picker dialog, most composer/chat controls, attachment/PDF UI and other backend errors are not yet migrated. Notifications and provider message wrappers still use their existing language. The new browser preference intentionally does not pretend to configure these server-side surfaces.
 
 ## Adding translated text
 
@@ -52,14 +54,24 @@ Use the functions in `i18n/formatters.js` for dates, numbers and relative time. 
 }
 ```
 
-The first migrated endpoint is `POST /api/requests/{id}/return-decision`, with codes `return.empty` and `return.unavailable`. HTTP status and the legacy `detail` field remain available to existing clients. Authentication and authorization are unchanged.
+Migrated endpoints are `POST /api/requests/{id}/return-decision` (`return.empty`, `return.unavailable`) and `POST /api/requests/{id}/decision`:
+
+- `decision.not_pending`, with the numeric request `id` parameter (including concurrent state changes).
+- `decision.prompt_edit_not_allowed`, `decision.recipient_not_allowed`, `decision.no_options`.
+- `decision.duplicate_options`, `decision.unknown_options`, `decision.rejected_options`.
+- `decision.single_choice`, `decision.multi_choice`, `decision.self_target`, `decision.now_target`.
+- `session.unavailable`, `session.excluded` from the shared target validator, also used when creating a request.
+
+Validation returns codes directly; it does not infer codes by matching diagnostic sentences. Client interpolation only accepts documented, typed parameters; server fields cannot override the active translation language or fallback text. HTTP status and the legacy `detail` field remain available to existing clients. Authentication and authorization are unchanged.
 
 The frontend maps known machine codes to catalog keys. Unknown codes, missing/non-JSON bodies, authorization failures and validation lists receive safe localized fallbacks; raw exception strings and arbitrary validation objects are not rendered. Add new codes and parameters explicitly instead of matching source-language sentences. Other API endpoints retain their existing contracts until their flows are migrated.
 
 ## Verification
 
-Run frontend tests, lint and production build from `frontend/`, and backend tests from the repository root. `I18n.test.jsx` checks preference resolution/storage failure, fallback, catalog and placeholder parity, plural forms, dynamic helpers, preservation of edits, actual approval/withholding API calls and translated error feedback. Existing product tests explicitly select Italian until their own flows are migrated.
+Run frontend tests, lint and production build from `frontend/`, and backend tests from the repository root. `I18n.test.jsx` checks preference resolution/storage failure, fallback, catalog and placeholder parity, plural forms, dynamic helpers, preservation of edits, actual approval/withholding API calls and translated error feedback. `RequestLocalization.test.jsx` additionally covers initial approvals in both languages, single/multiple choices, unchanged Other text, confirmation rejection, target/timing selection, retained edits and a localized conflict. Backend tests cover every semantic decision error code and verify that rejected input does not mutate a pending request. Existing product tests explicitly select Italian until their own flows are migrated.
 
-The first slice was also exercised in Chromium with mocked backend data at 390px and 1280px: language switching, draft preservation, reply forwarding, history and mobile horizontal overflow. This does not replace a real iPhone PWA check or a production delivery test.
+The first slice was also exercised in Chromium with mocked backend data at 390px and 1280px: language switching, draft preservation, reply forwarding, history and mobile horizontal overflow. The initial prompt-approval flow was also exercised with edited prompts, Queue/Now and automatic return policy on mobile, plus a separate desktop rendering check. This does not replace a real iPhone PWA check or a production delivery test.
+
+Known pre-existing limitation: crossing the 900px mobile/desktop layout boundary while an approval is being edited recreates the form, discarding its unsent local choices. Locale switching within a layout preserves them. Responsive draft retention requires a separate fix; the viewport checks do not claim that behavior is supported.
 
 Continue with one user workflow at a time. Complete catalog coverage before claiming an entirely English interface or changing the public readiness status.

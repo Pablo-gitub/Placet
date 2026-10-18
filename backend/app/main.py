@@ -48,7 +48,7 @@ from backend.app.models import (
     ACK_TIMEOUT_SECONDS,
     AGENT_BUSY_TTL_SECONDS,
     MAX_DELIVERY_ATTEMPTS,
-    decision_error,
+    decision_problem,
     is_settled,
 )
 from backend.app import envelopes
@@ -393,14 +393,12 @@ def create_app(
     def check_target_session(session_id: str, agent_id: str) -> None:
         session = db.get_session(session_id)
         if session is None or session.agent_id != agent_id or session.ended_at is not None:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail=f"Session {session_id} is not an open session of {agent_id}.",
+            raise ProductError(
+                422, "session.unavailable", f"Session {session_id} is not an open session of {agent_id}.",
             )
         if session.excluded:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail=f"Session {session_id} belongs to a project excluded from Placet (.placet-off).",
+            raise ProductError(
+                422, "session.excluded", f"Session {session_id} belongs to a project excluded from Placet (.placet-off).",
             )
 
     def require_party(who: Principal, req: RequestModel) -> None:
@@ -567,24 +565,25 @@ def create_app(
         req = get_or_404(request_id)
 
         if req.status != RequestStatus.PENDING:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Request {request_id} is in {req.status.value} state, not in PENDING state.",
+            raise ProductError(
+                409, "decision.not_pending",
+                f"Request {request_id} is in {req.status.value} state, not in PENDING state.",
+                {"id": request_id},
             )
 
-        problem = decision_error(req, decision)
+        problem = decision_problem(req, decision)
         if problem:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=problem)
+            raise ProductError(422, problem[0], problem[1])
         if decision.recipient_session_id is not None:
             check_target_session(decision.recipient_session_id, req.recipient_id)
             if decision.recipient_session_id == req.sender_session_id:
-                raise HTTPException(status_code=422, detail="Una sessione non può inviare a sé stessa.")
+                raise ProductError(422, "decision.self_target", "A session cannot send a request to itself.")
         if decision.status == RequestStatus.APPROVED and decision.delivery_mode == "now":
             target_id = decision.recipient_session_id or req.recipient_session_id
             target = db.get_session(target_id) if target_id else None
             if (req.question_type != QuestionType.PROMPT_REVIEW or req.recipient_id == "human"
                     or target is None or target.provider not in STEER_PROVIDERS):
-                raise HTTPException(status_code=422, detail="Subito richiede una sessione specifica di Claude o Antigravity.")
+                raise ProductError(422, "decision.now_target", "Now requires a specific Claude or Antigravity session.")
             check_target_session(target_id, req.recipient_id)
 
         updated = db.update_request_decision(
@@ -601,9 +600,10 @@ def create_app(
         if updated is None:
             # State changed between the check and the update (e.g. expired or cancelled).
             current = db.get_request(request_id)
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Request {request_id} is in {current.status.value} state, not in PENDING state.",
+            raise ProductError(
+                409, "decision.not_pending",
+                f"Request {request_id} is in {current.status.value} state, not in PENDING state.",
+                {"id": request_id},
             )
         notify_change(request_id)
         return updated

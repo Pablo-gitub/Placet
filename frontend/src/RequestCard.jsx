@@ -7,11 +7,12 @@ import { sessionName, sessionOrigin, sessionStatus } from "./sessionInfo";
 
 /** Where a request comes from: the sender's session, when known; opens its conversation. */
 export function Origin({ req, sessions, onOpenSession }) {
+  const { t } = useTranslation();
   const origin = sessionOrigin(sessions.find((s) => s.id === req.sender_session_id));
   if (!origin) return null;
   return (
     <div className="request-origin" data-testid={`origin-${req.id}`}>
-      da {req.sender_id} · {origin}
+      {t("requests.origin", { agent: req.sender_id, origin })}
       {onOpenSession && (
         <button
           type="button"
@@ -19,7 +20,7 @@ export function Origin({ req, sessions, onOpenSession }) {
           data-testid={`open-session-${req.id}`}
           onClick={() => onOpenSession(req.sender_session_id)}
         >
-          <MessagesSquare size={13} /> Apri la conversazione
+          <MessagesSquare size={13} /> {t("requests.openConversation")}
         </button>
       )}
     </div>
@@ -51,6 +52,7 @@ export default function RequestCard(props) {
 }
 
 function PromptCard({ req, submitting, highlighted, onDecide, sessions = [], onOpenSession }) {
+  const { t } = useTranslation();
   const [editedPrompt, setEditedPrompt] = useState(undefined);
   const [editing, setEditing] = useState(false);
   const [selected, setSelected] = useState([]);
@@ -78,7 +80,7 @@ function PromptCard({ req, submitting, highlighted, onDecide, sessions = [], onO
 
   const decide = (status) => onDecide(req.id, buildDecision(req, status, state));
 
-  const approveLabel = req.question_type === "prompt_review" ? "Approva e invia" : isChoice ? "Rispondi" : "Approva";
+  const approveLabel = t(req.question_type === "prompt_review" ? "requests.approveSend" : isChoice ? "requests.answer" : "requests.approve");
 
   return (
     <div
@@ -95,10 +97,10 @@ function PromptCard({ req, submitting, highlighted, onDecide, sessions = [], onO
         <div className="badges">
           {(req.priority === "high" || req.priority === "urgent") && (
             <span className={`status-badge priority-${req.priority}`} data-testid={`priority-${req.id}`}>
-              {req.priority === "urgent" ? "Urgente" : "Alta"}
+              {t(req.priority === "urgent" ? "requests.urgent" : "requests.high")}
             </span>
           )}
-          <span className="status-badge status-pending">In attesa</span>
+          <span className="status-badge status-pending">{t("requests.pending")}</span>
         </div>
       </div>
 
@@ -106,7 +108,7 @@ function PromptCard({ req, submitting, highlighted, onDecide, sessions = [], onO
 
       {req.context && (
         <section className="request-section">
-          <h3 className="section-label">Contesto</h3>
+          <h3 className="section-label">{t("requests.context")}</h3>
           <div className="card-context">
             <Markdown testId={`context-${req.id}`}>{req.context}</Markdown>
           </div>
@@ -118,10 +120,10 @@ function PromptCard({ req, submitting, highlighted, onDecide, sessions = [], onO
           <section className="request-section">
             <div className="section-head">
               <h3 className="section-label">
-                Prompt per {req.recipient_id}
+                {t("requests.prompt", { agent: req.recipient_id })}
                 {req.prompt_source && (
                   <span className="prompt-source" data-testid={`prompt-source-${req.id}`}>
-                    {" "}· da {req.prompt_source}
+                    {" "}{t("requests.promptSource", { source: req.prompt_source })}
                   </span>
                 )}
               </h3>
@@ -132,12 +134,12 @@ function PromptCard({ req, submitting, highlighted, onDecide, sessions = [], onO
                 onClick={() => setEditing((v) => !v)}
               >
                 {editing ? <Eye size={14} /> : <Pencil size={14} />}
-                {editing ? "Anteprima" : "Modifica"}
+                {t(editing ? "requests.preview" : "requests.edit")}
               </button>
             </div>
             {editing ? (
               <textarea
-                aria-label={`Prompt per ${req.recipient_id}`}
+                aria-label={t("requests.prompt", { agent: req.recipient_id })}
                 data-testid={`prompt-textarea-${req.id}`}
                 className="prompt-textarea"
                 value={editedPrompt !== undefined ? editedPrompt : req.prompt}
@@ -151,19 +153,19 @@ function PromptCard({ req, submitting, highlighted, onDecide, sessions = [], onO
               </div>
             )}
             {editedPrompt !== undefined && editedPrompt !== req.prompt && (
-              <p className="edited-note">Modificato da te: {req.recipient_id} riceverà questa versione.</p>
+              <p className="edited-note">{t("requests.edited", { agent: req.recipient_id })}</p>
             )}
           </section>
           <section className="request-section">
-            <h3 className="section-label">Domanda</h3>
+            <h3 className="section-label">{t("requests.question")}</h3>
             <p className="question-text">
-              Inviare questo prompt a {req.recipient_id}? Riceverà solo il prompt, non il contesto.
+              {t("requests.confirmPrompt", { agent: req.recipient_id })}
             </p>
           </section>
           {targetSessions.length > 0 && (
             <>
               <label className="prompt-editor-label" htmlFor={`target-${req.id}`}>
-                Sessione di {req.recipient_id} che lo riceve:
+                {t("requests.recipient", { agent: req.recipient_id })}
               </label>
               <select
                 id={`target-${req.id}`}
@@ -172,7 +174,7 @@ function PromptCard({ req, submitting, highlighted, onDecide, sessions = [], onO
                 value={targetSession}
                 onChange={(e) => { setTargetSession(e.target.value); setDeliveryMode("queue"); }}
               >
-                <option value="">Automatica (la prima libera)</option>
+                <option value="">{t("requests.automatic")}</option>
                 {targetSessions.map((s) => (
                   <option key={s.id} value={s.id}>
                     {sessionName(s)} · {sessionStatus(s).label}
@@ -183,24 +185,24 @@ function PromptCard({ req, submitting, highlighted, onDecide, sessions = [], onO
           )}
           {canSteer && (
             <fieldset className="request-section" data-testid={`delivery-mode-${req.id}`} disabled={submitting}>
-              <legend className="section-label">Quando consegnare</legend>
+              <legend className="section-label">{t("requests.when")}</legend>
               <label className="option-item">
                 <input type="radio" name={`delivery-${req.id}`} checked={deliveryMode === "queue"}
                   onChange={() => setDeliveryMode("queue")} />
-                <span>In coda · a fine turno</span>
+                <span>{t("requests.queue")}</span>
               </label>
               <label className="option-item">
                 <input type="radio" name={`delivery-${req.id}`} checked={deliveryMode === "now"}
                   onChange={() => setDeliveryMode("now")} />
-                <span>Subito · nel turno in corso</span>
+                <span>{t("requests.now")}</span>
               </label>
-              <p className="composer-note">Subito aggiunge il messaggio alla prossima azione utile. Se il turno termina prima, resta in coda.</p>
+              <p className="composer-note">{t("requests.nowHint")}</p>
             </fieldset>
           )}
         </>
       ) : (
         <section className="request-section">
-          <h3 className="section-label">Domanda</h3>
+          <h3 className="section-label">{t("requests.question")}</h3>
           <div className="question-text">
             <Markdown testId={`question-${req.id}`}>{req.prompt}</Markdown>
           </div>
@@ -210,7 +212,7 @@ function PromptCard({ req, submitting, highlighted, onDecide, sessions = [], onO
       {isChoice && (
         <fieldset className="options-list">
           <legend className="prompt-editor-label">
-            {multi ? "Scegli una o più opzioni:" : "Scegli un'opzione:"}
+            {t(multi ? "requests.chooseMany" : "requests.chooseOne")}
           </legend>
           {[...req.options, OTHER].map((opt) => (
             <label key={opt} className="option-item">
@@ -222,7 +224,7 @@ function PromptCard({ req, submitting, highlighted, onDecide, sessions = [], onO
                 checked={selected.includes(opt)}
                 onChange={() => toggle(opt)}
               />
-              <span>{opt === OTHER ? "Altro…" : opt}</span>
+              <span>{opt === OTHER ? t("requests.other") : opt}</span>
             </label>
           ))}
         </fieldset>
@@ -232,8 +234,8 @@ function PromptCard({ req, submitting, highlighted, onDecide, sessions = [], onO
         <textarea
           data-testid={`free-text-${req.id}`}
           className="prompt-textarea free-text"
-          placeholder={isChoice ? "Scrivi la tua risposta" : "Nota per l'agente (facoltativa)"}
-          aria-label={isChoice ? "Risposta Altro" : "Nota per l'agente"}
+          placeholder={t(isChoice ? "requests.writeAnswer" : "requests.notePlaceholder")}
+          aria-label={t(isChoice ? "requests.otherLabel" : "requests.noteLabel")}
           value={otherText}
           onChange={(e) => setOtherText(e.target.value)}
         />
@@ -242,7 +244,7 @@ function PromptCard({ req, submitting, highlighted, onDecide, sessions = [], onO
       {req.question_type === "prompt_review" && req.recipient_id !== "human" && req.sender_id !== "human" && (
         <label className="option-item">
           <input type="checkbox" checked={allowAutoReturn} onChange={(e) => setAllowAutoReturn(e.target.checked)} />
-          <span>Consenti anche il ritorno automatico della risposta</span>
+          <span>{t("requests.autoReturn")}</span>
         </label>
       )}
       <div className="actions-row">
@@ -253,7 +255,7 @@ function PromptCard({ req, submitting, highlighted, onDecide, sessions = [], onO
           onClick={() => decide("APPROVED")}
         >
           <CheckCircle size={16} />
-          {submitting ? "Invio in corso..." : approveLabel}
+          {submitting ? t("requests.submitting") : approveLabel}
         </button>
         <button
           data-testid={`btn-reject-${req.id}`}
@@ -262,7 +264,7 @@ function PromptCard({ req, submitting, highlighted, onDecide, sessions = [], onO
           onClick={() => decide("REJECTED")}
         >
           <XCircle size={16} />
-          Rifiuta
+          {t("requests.reject")}
         </button>
       </div>
     </div>

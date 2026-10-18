@@ -297,38 +297,41 @@ class RequestEvent(BaseModel):
     details: Dict[str, Any] = Field(default_factory=dict)
 
 
-def decision_error(req: "RequestModel", decision: RequestDecision) -> Optional[str]:
-    """
-    Checks a decision against the question it answers (RF-02, RF-03).
-    Returns a message describing the problem, or None if it is valid.
-    """
+def decision_problem(req: "RequestModel", decision: RequestDecision) -> Optional[tuple[str, str]]:
+    """Return a stable error code and English diagnostic, or None (RF-02/03)."""
     selected = decision.selected_options
     if decision.edited_prompt is not None and req.question_type != QuestionType.PROMPT_REVIEW:
-        return "edited_prompt is only allowed when reviewing a prompt for an agent"
+        return "decision.prompt_edit_not_allowed", "edited_prompt is only allowed when reviewing a prompt for an agent"
     if decision.recipient_session_id is not None and req.question_type != QuestionType.PROMPT_REVIEW:
-        return "recipient_session_id is only allowed when reviewing a prompt for an agent"
+        return "decision.recipient_not_allowed", "recipient_session_id is only allowed when reviewing a prompt for an agent"
 
     if req.question_type not in CHOICE_TYPES:
         if selected:
-            return f"{req.question_type.value} has no options to select"
+            return "decision.no_options", f"{req.question_type.value} has no options to select"
         return None
 
     if len(set(selected)) != len(selected):
-        return "selected_options must be unique"
+        return "decision.duplicate_options", "selected_options must be unique"
     unknown = [o for o in selected if o not in req.options]
     if unknown:
-        return f"unknown options: {', '.join(unknown)}"
+        return "decision.unknown_options", f"unknown options: {', '.join(unknown)}"
     if decision.status == RequestStatus.REJECTED:
         if selected:
-            return "a rejection cannot select options"
+            return "decision.rejected_options", "a rejection cannot select options"
         return None
 
     if req.question_type == QuestionType.SINGLE_CHOICE:
         if len(selected) + (1 if decision.custom_text else 0) != 1:
-            return "single_choice needs exactly one option, or 'Altro' with a text"
+            return "decision.single_choice", "single_choice needs exactly one option, or Other with a text"
     elif not selected and not decision.custom_text:
-        return "multi_choice needs at least one option or 'Altro' with a text"
+        return "decision.multi_choice", "multi_choice needs at least one option or Other with a text"
     return None
+
+
+def decision_error(req: "RequestModel", decision: RequestDecision) -> Optional[str]:
+    """Compatibility helper for callers that only need the diagnostic string."""
+    problem = decision_problem(req, decision)
+    return problem[1] if problem else None
 
 
 def is_settled(req: RequestModel) -> bool:
