@@ -104,3 +104,22 @@ async def test_return_errors_have_stable_codes_and_english_legacy_details(setup)
         assert (await human.post(f'/api/requests/{req.id}/return-decision', json={'approve': False})).status_code == 200
         duplicate = await human.post(f'/api/requests/{req.id}/return-decision', json={'approve': True})
         assert duplicate.status_code == 409 and duplicate.json()['code'] == 'return.unavailable'
+
+
+@pytest.mark.asyncio
+async def test_rejected_reply_draft_is_not_exposed_through_audit_to_agents(setup):
+    app, db = setup
+    req = completed(db)
+    async with human_client(app) as human:
+        decision = await human.post(f"/api/requests/{req.id}/return-decision", json={
+            "approve": False, "edited_response": "human draft not authorized for forwarding"})
+        assert decision.status_code == 200
+        audit = (await human.get(f"/api/requests/{req.id}/events")).json()
+        assert any(e["details"].get("edited_response") == "human draft not authorized for forwarding"
+                   for e in audit if e["details"])
+    for token in ("tok-claude", "tok-gemini"):
+        async with agent_client(app, token) as agent:
+            response = await agent.get(f"/api/requests/{req.id}/events")
+            assert response.status_code == 200
+            assert "human draft not authorized" not in response.text
+            assert any(e["event"] == "return_decided" for e in response.json())

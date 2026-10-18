@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Any, Dict, List, Optional, Literal
 from datetime import datetime, timezone
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import AwareDatetime, BaseModel, Field, field_validator, model_validator
 
 
 class RequestStatus(str, Enum):
@@ -351,7 +351,7 @@ class UsageBucket(BaseModel):
     group: Optional[str] = Field(default=None, max_length=100)
     window: Literal["5h", "7d"]
     used_percent: float = Field(ge=0, le=100)
-    resets_at: Optional[datetime] = None
+    resets_at: Optional[AwareDatetime] = None
 
 
 class ProviderUsage(BaseModel):

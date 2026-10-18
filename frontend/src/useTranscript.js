@@ -38,6 +38,7 @@ export function useTranscript(sessionId, refreshKey) {
     // oxlint-disable-next-line react/set-state-in-effect
     setStatus("loading");
     setEntries([]);
+    setMeta(null);
     fetchPage(sessionId, {})
       .then((page) => {
         if (cancelled) return;

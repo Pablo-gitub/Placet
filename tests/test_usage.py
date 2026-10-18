@@ -198,3 +198,26 @@ async def test_hooks_report_the_model(setup):  # noqa: F811
         # A later event without the model keeps it.
         await agent.post("/api/sessions/ag1/events", json={"event": "stop", "provider": "antigravity"})
     assert db.get_session("ag1").model == "gemini-3.8-flash-medium"
+
+
+@pytest.mark.asyncio
+async def test_usage_reset_requires_timezone_and_rejection_preserves_delivery(setup):
+    app, db = setup
+    async with agent_client(app, "tok-bridge") as bridge:
+        bad = {"providers": [{"provider": "codex", "buckets": [{
+            "id": "5h", "window": "5h", "used_percent": 100,
+            "resets_at": "2099-01-01T00:00:00"}]}]}
+        assert (await bridge.post("/api/bridge/usage", json=bad)).status_code == 422
+    assert db.limited_providers() == set()
+
+
+@pytest.mark.parametrize("provider,entry", [
+    ("claude-code", {"type": "assistant", "message": {"model": "test", "usage": {"input_tokens": "unknown"}}}),
+    ("claude-code", {"type": "assistant", "message": {"model": "test", "usage": ["invalid"]}}),
+    ("codex", {"type": "event_msg", "payload": {"type": "token_count", "info": "unknown"}}),
+])
+def test_bad_optional_metadata_does_not_break_transcript(tmp_path, provider, entry):
+    from bridge.transcripts import session_meta
+    path = tmp_path / "bad.jsonl"
+    path.write_text(json.dumps(entry) + "\n")
+    assert session_meta(provider, path) == {}

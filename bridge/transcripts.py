@@ -555,7 +555,8 @@ def session_meta(provider: str, path: Path) -> dict:
                                     context_window=info.get("model_context_window"))
                 if "model" in meta and "context_tokens" in meta:
                     break
-    except OSError:
+    except (OSError, TypeError, ValueError, AttributeError):
+        # Optional provider metadata must never prevent reading the conversation.
         return {}
     return {k: v for k, v in meta.items() if v is not None}
 

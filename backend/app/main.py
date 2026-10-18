@@ -574,7 +574,14 @@ def create_app(
     @app.get("/api/requests/{request_id}/events", response_model=List[RequestEvent])
     async def request_events(request_id: int, who: Principal = Depends(principal)):
         require_party(who, get_or_404(request_id))
-        return db.list_events(request_id)
+        events = db.list_events(request_id)
+        if not who.is_human:
+            # Audit may contain a human draft even when forwarding was rejected.
+            # Agents get outcome metadata; authorized reply text uses the reply path.
+            events = [event.model_copy(update={"details": {
+                key: value for key, value in event.details.items() if key != "edited_response"
+            }}) if event.event == "return_decided" and event.details else event for event in events]
+        return events
 
     @app.post("/api/requests/{request_id}/decision", response_model=RequestModel)
     async def decide_request(

@@ -1,8 +1,9 @@
 import React from "react";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import i18n, { setLanguagePreference } from "../i18n";
 import SessionView from "../SessionView";
+import { useTranscript } from "../useTranscript";
 import App from "../App";
 import CodeBlock from "../CodeBlock";
 import { json, mockFetch, MockEventSource, paramsOf, transcriptOf } from "./testUtils";
@@ -103,4 +104,20 @@ it("confirms queue-hold cancellation in the active language", async () => {
   fireEvent.click(screen.getByTestId("cancel-5"));
   expect(confirm.mock.calls[0][0]).toContain("The agent may continue working");
   expect(delivery).not.toHaveBeenCalled();
+});
+
+
+it("clears the previous session metadata while the next conversation loads", async () => {
+  let fail;
+  mockFetch([
+    [transcriptOf("c1"), { messages: [], before: null, end: 0, meta: { model: "original-model" } }],
+    [transcriptOf("c2"), () => new Promise((resolve, reject) => { fail = reject; })],
+  ]);
+  const { result, rerender } = renderHook(({ id }) => useTranscript(id), { initialProps: { id: "c1" } });
+  await waitFor(() => expect(result.current.meta).toEqual({ model: "original-model" }));
+  rerender({ id: "c2" });
+  expect(result.current.meta).toBeNull();
+  await act(async () => { fail(new Error("offline")); });
+  expect(result.current.status).toBe("error");
+  expect(result.current.meta).toBeNull();
 });
