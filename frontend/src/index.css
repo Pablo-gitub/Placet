@@ -1294,3 +1294,18 @@ body.chat-open { overflow: hidden; }
 .relation-route small { color: var(--text-muted); margin-left: 0.3rem; }
 .relation-row .session-select { width: auto; margin: 0; }
 .relation-rule { margin: 0.5rem 0 0.75rem; }
+
+/* RFC-14: automatic relations, Stop all and loop limits. */
+.automation-bar {
+  margin: 0 0 1.25rem; padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-secondary);
+  font-size: 0.8rem;
+}
+.automation-bar.paused { border-color: var(--warning, #f59e0b); }
+.automation-line { display: flex; align-items: center; gap: 0.5rem; }
+.automation-text { flex: 1; min-width: 0; }
+.automation-button { padding: 0.3rem 0.6rem; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 0.3rem; }
+.automation-limits { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.6rem; margin-top: 0.6rem; }
+.automation-limits label { display: grid; gap: 0.2rem; color: var(--text-muted); }
+.automation-limits input { width: 5rem; font: inherit; padding: 0.3rem; border-radius: 6px;
+  border: 1px solid var(--border-color); background: var(--bg-card, transparent); color: var(--text-main); }

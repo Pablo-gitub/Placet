@@ -277,3 +277,84 @@ def test_the_recipient_sees_whether_the_user_reviewed(env):
     assert "reviewed and approved" in envelopes.injection(RequestModel(**base, approval="manual"), language="en")
     edited = RequestModel(**base, approval="manual", edited_prompt="q")
     assert "edited" in envelopes.injection(edited, language="en")
+
+
+async def ping_pong(app, db):
+    a, b = await two_nodes(app, db)
+    t = db.create_relation_type("review", "")
+    db.create_relation(a.id, b.id, t.id, "automatic")
+    db.create_relation(b.id, a.id, t.id, "automatic")
+    return a, b
+
+
+async def hop(app, db, agent, session, target, parent):
+    """`session` runs the turn of `parent` and sends on to `target`."""
+    db.set_session_state(session, "busy", parent)
+    return await send(app, agent=agent, target=target, session=target_session[target])
+
+target_session = {"codex": "cx", "claude": "cl"}
+
+
+@pytest.mark.asyncio
+async def test_chains_stop_after_three_automatic_hops(env):
+    app, db = env
+    await ping_pong(app, db)
+    first = await send(app)
+    assert first["status"] == "APPROVED" and first["chain_hops"] == 1
+    second = await hop(app, db, "codex", "cx", "claude", first["id"])
+    third = await hop(app, db, "claude", "cl", "codex", second["id"])
+    assert (second["chain_hops"], third["chain_hops"]) == (2, 3) and third["status"] == "APPROVED"
+    fourth = await hop(app, db, "codex", "cx", "claude", third["id"])
+    assert fourth["status"] == "PENDING" and fourth["automation_limit"] == "hops"
+    assert fourth["parent_request_id"] == third["id"] and fourth["chain_hops"] == 0
+    assert any(e.event == "automation_limited" for e in db.list_events(fourth["id"]))
+    # The user approves it: the next hop starts a new count.
+    async with human_client(app) as human:
+        await human.post(f"/api/requests/{fourth['id']}/decision", json={"status": "APPROVED"})
+    fifth = await hop(app, db, "claude", "cl", "codex", fourth["id"])
+    assert fifth["status"] == "APPROVED" and fifth["chain_hops"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_question_to_the_user_resets_the_chain(env):
+    app, db = env
+    await ping_pong(app, db)
+    db.set_automation(max_hops=1)
+    first = await send(app)
+    db.set_session_state("cx", "busy", first["id"])
+    async with agent_client(app, "tok-codex") as client:
+        q = (await client.post("/api/requests", json={"recipient_id": "human", "prompt": "ok?"})).json()
+    async with human_client(app) as human:
+        await human.post(f"/api/requests/{q['id']}/decision", json={"status": "APPROVED"})
+    second = await send(app, agent="codex", target="claude", session="cl")
+    assert second["status"] == "APPROVED" and second["chain_hops"] == 1
+
+
+@pytest.mark.asyncio
+async def test_hourly_limit_per_relation(env):
+    app, db = env
+    await ping_pong(app, db)
+    db.set_automation(max_per_hour=2)
+    assert [(await send(app))["status"] for _ in range(3)] == ["APPROVED", "APPROVED", "PENDING"]
+
+
+@pytest.mark.asyncio
+async def test_stop_all_holds_queued_prompts_until_resumed(env):
+    app, db = env
+    await ping_pong(app, db)
+    queued = await send(app)
+    async with human_client(app) as human:
+        state = (await human.get("/api/automation")).json()
+        assert state["paused"] is False and state["automatic_relations"] == 2
+        stopped = (await human.post("/api/automation/stop")).json()
+        assert stopped["paused"] is True and stopped["held"] == [queued["id"]]
+        assert db.get_request(queued["id"]).status.value == "PENDING"
+        paused = await send(app)
+        assert paused["status"] == "PENDING" and paused["automation_limit"] == "paused"
+        await human.post("/api/automation/resume")
+        assert (await send(app))["status"] == "APPROVED"
+        resp = await human.put("/api/automation", json={"max_hops": 5, "max_per_hour": 50})
+        assert (resp.json()["max_hops"], resp.json()["max_per_hour"]) == (5, 50)
+        assert (await human.put("/api/automation", json={"max_hops": 0})).status_code == 422
+    async with agent_client(app, "tok-claude") as client:
+        assert (await client.post("/api/automation/stop")).status_code in (401, 403, 404)

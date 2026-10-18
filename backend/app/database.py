@@ -136,6 +136,88 @@ class Database:
             conn.execute("INSERT INTO app_settings (key, value) VALUES ('relation_rule', ?)"
                          " ON CONFLICT(key) DO UPDATE SET value = excluded.value", (rule,))
 
+    # --- Automation limits (RFC-14) -------------------------------------------
+
+    AUTOMATION_DEFAULTS = {"automation_paused": "0", "max_auto_hops": "3", "max_auto_per_hour": "20"}
+
+    def get_automation(self) -> Dict[str, Any]:
+        with self._get_connection() as conn:
+            rows = dict(conn.execute(
+                "SELECT key, value FROM app_settings WHERE key IN (?, ?, ?)",
+                tuple(self.AUTOMATION_DEFAULTS)).fetchall())
+        values = {k: rows.get(k, v) for k, v in self.AUTOMATION_DEFAULTS.items()}
+        return {"paused": values["automation_paused"] == "1",
+                "max_hops": int(values["max_auto_hops"]),
+                "max_per_hour": int(values["max_auto_per_hour"])}
+
+    def set_automation(self, paused: Optional[bool] = None, max_hops: Optional[int] = None,
+                       max_per_hour: Optional[int] = None) -> None:
+        updates = {"automation_paused": None if paused is None else ("1" if paused else "0"),
+                   "max_auto_hops": None if max_hops is None else str(max_hops),
+                   "max_auto_per_hour": None if max_per_hour is None else str(max_per_hour)}
+        with self._get_connection() as conn:
+            for key, value in updates.items():
+                if value is not None:
+                    conn.execute("INSERT INTO app_settings (key, value) VALUES (?, ?)"
+                                 " ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
+
+    def chain_start(self, session_id: Optional[str]) -> Tuple[Optional[int], int]:
+        """
+        The request whose turn the session is running, and the consecutive
+        automatic hops that led to it. A question the user answered for the
+        session during that turn resets the count: the user took part.
+        """
+        if not session_id:
+            return None, 0
+        with self._get_connection() as conn:
+            session = conn.execute("SELECT turn_request_id FROM sessions WHERE id = ?", (session_id,)).fetchone()
+            parent_id = session["turn_request_id"] if session else None
+            if parent_id is None:
+                return None, 0
+            parent = conn.execute("SELECT approval, chain_hops, execution_at, delivery_at FROM requests"
+                                  " WHERE id = ?", (parent_id,)).fetchone()
+            if parent is None or parent["approval"] != "automatic":
+                return parent_id, 0
+            since = parent["execution_at"] or parent["delivery_at"] or ""
+            asked = conn.execute(
+                "SELECT 1 FROM requests WHERE sender_session_id = ? AND recipient_id = 'human'"
+                " AND decided_at IS NOT NULL AND decided_at >= ? LIMIT 1", (session_id, since)).fetchone()
+            return parent_id, 0 if asked else parent["chain_hops"] or 0
+
+    def set_chain(self, request_id: int, parent_id: Optional[int], hops: int) -> None:
+        with self._get_connection() as conn:
+            conn.execute("UPDATE requests SET parent_request_id = ?, chain_hops = ? WHERE id = ?",
+                         (parent_id, hops, request_id))
+
+    def automatic_sends_last_hour(self, relation_id: int) -> int:
+        horizon = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        with self._get_connection() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) FROM requests WHERE relation_id = ? AND approval = 'automatic'"
+                " AND created_at >= ?", (relation_id, horizon)).fetchone()[0]
+
+    def log_event(self, request_id: int, actor: str, event: str, details: Dict[str, Any]) -> None:
+        with self._get_connection() as conn:
+            self._log(conn.cursor(), request_id, actor, event, details)
+
+    def hold_automatic(self, actor: str) -> List[int]:
+        """
+        Stop all: automatic prompts not yet taken for delivery go back to the
+        user's review. Prompts already being delivered or running are not stopped.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            ids = [r[0] for r in cur.execute(
+                "SELECT id FROM requests WHERE status = 'APPROVED' AND approval = 'automatic'"
+                " AND COALESCE(delivery_state, 'waiting') = 'waiting' AND delivering_since IS NULL"
+                " AND recipient_id != 'human'").fetchall()]
+            for request_id in ids:
+                cur.execute("UPDATE requests SET status = 'PENDING', approval = NULL, decided_at = NULL,"
+                            " updated_at = ? WHERE id = ? AND status = 'APPROVED'", (now, request_id))
+                self._log(cur, request_id, actor, "held", {"reason": "stop_all"})
+            return ids
+
     def init_db(self):
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         with self._get_connection() as conn:
@@ -329,6 +411,11 @@ class Database:
                     "UPDATE requests SET queue_released_at = COALESCE(updated_at, created_at)"
                     " WHERE status NOT IN ('PENDING', 'APPROVED', 'DELIVERING');"
                 )
+            if "chain_hops" not in cols:
+                # RFC-14: the request whose turn sent this one, and how many
+                # consecutive automatic hops led here.
+                cursor.execute("ALTER TABLE requests ADD COLUMN parent_request_id INTEGER;")
+                cursor.execute("ALTER TABLE requests ADD COLUMN chain_hops INTEGER NOT NULL DEFAULT 0;")
             if "approval" not in cols:
                 # Who let the prompt go: "automatic" (rule or relation) or "manual" (the user).
                 cursor.execute("ALTER TABLE requests ADD COLUMN approval TEXT;")
@@ -485,6 +572,8 @@ class Database:
             relation_id=row["relation_id"],
             return_forward_id=row["return_forward_id"],
             approval=row["approval"],
+            parent_request_id=row["parent_request_id"],
+            chain_hops=row["chain_hops"] or 0,
         )
 
     def list_requests(

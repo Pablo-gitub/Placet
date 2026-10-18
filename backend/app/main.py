@@ -164,6 +164,11 @@ class RelationUpdate(BaseModel):
     approval: Literal["manual", "automatic"]
 
 
+class AutomationLimits(BaseModel):
+    max_hops: Optional[int] = Field(None, ge=1, le=10)
+    max_per_hour: Optional[int] = Field(None, ge=1, le=200)
+
+
 class RelationRule(BaseModel):
     rule: str = Field("", max_length=4000)
 
@@ -628,6 +633,24 @@ def create_app(
                 needs_approval = False
                 by_relation = True
 
+        # RFC-14: loop limits turn an automatic relation back into a review.
+        parent_id, hops_before = db.chain_start(created.sender_session_id)
+        automation_limit = None
+        if by_relation:
+            limits = db.get_automation()
+            if limits["paused"]:
+                automation_limit = "paused"
+            elif hops_before + 1 > limits["max_hops"]:
+                automation_limit = "hops"
+            elif db.automatic_sends_last_hour(relation.id) >= limits["max_per_hour"]:
+                automation_limit = "rate"
+            if automation_limit:
+                needs_approval, by_relation = True, False
+                db.log_event(created.id, "system:limits", "automation_limited",
+                             {"reason": automation_limit, "hops": hops_before + 1, **limits})
+        db.set_chain(created.id, parent_id, hops_before + 1 if by_relation else 0)
+        created = db.get_request(created.id)
+
         if not needs_approval:
             # Auto-approval: AGENTS.md routing, or an automatic relation.
             created = db.update_request_decision(
@@ -650,6 +673,9 @@ def create_app(
         if req.recipient_id != "human":
             # RFC-06: the sender knows whether the user reviews its prompt.
             extra["delivery_policy"] = "automatic" if not needs_approval else "manual"
+            if automation_limit:
+                extra["automation_limit"] = automation_limit
+                extra["note"] = text(f"envelope.limit_{automation_limit}", db.get_background_language())
             if relation is not None:
                 extra["relation"] = relation_brief(relation)
         if target_warning:
@@ -1355,6 +1381,39 @@ def create_app(
             raise ProductError(409, "relation_type.in_use", "Relations of this type exist.")
         return Response(status_code=204)
 
+    # --- Automation limits and Stop all (RFC-14) --------------------------------
+
+    @app.get("/api/automation")
+    async def get_automation(who: Principal = Depends(principal)):
+        require_human(who)
+        automatic = sum(1 for r in db.list_relations() if r.approval == "automatic")
+        return {**db.get_automation(), "automatic_relations": automatic}
+
+    @app.put("/api/automation")
+    async def set_automation(body: AutomationLimits, who: Principal = Depends(principal)):
+        require_human(who)
+        db.set_automation(max_hops=body.max_hops, max_per_hour=body.max_per_hour)
+        _broadcast(("automation", 0))
+        return await get_automation(who)
+
+    @app.post("/api/automation/stop")
+    async def stop_automation(who: Principal = Depends(principal)):
+        """Stop all: no automatic delivery until resumed; queued ones go back to review."""
+        require_human(who)
+        db.set_automation(paused=True)
+        held = db.hold_automatic(who.actor)
+        for request_id in held:
+            notify_change(request_id)
+        _broadcast(("automation", 0))
+        return {**(await get_automation(who)), "held": held}
+
+    @app.post("/api/automation/resume")
+    async def resume_automation(who: Principal = Depends(principal)):
+        require_human(who)
+        db.set_automation(paused=False)
+        _broadcast(("automation", 0))
+        return await get_automation(who)
+
     @app.get("/api/settings/relation-rule", response_model=RelationRule)
     async def get_relation_rule(who: Principal = Depends(principal)):
         require_human(who)
@@ -1783,6 +1842,9 @@ def create_app(
                     if kind == "usage":
                         yield {"event": "usage_update",
                                "data": json.dumps([u.model_dump(mode="json") for u in stored_usage()])}
+                        continue
+                    if kind == "automation":
+                        yield {"event": "automation_update", "data": json.dumps(db.get_automation())}
                         continue
                     if kind == "session":
                         session = db.get_session(key)

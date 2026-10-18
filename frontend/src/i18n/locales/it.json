@@ -142,7 +142,8 @@
     "relationExists": "Questa relazione esiste già.",
     "relationSelf": "Un nodo non può avere una relazione con se stesso.",
     "relationSave": "Impossibile salvare la relazione. Controlla la connessione.",
-    "forwardInvalid": "Scegli una sessione aperta diversa dal mittente e da chi ha risposto."
+    "forwardInvalid": "Scegli una sessione aperta diversa dal mittente e da chi ha risposto.",
+    "automation": "Impossibile modificare gli automatismi. Controlla la connessione."
   },
   "sessions": {
     "closed": "Chiusa",
@@ -431,5 +432,16 @@
     "ruleSave": "Salva regola",
     "ruleActive": "Regola attiva: gli agenti la leggono prima di ogni invio automatico.",
     "ruleEmpty": "Nessuna regola: le relazioni automatiche consegnano subito."
+  },
+  "automation": {
+    "active_one": "{{count}} relazione automatica · max {{hops}} passaggi, {{perHour}}/h",
+    "active_other": "{{count}} relazioni automatiche · max {{hops}} passaggi, {{perHour}}/h",
+    "paused": "Relazioni automatiche in pausa: ogni prompt attende la tua revisione.",
+    "stop": "Ferma tutto",
+    "resume": "Riprendi",
+    "limits": "Limiti anti-loop",
+    "maxHops": "Passaggi automatici consecutivi",
+    "maxPerHour": "Prompt automatici all'ora per relazione",
+    "save": "Salva"
   }
 }

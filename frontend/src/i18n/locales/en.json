@@ -142,7 +142,8 @@
     "relationExists": "This relation already exists.",
     "relationSelf": "A node cannot have a relation with itself.",
     "relationSave": "Unable to save the relation. Check your connection.",
-    "forwardInvalid": "Choose an open session other than the sender and the one that replied."
+    "forwardInvalid": "Choose an open session other than the sender and the one that replied.",
+    "automation": "Unable to change the automation. Check your connection."
   },
   "sessions": {
     "closed": "Closed",
@@ -431,5 +432,16 @@
     "ruleSave": "Save rule",
     "ruleActive": "Rule active: agents read it before each automatic send.",
     "ruleEmpty": "No rule: automatic relations deliver at once."
+  },
+  "automation": {
+    "active_one": "{{count}} automatic relation · max {{hops}} hops, {{perHour}}/h",
+    "active_other": "{{count}} automatic relations · max {{hops}} hops, {{perHour}}/h",
+    "paused": "Automatic relations paused: every prompt waits for your review.",
+    "stop": "Stop all",
+    "resume": "Resume",
+    "limits": "Loop limits",
+    "maxHops": "Consecutive automatic hops",
+    "maxPerHour": "Automatic prompts per hour per relation",
+    "save": "Save"
   }
 }

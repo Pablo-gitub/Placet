@@ -104,6 +104,7 @@ export default function App() {
 
   // RF-60: usage windows per provider, as the bridge last read them.
   const [usage, setUsage] = useState([]);
+  const [automationVersion, setAutomationVersion] = useState(0);
   const fetchUsage = useCallback(async () => {
     try {
       const res = await fetch("/api/usage");
@@ -157,6 +158,7 @@ export default function App() {
           console.error("Error parsing SSE event:", err);
         }
       });
+      evtSource.addEventListener("automation_update", () => setAutomationVersion((v) => v + 1));
       evtSource.addEventListener("usage_update", (event) => {
         try {
           setUsage(JSON.parse(event.data));
@@ -325,6 +327,7 @@ export default function App() {
       requests={requests}
       sessions={sessions}
       usage={usage}
+      automationVersion={automationVersion}
       onDecide={handleDecision}
       submittingId={submittingId}
       focusId={focusId}

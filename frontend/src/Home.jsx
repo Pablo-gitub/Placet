@@ -5,6 +5,7 @@ import RequestCard from "./RequestCard";
 import { needsReturnApproval } from "./decisions";
 import AddSessionsDialog from "./AddSessionsDialog";
 import UsageBar from "./UsageBar";
+import AutomationBar from "./AutomationBar";
 import {
   activityOf,
   byActivity,
@@ -96,6 +97,7 @@ export default function Home({
   requests,
   sessions,
   usage,
+  automationVersion,
   onDecide,
   submittingId,
   focusId,
@@ -133,6 +135,7 @@ export default function Home({
   return (
     <div data-testid="home-section">
       <UsageBar usage={usage} />
+      <AutomationBar version={automationVersion} />
       <section className="home-section">
         <h2 className="home-title">
           <MessageCircleQuestion size={16} /> {t("home.questions")}

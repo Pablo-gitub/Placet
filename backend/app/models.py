@@ -180,6 +180,9 @@ class RequestModel(BaseModel):
     return_text: Optional[str] = None
     # Who let the prompt go: "automatic" (a rule or relation) or "manual" (the user).
     approval: Optional[str] = None
+    # RFC-14: the request whose turn sent this one; consecutive automatic hops.
+    parent_request_id: Optional[int] = None
+    chain_hops: int = 0
     # The reply went, by the user's choice, to another session on this request.
     return_forward_id: Optional[int] = None
     # RFC-04: the relation the request travelled on, if any.
