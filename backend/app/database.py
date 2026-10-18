@@ -93,11 +93,25 @@ class Database:
         finally:
             conn.close()
 
+    def get_background_language(self) -> str:
+        from backend.app.i18n import default_language
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT value FROM app_settings WHERE key = 'background_language'").fetchone()
+        return row[0] if row and row[0] in ("en", "it") else default_language()
+
+    def set_background_language(self, language: str) -> None:
+        if language not in ("en", "it"):
+            raise ValueError("Unsupported background language")
+        with self._get_connection() as conn:
+            conn.execute("INSERT INTO app_settings (key, value) VALUES ('background_language', ?)"
+                         " ON CONFLICT(key) DO UPDATE SET value = excluded.value", (language,))
+
     def init_db(self):
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("PRAGMA journal_mode = WAL;")
+            cursor.execute("CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS requests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -341,5 +341,16 @@
     "cancelled": "Message cancelled.",
     "markedFinished": "Marked finished: the session can receive the next message.",
     "queuedNext": "The next message will be sent without waiting."
+  },
+  "backgroundLanguage": {
+    "title": "Notification and message language",
+    "explanation": "This shared setting applies to notifications and new Placet-generated messages for this installation. It does not change this browser’s interface language or translate existing conversations. Only the human supervisor can change it.",
+    "label": "Background language",
+    "loading": "Loading setting…",
+    "save": "Save",
+    "saving": "Saving…",
+    "saved": "Saved. New notifications and Placet messages will use this language.",
+    "loadError": "Unable to load the setting. Close and reopen to retry.",
+    "saveError": "Unable to save. Your choice is still selected; try again."
   }
 }

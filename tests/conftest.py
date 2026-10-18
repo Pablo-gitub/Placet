@@ -7,6 +7,8 @@ from tests.helpers import HUMAN_LOGIN
 def _allowed_human(monkeypatch):
     # Apps built without an explicit allowed_users read this variable.
     monkeypatch.setenv("PLACET_ALLOWED_USERS", HUMAN_LOGIN)
+    # Legacy scenarios explicitly select Italian; server-locale tests override it.
+    monkeypatch.setenv("PLACET_DEFAULT_LANGUAGE", "it")
 
 
 @pytest.fixture(autouse=True)

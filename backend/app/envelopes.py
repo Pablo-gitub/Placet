@@ -1,106 +1,65 @@
-"""
-Texts Placet writes into an agent session: a prompt from another agent
-(injection) or the outcome of a request the session made (outcome).
+"""Localized product wrappers around unchanged agent/user content.
 
-Three channels deliver them:
-- tmux: typed into the terminal, so the user sees the text as a prompt;
-- hook: handed to Claude Code by a background hook that wakes the session.
-  The app does not show that text (it reaches the model as a system
-  reminder framed as a "Stop hook blocking error"), so the agent is asked to
-  quote it first: the user must see why the agent started working;
-- app: queued by the bridge into the provider's app (Codex, Antigravity),
-  where it appears as a user message.
+Delivery channels: terminal input (tmux), app messages, or hook context.
+Only the wrapper is translated; tools and request identifiers are stable.
 """
 from backend.app.models import QuestionType, RequestModel, RequestStatus
-
-OUTCOME_NOTES = {
-    RequestStatus.DELIVERY_FAILED: "Il prompt non è stato confermato dall'agente destinatario dopo più tentativi.",
-    RequestStatus.STALLED: "L'agente destinatario ha ricevuto il prompt ma non ha risposto entro il tempo massimo.",
-    RequestStatus.EXPIRED: "La richiesta è scaduta.",
-}
-
-HOOK_PREFACE = (
-    "Questo non è un errore: è un messaggio di Placet, il sistema di coordinamento "
-    "tra te, l'utente e gli altri agenti. Inizia la tua risposta riportando in una riga "
-    "chi ti scrive e cosa ti chiede (l'utente non vede questo messaggio), poi procedi."
-)
+from backend.app.i18n import text
 
 
-USER_MESSAGE_NOTE = (
-    "È un messaggio che l'utente ti scrive dal telefono tramite Placet: rispondigli "
-    "direttamente, come a un suo messaggio (non serve placet_reply)."
-)
+def hook_preface(language=None):
+    return text("envelope.hook", language)
 
 
-STEER_NOTE = (
-    "Arriva adesso, mentre stai lavorando: tienine conto nel turno in corso "
-    "(l'utente ha scelto di inserirlo subito invece di aspettare la fine del turno)."
-)
+# Compatibility constant for external callers; new callers use hook_preface().
+HOOK_PREFACE = text("envelope.hook", "en")
 
 
-def steer(req: RequestModel) -> str:
-    """A message the user sends "now", inside the running turn (RF-35)."""
+def steer(req: RequestModel, language=None) -> str:
     if req.question_type != QuestionType.MESSAGE:
-        # Preserve the sender, edited prompt and explicit reply contract.
-        return injection(req, ack_mode="none", channel="app") + "\n" + STEER_NOTE
-    text = f"[Placet Request #{req.id} dall'utente]: {req.prompt}\n{USER_MESSAGE_NOTE}\n{STEER_NOTE}"
-    if req.context:
-        text += f"\n\n{req.context}"
-    return text
+        return injection(req, ack_mode="none", channel="app", language=language) + "\n" + text("envelope.steer", language)
+    message = text("envelope.user", language, id=req.id, prompt=req.prompt)
+    message += "\n" + text("envelope.user_note", language) + "\n" + text("envelope.steer", language)
+    return message + (f"\n\n{req.context}" if req.context else "")
 
 
-def injection(req: RequestModel, ack_mode: str = "mcp", channel: str = "tmux") -> str:
+def injection(req: RequestModel, ack_mode="mcp", channel="tmux", language=None) -> str:
     if req.question_type == QuestionType.MESSAGE:
-        # The user's own message (RF-34): no reply tool, the answer is the turn.
-        text = f"[Placet Request #{req.id} dall'utente]: {req.prompt}\n{USER_MESSAGE_NOTE}"
+        message = text("envelope.user", language, id=req.id, prompt=req.prompt)
+        message += "\n" + text("envelope.user_note", language)
         if req.context:
-            text += f"\n\n{req.context}"
-        return f"{text}\n{HOOK_PREFACE}" if channel == "hook" else text
-    # Only the prompt: the context explains the request to the human and is
-    # not part of what the recipient receives.
-    prompt_to_send = req.edited_prompt if req.edited_prompt is not None else req.prompt
-    # Over the hook channel the delivery is confirmed by the turn it opens.
-    ack_part = (
-        f"Prima di iniziare chiama placet_ack(request_id={req.id}) per confermare la ricezione. "
-        if ack_mode == "mcp" and channel == "tmux" else ""
-    )
-    text = (
-        f"[Placet Request #{req.id} da {req.sender_id}]: {prompt_to_send}\n"
-        f"{ack_part}Quando hai terminato, rispondi usando lo strumento MCP "
-        f"placet_reply(request_id={req.id}, response=\"...\")."
-    )
-    return f"{text}\n{HOOK_PREFACE}" if channel == "hook" else text
+            message += f"\n\n{req.context}"
+    else:
+        prompt = req.edited_prompt if req.edited_prompt is not None else req.prompt
+        message = text("envelope.agent", language, id=req.id, sender=req.sender_id, prompt=prompt) + "\n"
+        if ack_mode == "mcp" and channel == "tmux":
+            message += text("envelope.ack", language, id=req.id)
+        message += text("envelope.reply", language, id=req.id)
+    return message + ("\n" + hook_preface(language) if channel == "hook" else "")
 
 
-def outcome(req: RequestModel, channel: str = "tmux") -> str:
+def outcome(req: RequestModel, channel="tmux", language=None) -> str:
     if req.recipient_id == "human":
-        lines = [f"[Placet] Decisione dell'utente sulla richiesta #{req.id}: {req.status.value}."]
+        lines = [text("envelope.decision", language, id=req.id, status=req.status.value)]
         if req.selected_options:
-            lines.append(f"Opzioni scelte: {', '.join(req.selected_options)}")
+            lines.append(text("envelope.options", language, options=", ".join(req.selected_options)))
         if req.custom_text:
-            label = "Altro" if req.options else "Nota dell'utente"
+            label = text("envelope.other" if req.options else "envelope.note", language)
             lines.append(f"{label}: {req.custom_text}")
         if req.edited_prompt is not None and req.edited_prompt != req.prompt:
-            lines.append(f"Testo modificato dall'utente: {req.edited_prompt}")
+            lines.append(text("envelope.edited", language, prompt=req.edited_prompt))
     else:
-        lines = [f"[Placet] Esito della richiesta #{req.id} a {req.recipient_id}: {req.status.value}."]
+        lines = [text("envelope.outcome", language, id=req.id, recipient=req.recipient_id, status=req.status.value)]
         if req.edited_prompt is not None and req.edited_prompt != req.prompt:
-            lines.append(
-                "Attenzione: l'utente ha modificato il tuo prompt prima di inviarlo. "
-                f"{req.recipient_id} ha ricevuto ed eseguito questo testo: {req.edited_prompt}"
-            )
-        if req.status in OUTCOME_NOTES:
-            lines.append(OUTCOME_NOTES[req.status])
+            lines.append(text("envelope.prompt_changed", language, recipient=req.recipient_id, prompt=req.edited_prompt))
+        note = {RequestStatus.DELIVERY_FAILED: "failed", RequestStatus.STALLED: "stalled", RequestStatus.EXPIRED: "expired"}.get(req.status)
+        if note:
+            lines.append(text(f"envelope.{note}", language))
         if req.response is not None:
-            origin = (
-                " (risposta implicita: ultimo messaggio dell'agente, non inviato con placet_reply)"
-                if req.response.implicit else ""
-            )
-            lines.append(f"Risposta di {req.response.responder_id}{origin}: {req.return_text if req.return_text is not None else req.response.content}")
-    lines.append(
-        "Riprendi il lavoro che avevi sospeso in attesa di questo esito "
-        f"(dettagli con placet_check_status(request_id={req.id}))."
-    )
+            origin = text("envelope.implicit", language) if req.response.implicit else ""
+            content = req.return_text if req.return_text is not None else req.response.content
+            lines.append(text("envelope.response", language, responder=req.response.responder_id, origin=origin, content=content))
+    lines.append(text("envelope.resume", language, id=req.id))
     if channel == "hook":
-        lines.append(HOOK_PREFACE)
+        lines.append(hook_preface(language))
     return "\n".join(lines)

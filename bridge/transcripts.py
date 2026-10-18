@@ -79,7 +79,7 @@ def _action(name: str, kind: str, detail: Optional[str], at: Optional[str]) -> d
 
 # A message the user wrote from the PWA (RF-34), as delivered by Placet:
 # "[Placet Request #N dall'utente]: <text>" plus a note for the agent.
-_USER_MESSAGE = re.compile(r"^\s*\[Placet Request #\d+ dall'utente\]:\s*(.*?)(?:\nÈ un messaggio che l'utente ti scrive.*)?$", re.S)
+_USER_MESSAGE = re.compile(r"^\s*\[Placet Request #\d+ (?:dall'utente|from user)\]:\s*(.*?)(?:\n(?:È un messaggio che l['’]utente ti scrive|This is a message from the user on their phone).*)?$", re.S)
 
 
 _REQUEST_ID = re.compile(r"^\s*\[Placet Request #(\d+)\b")

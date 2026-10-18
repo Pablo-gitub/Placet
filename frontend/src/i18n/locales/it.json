@@ -341,5 +341,16 @@
     "cancelled": "Messaggio annullato.",
     "markedFinished": "Segnata come terminata: la sessione riceve il prossimo messaggio.",
     "queuedNext": "Il prossimo messaggio parte senza aspettare."
+  },
+  "backgroundLanguage": {
+    "title": "Lingua di notifiche e messaggi",
+    "explanation": "Questa impostazione condivisa vale per notifiche e nuovi messaggi generati da Placet in questa installazione. Non cambia la lingua dell’interfaccia di questo browser e non traduce le conversazioni esistenti. Può modificarla solo il supervisore umano.",
+    "label": "Lingua dei processi in background",
+    "loading": "Caricamento impostazione…",
+    "save": "Salva",
+    "saving": "Salvataggio…",
+    "saved": "Salvata. Nuove notifiche e messaggi Placet useranno questa lingua.",
+    "loadError": "Impossibile caricare l’impostazione. Chiudi e riapri per riprovare.",
+    "saveError": "Impossibile salvare. La scelta resta selezionata: riprova."
   }
 }

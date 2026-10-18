@@ -67,24 +67,19 @@ def placet_ask_human(
     priority: Optional[PriorityLevel] = None,
 ) -> str:
     """
-    Richiede una decisione, un'approvazione o una scelta all'utente umano (Paolo su iPhone).
-    `context` è obbligatorio: la domanda arriva sul telefono senza nient'altro, mentre l'utente
-    fa altro. Spiega in 1-3 frasi su cosa stai lavorando, cosa succede con ciascuna risposta e
-    perché ti serve la sua decisione. Una domanda come "Procedo?" senza contesto non è decidibile.
-    - Senza `options`: domanda di conferma (approva/rifiuta) con eventuale nota libera dell'utente.
-    - Con `options`: l'utente sceglie un'opzione (`multiple=False`) o più opzioni (`multiple=True`).
-      L'utente ha sempre anche l'opzione "Altro" con testo libero: non aggiungerla tu.
-    Nella risposta: `status` (APPROVED = risposto/approvato, REJECTED = rifiutato),
-    `selected_options` e `custom_text` (testo di "Altro" o nota).
-    `priority` (low/normal/high/urgent, default high) decide quanto è insistente la notifica:
-    usa urgent solo se un'attesa blocca qualcosa di importante.
-    `timeout_seconds`: quanto aspettare la risposta, almeno 60 secondi (valori più bassi vengono
-    portati a 60, perché l'utente deve avere il tempo di leggere e rispondere).
-    La richiesta viene notificata istantaneamente su iPhone. Se l'utente risponde entro il timeout,
-    lo strumento restituisce la decisione, le opzioni scelte o il testo inserito/modificato.
-    Se scade il timeout, restituisce lo stato PENDING con request_id: in quel caso termina il turno
-    senza ripetere la domanda. Quando l'utente decide, Placet scrive l'esito in questa sessione
-    (messaggio che inizia con "[Placet]") e potrai riprendere il lavoro.
+    Ask the human supervisor for a decision, approval, or choice on their phone.
+    `context` is required: explain in 1–3 sentences what you are doing, the
+    consequences of each answer, and why a decision is needed. A bare
+    "Proceed?" cannot be evaluated without context.
+    Without `options`, the user can approve/reject and add a free-text note.
+    With `options`, the user selects one (`multiple=False`) or more options.
+    The UI always includes an Other/free-text choice; do not add one yourself.
+    Read `status`, `selected_options`, and `custom_text` from the result.
+    `priority` controls notification urgency (default high); reserve urgent for
+    important blocked work. `timeout_seconds` waits at least 60 seconds so the
+    user has time to read. If the result is still PENDING, end the turn without
+    repeating the request. Placet posts the eventual decision in this session
+    with a message beginning with "[Placet]" so work can resume.
     """
     try:
         res = client.ask_human(
@@ -111,19 +106,21 @@ def placet_send_to_agent(
     target_session: Optional[str] = None,
 ) -> str:
     """
-    Invia un prompt a un'altra sessione di un agente registrato (es. 'claude', 'gemini', 'codex').
-    - `prompt`: il testo (Markdown) che l'agente destinatario riceverà, e solo quello.
-    - `prompt_file`: in alternativa, il percorso assoluto di un file .md/.txt con il prompt
-      (ad esempio un prompt preparato in un file); il contenuto diventa il prompt.
-    - `context`: spiega all'utente perché mandi questo prompt e cosa ti aspetti. Lo legge
-      solo l'utente su iPhone, mentre decide se approvare o modificare: NON arriva al destinatario.
-    L'utente può approvare, rifiutare o modificare il prompt prima dell'invio, secondo le regole
-    in AGENTS.md.
-    `target_session` (facoltativo): id di una sessione raggiungibile del destinatario, da
-    placet_list_agents; senza, Placet usa la prima sessione libera di quell'agente.
-    Lo strumento attende la risposta dell'altro agente fino al timeout. Se restituisce uno stato
-    non finale (PENDING, APPROVED, DELIVERING, EXECUTING), termina il turno: Placet scriverà
-    l'esito in questa sessione (messaggio che inizia con "[Placet]") quando sarà disponibile.
+    Send a prompt to another session of a registered agent, including another
+    session of the same provider when routing rules allow it.
+    `prompt` is the Markdown text the recipient receives. Alternatively,
+    `prompt_file` is an absolute .md/.txt path whose contents become the prompt.
+    `context` explains the request to the human reviewer only; it is NEVER
+    delivered to the recipient. Put all task instructions in the prompt.
+    Routing and human approval follow AGENTS.md. The human may edit or reject
+    the prompt. `target_session` selects an exact session from placet_list_agents;
+    otherwise Placet chooses an available session. Never target this session.
+    The tool waits up to `timeout_seconds`. For PENDING, APPROVED, DELIVERING,
+    or EXECUTING, end the turn without resending. A completed task may still
+    have its reply withheld for human approval: COMPLETED with no `response`
+    does not authorize bypassing that approval or repeating the request. Wait
+    for Placet's outcome message. Automatic reply return requires explicit
+    authorization; never fetch the other session's files to bypass it.
     """
     try:
         prompt_source = None
@@ -148,9 +145,10 @@ def placet_send_to_agent(
 @mcp.tool()
 def placet_ack(request_id: int) -> str:
     """
-    Conferma di aver ricevuto una richiesta Placet arrivata nel terminale
-    (messaggio "[Placet Request #N da ...]"). Chiamalo subito, prima di iniziare il lavoro:
-    senza conferma Placet considera il prompt non consegnato e lo reinvia.
+    Acknowledge a Placet request delivered through a terminal (a message
+    beginning with "[Placet Request #N"). Call before starting the task when
+    the delivery message requests it. Without acknowledgment, terminal
+    delivery may be considered unconfirmed and retried.
     """
     try:
         res = client.ack(request_id=request_id)
@@ -165,8 +163,10 @@ def placet_reply(
     response: str,
 ) -> str:
     """
-    Restituisce la risposta a una richiesta Placet ricevuta (indicata da request_id).
-    Da chiamare una volta completata l'analisi o il task richiesto da un altro agente.
+    Record the result of another agent's Placet request, identified by request_id.
+    Call after completing the requested analysis or task. This completes the
+    task but does not bypass human approval of forwarding the reply to the
+    requesting session. Direct user messages do not require this tool.
     """
     try:
         res = client.reply(request_id=request_id, response=response)
@@ -178,16 +178,14 @@ def placet_reply(
 @mcp.tool()
 def placet_share_file(path: str, title: Optional[str] = None) -> str:
     """
-    Mostra all'utente, nella conversazione sul telefono (PWA Placet), un file che hai
-    prodotto per lui: un PDF o un'immagine (JPEG, PNG, WebP). Usalo quando l'utente deve
-    vedere o scaricare il risultato, non per i file di lavoro intermedi.
-
-    - path: percorso assoluto del file, nella home dell'utente e non in cartelle nascoste
-      (mai .ssh, .config...); non in progetti esclusi con .placet-off.
-    - title: nome da mostrare (facoltativo).
-
-    Il file non viene copiato: l'utente lo legge dal PC finché esiste. Non serve
-    citare il percorso nella risposta.
+    Show a generated PDF or JPEG/PNG/WebP image in the user's Placet phone
+    conversation. Use for deliverables the user should view or download,
+    rather than intermediate working files.
+    `path` is an absolute path in the user's home, outside hidden directories
+    such as .ssh or .config and outside projects excluded with .placet-off.
+    `title` optionally supplies a display name.
+    The file is read from the PC on demand and remains available only while
+    it exists. There is no need to repeat its path in the final answer.
     """
     from bridge.attachments import AttachmentError, check_content, check_shared
     try:
@@ -195,17 +193,18 @@ def placet_share_file(path: str, title: Optional[str] = None) -> str:
         with open(real, "rb") as f:
             check_content(f.read(21 * 1024 * 1024))
     except AttachmentError as e:
-        return f"File non condiviso: {e}"
+        return f"File not shared: {e}"
     except OSError as e:
-        return f"File non condiviso: {e}"
-    return f"File condiviso con l'utente: {title or real.name}. Lo vede nella conversazione sul telefono."
+        return f"File not shared: {e}"
+    return f"File shared with the user: {title or real.name}. It is visible in the phone conversation."
 
 
 @mcp.tool()
 def placet_list_agents() -> str:
     """
-    Restituisce gli agenti registrati in Placet (ruoli, regole di approvazione) e le loro
-    sessioni aperte: progetto (cwd), titolo, stato (busy/idle) e se Placet può raggiungerle.
+    List registered agents, their roles and routing/approval rules, and known
+    sessions: project (cwd), title, busy/idle state and reachability.
+    Use exact session IDs when the user selects a target session.
     """
     try:
         res = client.list_agents()
@@ -219,7 +218,9 @@ def placet_check_status(
     request_id: int,
 ) -> str:
     """
-    Interroga lo stato aggiornato di una richiesta precedente rimasta in sospeso (PENDING).
+    Read the current state of an existing Placet request. Do not resend it.
+    COMPLETED means the recipient task finished, not that reply forwarding
+    was authorized. If response is withheld, wait for the human decision.
     """
     try:
         res = client.check_status(request_id=request_id)

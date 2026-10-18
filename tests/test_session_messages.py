@@ -12,7 +12,7 @@ from starlette.testclient import TestClient
 
 from backend.app.config import AgentSpec, PlacetConfig
 from backend.app.database import Database
-from backend.app.envelopes import HOOK_PREFACE
+from backend.app.envelopes import hook_preface
 from backend.app.main import create_app
 from backend.app.models import QuestionType, RequestStatus
 from bridge.bridge_daemon import BridgeDaemon
@@ -85,7 +85,7 @@ async def test_claude_session_gets_it_from_its_waiter_and_answers(setup):
         mail = (await claude.get("/api/sessions/c1/inbox")).json()
         assert mail["kind"] == "injection" and mail["request_id"] == req_id
         assert mail["text"].startswith(f"[Placet Request #{req_id} dall'utente]: a che punto sei?")
-        assert "placet_reply(" not in mail["text"] and HOOK_PREFACE in mail["text"]
+        assert "placet_reply(" not in mail["text"] and hook_preface("it") in mail["text"]
         await claude.post("/api/sessions/c1/events", json={"event": "prompt", "request_id": req_id})
         assert db.get_request(req_id).status == RequestStatus.EXECUTING
         await claude.post("/api/sessions/c1/events", json={"event": "stop", "last_message": "Quasi finito."})
@@ -107,7 +107,7 @@ async def test_bridge_wakes_codex_and_antigravity_sessions(setup):
         work = (await bridge.get("/api/bridge/work")).json()
         assert work["sessions"] == [{"id": "cx1", "agent_id": "codex", "provider": "codex"}]
         mail = (await bridge.post("/api/bridge/sessions/cx1/take")).json()
-        assert mail["request_id"] == first and HOOK_PREFACE not in mail["text"]
+        assert mail["request_id"] == first and hook_preface("it") not in mail["text"]
         assert db.get_request(first).status == RequestStatus.DELIVERING
         # Queuing failed: the message goes back to wait.
         await bridge.delete(f"/api/bridge/requests/{first}/claim")

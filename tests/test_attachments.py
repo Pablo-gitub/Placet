@@ -307,9 +307,9 @@ def test_the_mcp_tool_answers_the_agent_at_once(tmp_path, monkeypatch):
     home = shared_home(tmp_path)
     monkeypatch.setenv("HOME", str(home))
     from mcp_server.server import placet_share_file
-    assert "File condiviso" in placet_share_file(str(home / "Projects/app/out/report.pdf"), "Rapporto")
-    assert placet_share_file(str(home / ".ssh/key.pdf")).startswith("File non condiviso")
-    assert placet_share_file(str(home / "Projects/app/notes.txt")).startswith("File non condiviso")
+    assert "File shared" in placet_share_file(str(home / "Projects/app/out/report.pdf"), "Rapporto")
+    assert placet_share_file(str(home / ".ssh/key.pdf")).startswith("File not shared")
+    assert placet_share_file(str(home / "Projects/app/notes.txt")).startswith("File not shared")
 
 
 @pytest.mark.asyncio

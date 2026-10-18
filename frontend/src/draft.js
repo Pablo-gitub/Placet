@@ -6,11 +6,11 @@
 export function splitPrompt(prompt, sessions = []) {
   let text = prompt || "";
   let files = [];
-  const match = text.match(/\n\nAllegati: ([^\n]*)$/);
+  const match = text.match(/\n\n(?:Allegati|Attachments): ([^\n]*)$/);
   if (match) {
     files = match[1].split(", ").filter(Boolean);
     text = text.slice(0, match.index);
-    if (text === "Leggi gli allegati che ti ho inviato.") text = "";
+    if (["Leggi gli allegati che ti ho inviato.", "Read the attachments I sent you."].includes(text)) text = "";
   }
   const mentions = [];
   for (const m of text.matchAll(/@[^@\n]*? \[([0-9a-f-]{8})\]/g)) {

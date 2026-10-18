@@ -49,6 +49,7 @@ class BridgeDaemon:
         # Direct database access (db/config) is the single-process dev mode;
         # in production pass an HttpStore.
         self.store = store or LocalStore(db, config)
+        self.language = None
         self.tmux = tmux or TmuxController()
         # provider -> channel that queues a message into the provider's app
         self.channels = channels if channels is not None else default_channels()
@@ -64,10 +65,10 @@ class BridgeDaemon:
         self._steer_orphans: Dict[int, float] = {}
 
     def format_injection_envelope(self, req: RequestModel, ack_mode: str = "mcp") -> str:
-        return envelopes.injection(req, ack_mode=ack_mode, channel="tmux")
+        return envelopes.injection(req, ack_mode=ack_mode, channel="tmux", language=self.language)
 
     def format_result_envelope(self, req: RequestModel) -> str:
-        return envelopes.outcome(req, channel="tmux")
+        return envelopes.outcome(req, channel="tmux", language=self.language)
 
     def _session_ready(
         self, agent_id: str, busy_sessions: Set[str], busy_agents: Set[str]
@@ -109,6 +110,7 @@ class BridgeDaemon:
         busy_sessions = busy_sessions if busy_sessions is not None else set()
         if results is None or busy_agents is None:
             work = self.store.work()
+            self.language = work.language
             results = work.results if results is None else results
             busy_agents = set(work.busy_agents) if busy_agents is None else busy_agents
         delivered = 0
@@ -143,6 +145,7 @@ class BridgeDaemon:
         busy_sessions = busy_sessions if busy_sessions is not None else set()
         if injections is None or busy_agents is None:
             work = self.store.work()
+            self.language = work.language
             injections = work.injections if injections is None else injections
             busy_agents = set(work.busy_agents) if busy_agents is None else busy_agents
         processed = 0
@@ -340,6 +343,7 @@ class BridgeDaemon:
         # At most one injection per session per tick, outcomes first: they
         # unblock work that is already waiting.
         work: Work = self.store.work()
+        self.language = work.language
         self.check_folders(work.folders)
         self.refresh_titles(work.titles)
         self.wake_claude_sessions(work.claude_wake_sessions)

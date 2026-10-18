@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 import httpx
 
 from backend.app.models import Priority, RequestModel
+from backend.app.i18n import text
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ class NtfyConfig:
     # PWA address as seen from the iPhone (e.g. https://host.tailnet.ts.net).
     base_url: str = ""
     access_token: str = ""
+    language: Optional[str] = None
 
     @classmethod
     def from_env(cls) -> "NtfyConfig":
@@ -96,9 +98,9 @@ def build_notification(
     open_url = f"{cfg.base_url}/#request-{request.id}"
     sender = origin or request.sender_id
     if request.recipient_id == "human":
-        title = f"{sender}: domanda"
+        title = text("notify.question", cfg.language, sender=sender)
     else:
-        title = f"{sender} -> {request.recipient_id}: da approvare"
+        title = text("notify.review", cfg.language, sender=sender, recipient=request.recipient_id)
 
     if cfg.is_private:
         body = request.prompt
@@ -107,14 +109,14 @@ def build_notification(
         if request.context:
             body = f"{request.context}\n\n{body}"
     else:
-        body = f"Nuova richiesta da {request.sender_id}. Apri Placet per leggerla."
+        body = text("notify.public", cfg.language, sender=request.sender_id)
 
     headers = {
         "Title": _ascii_header(title),
         "Priority": NTFY_PRIORITY[request.priority],
         "Tags": "robot",
         "Click": open_url,
-        "Actions": f"view, Apri, {open_url}, clear=true",
+        "Actions": f"view, {text('notify.open', cfg.language)}, {open_url}, clear=true",
     }
     if cfg.access_token:
         headers["Authorization"] = f"Bearer {cfg.access_token}"
@@ -127,15 +129,15 @@ def build_turn_end(
 ) -> Tuple[str, Dict[str, str], str]:
     """A followed session finished its turn: quiet, opens the conversation (RF-43)."""
     open_url = f"{cfg.base_url}/#/sessione/{session_id}"
-    body = "Turno finito."
+    body = text("notify.turn_body", cfg.language)
     if cfg.is_private and last_message:
         body = last_message if len(last_message) <= BODY_PREVIEW_CHARS else last_message[:BODY_PREVIEW_CHARS] + "..."
     headers = {
-        "Title": _ascii_header(f"{label}: turno finito"),
+        "Title": _ascii_header(text("notify.turn_title", cfg.language, label=label)),
         "Priority": "low",
         "Tags": "white_check_mark",
         "Click": open_url,
-        "Actions": f"view, Apri, {open_url}, clear=true",
+        "Actions": f"view, {text('notify.open', cfg.language)}, {open_url}, clear=true",
     }
     if cfg.access_token:
         headers["Authorization"] = f"Bearer {cfg.access_token}"
@@ -151,7 +153,7 @@ async def send_ntfy_turn_end(session_id: str, label: str, last_message: Optional
             resp = await client.post(url, content=body.encode("utf-8"), headers=headers)
         return resp.status_code == 200
     except Exception as e:
-        logger.warning(f"Impossibile inviare notifica di fine turno: {e}")
+        logger.warning(f"Unable to send turn-end notification: {e}")
         return False
 
 
@@ -165,7 +167,7 @@ def build_alert(
         "Priority": "high",
         "Tags": "warning",
         "Click": open_url,
-        "Actions": f"view, Apri, {open_url}, clear=true",
+        "Actions": f"view, {text('notify.open', cfg.language)}, {open_url}, clear=true",
     }
     if cfg.access_token:
         headers["Authorization"] = f"Bearer {cfg.access_token}"
@@ -182,7 +184,7 @@ async def send_ntfy_alert(request: RequestModel, cfg: NtfyConfig, problem: str) 
             resp = await client.post(url, content=body.encode("utf-8"), headers=headers)
         return resp.status_code == 200
     except Exception as e:
-        logger.warning(f"Impossibile inviare avviso ntfy: {e}")
+        logger.warning(f"Unable to send ntfy alert: {e}")
         return False
 
 
@@ -207,5 +209,5 @@ async def send_ntfy_notification(
             return False
         return True
     except Exception as e:
-        logger.warning(f"Impossibile inviare notifica ntfy: {e}")
+        logger.warning(f"Unable to send ntfy notification: {e}")
         return False

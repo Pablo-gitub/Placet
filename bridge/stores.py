@@ -36,6 +36,7 @@ JOBS_WAIT_SECONDS = 25
 
 @dataclass
 class Work:
+    language: Optional[str] = None
     # APPROVED agent-to-agent requests, at most one per recipient.
     injections: List[RequestModel] = field(default_factory=list)
     # Settled outcomes to deliver to the sender's session.
@@ -117,6 +118,7 @@ class LocalStore:
             lambda agent_id: getattr(self.config.get_agent(agent_id), "tmux_session", None),
         )
         return Work(
+            language=self.db.get_background_language(),
             claude_wake_sessions=[{"id": s.id, "cwd": s.cwd}
                                  for s in self.db.claude_sessions_to_wake()],
             wake_sessions=[{"id": s.id, "provider": s.provider, "suspended": True}
@@ -150,8 +152,8 @@ class LocalStore:
         if taken is None:
             return None
         kind, req = taken
-        text = (envelopes.outcome(req, channel="app") if kind == "outcome"
-                else envelopes.injection(req, ack_mode="none", channel="app"))
+        text = (envelopes.outcome(req, channel="app", language=self.db.get_background_language()) if kind == "outcome"
+                else envelopes.injection(req, ack_mode="none", channel="app", language=self.db.get_background_language()))
         return SessionMail(kind, req.id, text)
 
     def claim_injection(self, request_id: int) -> bool:
@@ -184,7 +186,7 @@ class LocalStore:
         if claimed is None:
             return None
         return {"request_id": request_id, "session_id": session.id, "provider": session.provider,
-                "text": envelopes.steer(claimed)}
+                "text": envelopes.steer(claimed, language=self.db.get_background_language())}
 
     def claim_delivery(self, request_id: int) -> bool:
         return self.db.mark_delivered(request_id, actor=BRIDGE_ACTOR, via="tmux")
@@ -226,6 +228,7 @@ class HttpStore:
         resp.raise_for_status()
         data = resp.json()
         return Work(
+            language=data.get("language"),
             claude_wake_sessions=list(data.get("claude_wake_sessions", [])),
             wake_sessions=list(data.get("wake_sessions", [])),
             injections=[RequestModel(**r) for r in data["injections"]],

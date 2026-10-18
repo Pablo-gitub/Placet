@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import LanguageSelect from "./i18n/LanguageSelect";
+import BackgroundLanguage from "./i18n/BackgroundLanguage";
 import { apiErrorDescriptor } from "./i18n/errors";
 import { needsReturnApproval } from "./decisions";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -370,6 +371,7 @@ export default function App() {
         {wide && navTabs}
         <div className="header-controls">
           <LanguageSelect />
+          <BackgroundLanguage />
           <div className="live-indicator" data-testid="live-indicator">
             <Radio size={12} className={connected ? "text-emerald-400 animate-pulse" : "text-amber-400"} />
             {t(connected ? "app.live" : "app.reconnecting")}
