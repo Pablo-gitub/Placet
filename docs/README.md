@@ -29,7 +29,8 @@ These describe observations at a point in time. Where they differ from the requi
 
 ## Plans
 
-- [Reserved commands](plans/reserved-commands.md): running approved privileged actions, such as a deploy, from the phone. Not implemented.
+- [Reserved commands](plans/reserved-commands.md): running approved privileged actions, such as a deploy, from the phone. Foundations, passkey enrollment and administrative transport implemented; privileged dispatch not yet.
+  - [Administrative network setup](plans/admin-network-setup.md) and [administrative web setup](plans/admin-web-setup.md): the separate Tailscale transport and passkey enrollment page.
 
 ## Reviews
 

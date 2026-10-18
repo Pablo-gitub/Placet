@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <title>Placet Admin</title>
+  <link rel="stylesheet" href="/assets/style.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <main>
+    <header><div class="brand"><span class="logo" aria-hidden="true">P</span><h1>Placet Admin</h1></div><select id="language" aria-label="Language"><option value="en">English</option><option value="it">Italiano</option></select></header>
+    <section class="panel" aria-labelledby="heading">
+      <span class="label" data-i18n="label"></span>
+      <h2 id="heading" data-i18n="heading"></h2>
+      <p data-i18n="intro"></p>
+      <div class="status"><span aria-hidden="true">●</span> <strong data-i18n="disabled"></strong></div>
+      <p class="muted" data-i18n="disabledDetail"></p>
+    </section>
+    <section class="panel" aria-labelledby="setup-heading">
+      <h2 id="setup-heading" data-i18n="setupHeading"></h2>
+      <p id="setup-description"></p>
+      <button id="enroll" type="button" hidden data-i18n="register"></button>
+      <p id="feedback" role="status" aria-live="polite"></p>
+    </section>
+    <footer data-i18n="footer"></footer>
+  </main>
+</body>
+</html>

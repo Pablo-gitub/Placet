@@ -1,0 +1,18 @@
+{
+  "label": "AUTORIZZAZIONE UMANA",
+  "heading": "La tua approvazione resta separata",
+  "intro": "Questa pagina dedicata mostrerà l’operazione amministrativa esatta prima di autorizzarla con una passkey.",
+  "disabled": "I comandi non sono abilitati",
+  "disabledDetail": "L’esecutore è ancora in preparazione. Registrare una passkey non abilita né esegue alcun comando.",
+  "setupHeading": "Configura la passkey",
+  "setupMissing": "Apri l’invito monouso creato dal terminale amministrativo per registrare questo dispositivo.",
+  "setupReady": "Questo invito è stato creato dal terminale amministrativo. Registra una passkey con Face ID, Touch ID o il tuo autenticatore. L’amministratore dovrà poi completare la verifica nel terminale.",
+  "register": "Registra una passkey",
+  "waiting": "Segui le istruzioni sul dispositivo…",
+  "staged": "Risposta ricevuta. Completa la verifica nel terminale amministrativo. I comandi restano disabilitati.",
+  "cancelled": "Registrazione annullata o tempo scaduto. Puoi riprovare mentre l’invito è valido.",
+  "unavailable": "L’invito è scaduto, già utilizzato o non disponibile. Creane uno nuovo dal terminale amministrativo.",
+  "unsupported": "La registrazione delle passkey non è disponibile in questo browser. Apri questa pagina HTTPS in Safari sul dispositivo.",
+  "network": "Impossibile confermare l’esito. Controlla la connessione e fai verificare l’invito all’amministratore prima di riprovare.",
+  "footer": "Non viene chiesta né inviata la password sudo. Gli agenti Placet non possono autorizzare operazioni tramite questa pagina."
+}

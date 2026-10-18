@@ -1,7 +1,17 @@
 # Reserved commands: implementation plan
 
-Status: proposal persistence and artifact acquisition implemented; execution, protected bootstrap,
-passkey authorization and product integration are not implemented yet.
+Status: proposal persistence, artifact acquisition, offline release-pointer
+journalling, build policy/worker, SQLite backup and WebAuthn authorization core
+implemented. A foundation-only bootstrap is available for review. Host isolation
+is not attested; build provisioning/supervision, production service cutover,
+privileged dispatch and product integration are not implemented yet. A dedicated
+enrollment HTTP/UI service and its explicit installer are implemented but require
+live installation and iPhone verification; see
+[administrative web setup](admin-web-setup.md).
+
+The independent Tailscale transport now has a separately reviewed, explicit
+installer. See [administrative network setup](admin-network-setup.md) for the
+human steps, live verification and recovery. It enables no administrative action.
 
 ### Current implementation boundary
 
@@ -36,11 +46,120 @@ require reconciliation with the manifest; callers must not blindly rerun or
 activate on an exception. Directory publication does not change `/opt/placet`,
 the current release pointer, running services or the database.
 
-There are no HTTP routes, command execution methods, service installs, or
+`admin_executor/releases.py` records a prepared activation in a separate SQLite
+journal before atomically selecting an acquired release through a managed
+`current` symlink. It serializes operations through a file lock, checks the
+expected current version, binds intent to the acquired manifest digest and
+refuses another activation while one remains unresolved. On restart, a pointer
+already changed to the intended version is reconciled without repeating the
+selection. Selection is not success: the trusted supervisor must separately
+perform migrations/service coordination and report its health check. Failure
+enters `needs_review`; there is no automatic database or file rollback. There
+is not yet an operator recovery command for that state.
+
+This manager assumes immutable, protected acquired releases; it compares the
+manifest digest, not every file's contents on each selection. It cannot attest
+production ownership, actual service health or authorization. Its private root
+and pointer are not connected to `/opt/placet` or production services. Its
+`record_health` method is a future internal supervisor interface, not an API
+accepting a backend/agent assertion that deployment succeeded.
+
+`admin_executor/bootstrap.py` runs directly with system Python in isolated mode;
+its default invocation is a read-only preview:
+
+```bash
+python3 -I admin_executor/bootstrap.py
+```
+
+It freezes an allowlist of regular module files (including itself), prints their
+combined digest and the intended fixed destinations. Explicit `--apply` requires
+root and the matching `--bundle-sha256` value. The bootstrap source itself must
+be reviewed and held unchanged before invoking it as root: a digest of modules
+does not authenticate an untrusted bootstrap program. No application imports,
+dependency installs or repository scripts run during installation.
+
+The fresh-install-only operation creates `/usr/local/lib/placet-admin`,
+`/etc/placet-admin` and `/var/lib/placet-admin`, refusing existing destinations,
+symlink ancestors and ancestors writable by non-root. State subdirectories are
+private; the catalogue lists three disabled candidate actions. No sudoers/polkit
+rules, user accounts, commands launcher, network listeners or services are
+installed. An interrupted install requires manual review; it cannot silently
+overwrite a partial previous installation. Upgrading administrative code remains
+a separate, explicitly reviewed operation. This foundation bootstrap is not yet
+the operational command-service installation and need not be applied now.
+
+There are no HTTP routes, service execution methods, service installs, or
 changes to the current deploy. Production ownership and filesystem protection
-are not provided by these libraries. Next: isolated build supervision, protected
-release activation and recovery, followed by the administrative bootstrap.
-Only after those checks should authorization and the PWA be wired.
+are not provided by these libraries. Next: isolated build supervision, source
+identity verification, backups and service activation/recovery, followed by the
+administrative bootstrap. Only after those checks should authorization and
+the PWA be wired. Running `npm run build` in the working tree validates the
+frontend but does not establish any of these administrative boundaries.
+
+Relevant isolation references for the next block:
+[systemd execution environments](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html),
+[control-group termination](https://www.freedesktop.org/software/systemd/man/latest/systemd.kill.html),
+and [Bubblewrap's policy responsibilities and limitations](https://github.com/containers/bubblewrap/blob/main/README.md).
+Choosing a tool or generating a unit alone is not evidence of isolation: the
+host must pass checks for inaccessible credentials/sockets, process cleanup,
+resource bounds and rejection of untrusted build scripts as root.
+
+## Build, backup and authorization implementation
+
+- `build.py` renders a fixed systemd service, not a shell supplied by a caller.
+  The job ID cannot inject directives. The sandbox uses a dedicated build user,
+  a separately provisioned read-only toolchain root, read-only source/dependency
+  mounts, a clean environment, private networking and resource limits. Shutdown
+  targets the complete cgroup. Only the per-job output mount is host-writable.
+  The generated unit has passed the local systemd parser; that does not establish
+  effective host isolation or demonstrate a completed build.
+- `build_worker.py` refuses root and runs npm offline and wheel-only pip without
+  an index inside that environment. Missing cached dependencies fail; there is
+  no online fallback. It produces candidate runtime files and refuses links and
+  special files. Repository build code can run as the isolated build user.
+  Worker output is untrusted and needs independent acquisition after cgroup
+  shutdown. Provisioning the toolchain/caches, verified Git snapshot resolution,
+  cgroup supervision and validation of the relocated venv remain necessary.
+- `backup.py` uses SQLite's backup API and integrity checks, including committed
+  WAL contents. It refuses root execution and existing destinations. A separate
+  trusted supervisor must quiesce writes at cutover and acquire the backup into
+  administrative storage. A file backup does not itself coordinate migrations
+  or provide a safe restore operation.
+- `authorization.py` verifies real WebAuthn signatures through `webauthn`, in a
+  separate administrative Python environment declared in `requirements.txt` in
+  that directory. Required user verification, exact HTTPS origin/RP, cross-origin
+  rejection, expiration, revoked credentials and one-use challenges are enforced.
+  The challenge binds the protected handler's canonical action, parameters,
+  artifact digest, installed version and summary. Verification, credential
+  counter update, consumption and creation of an authorized job are one SQLite
+  transaction. Replays are rejected rather than creating another job.
+  Registration and revocation methods require a root-authorized terminal context;
+  no network enrollment endpoint exists. Changing origin requires an explicit
+  credential migration. Neither a cryptographic signature nor an authorized row
+  dispatches a privileged action: supervisor integration is still absent.
+
+Passkey tests use actual ES256 signatures and registration data; they do not
+demonstrate Face ID compatibility on a physical iPhone. Install the separate
+administrative requirements for these tests. CI installs them for development
+testing; the ordinary application installer does not. No dependency is installed
+as root by the bootstrap.
+
+## Administrative hostname on the existing PC
+
+Another physical PC is not required. Tailscale Services can provide a separate
+service hostname hosted on the same machine. The existing client supports the
+`serve --service` option; actual service registration, host eligibility, access
+policy and HTTPS configuration still need verification. See
+[Tailscale Services](https://tailscale.com/docs/features/tailscale-services).
+
+The current host grants the desktop user Tailscale operator privileges. Because
+agents share that UID, this is an unresolved trust boundary: a different hostname
+alone does not protect a confirmation page whose proxy can be reconfigured by
+that same user. Administrative proxy/identity management must be made inaccessible
+to agent processes (or use a separate root-managed Tailscale instance) before
+enabling remote commands. This review has not changed any Tailscale settings.
+Do not replace this boundary with another port on the PWA hostname or claim
+that a successful signature proves the displayed operation was trustworthy.
 
 ## Goal and scope
 

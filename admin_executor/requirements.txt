@@ -1,0 +1,24 @@
+# Separate administrative environment; never installed by the application deploy.
+webauthn==3.0.1
+fastapi==0.143.0
+uvicorn==0.54.0
+# Versions exercised by the administrative tests. Keep changes separate from
+# application dependency updates; wheels are installed only as DynamicUser.
+starlette==1.8.0
+pydantic==2.14.1
+pydantic-core==2.50.1
+annotated-types==0.8.0
+annotated-doc==0.0.5
+typing-extensions==4.16.0
+typing-inspection==0.4.4
+anyio==4.15.1
+idna==3.20
+click==8.5.0
+h11==0.16.0
+cryptography==50.0.2
+cffi==2.1.1
+pycparser==3.11
+pyOpenSSL==26.4.0
+cbor2==6.1.5
+pyasn1==0.6.4
+pyasn1-modules==0.4.2

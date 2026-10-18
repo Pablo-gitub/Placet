@@ -1,0 +1,18 @@
+{
+  "label": "HUMAN AUTHORIZATION",
+  "heading": "Your approval stays separate",
+  "intro": "This dedicated page will confirm the exact administrative action before you authorize it with a passkey.",
+  "disabled": "Commands are not enabled",
+  "disabledDetail": "The executor is still being prepared. Registering a passkey does not enable or run any command.",
+  "setupHeading": "Set up your passkey",
+  "setupMissing": "Open the single-use invitation created from the administrator terminal to register this device.",
+  "setupReady": "This invitation was created from the administrator terminal. Register a passkey using Face ID, Touch ID or your authenticator. The administrator must then finish verification in the terminal.",
+  "register": "Register a passkey",
+  "waiting": "Follow the instructions on your device…",
+  "staged": "Response received. Finish verification in the administrator terminal. Commands remain disabled.",
+  "cancelled": "Registration was cancelled or timed out. You can try again while the invitation is valid.",
+  "unavailable": "The invitation is expired, already used or unavailable. Create a new one from the administrator terminal.",
+  "unsupported": "Passkey registration is unavailable in this browser. Open this HTTPS page in Safari on your device.",
+  "network": "Unable to confirm the result. Check the connection and ask the administrator to check the invitation before trying again.",
+  "footer": "No sudo password is requested or sent. Placet agents cannot authorize actions through this page."
+}
