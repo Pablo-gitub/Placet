@@ -304,7 +304,8 @@ If the tool's wait ends before the outcome, the agent ends its turn. When the ou
 ## Running the tests
 
 ```bash
-.venv/bin/python -m pytest -q                    # backend, bridge, hooks
 npm --prefix frontend test                      # PWA
+npm --prefix frontend run build                 # needed by the API integration tests
+.venv/bin/python -m pytest -q                    # backend, bridge, hooks
 ```
 The suites cover configuration and `AGENTS.md` parsing, the SQLite database and state transitions, the REST API, SSE and notifications, the bridge and its provider channels, the hooks, the MCP tools and the PWA.

@@ -29,7 +29,7 @@ Reviewed the accumulated changes from the fetched `origin/main` baseline through
 - Additional mocked-API browser flows passed: closed-session unpin, mentions, PDF upload, Queue/Now selection, localized upload failure/retry, prompt approval with retained edits/recipient/timing/return policy, image viewer, real two-page PDF rendering, visible close controls, conversation pagination/errors and independent shared-language settings. Viewer/approval/settings flows also checked at 1280 px.
 - Screenshots were inspected. Data and requests in browser checks were simulated; no production agent tasks or push notifications were generated for those checks.
 
-GitHub Actions runs documentation links, Python tests, frontend tests/catalog validation, lint and build with read-only repository permissions. CI is separate from privileged deployment; it does not receive deployment credentials or run the installer. The first remote run still needs confirmation after push.
+GitHub Actions runs documentation links, Python tests, frontend tests/catalog validation, lint and build with read-only repository permissions. CI is separate from privileged deployment; it does not receive deployment credentials or run the installer. The first remote run exposed a setup-order dependency: one API integration test serves the compiled PWA. CI now builds before Python tests, matching the documented contributor sequence; no test is skipped or weakened. Confirm the corrected run after push.
 
 ## Limits retained
 

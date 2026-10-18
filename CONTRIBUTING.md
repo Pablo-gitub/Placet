@@ -23,11 +23,11 @@ For a full local run, see [docs/installation.md](docs/installation.md). `run_all
 ## Tests and checks
 
 ```bash
-.venv/bin/python -m pytest -q          # backend, bridge, hooks
 python3 scripts/check_docs.py          # local documentation links/anchors
-npm --prefix frontend test             # PWA
+npm --prefix frontend test             # PWA and locale catalogs
 npm --prefix frontend run lint         # PWA lint
-npm --prefix frontend run build        # production build
+npm --prefix frontend run build        # assets also used by API integration tests
+.venv/bin/python -m pytest -q           # backend, bridge, hooks
 ```
 
 GitHub Actions runs the documentation check, both test suites, lint and build on pushes and pull requests. It does not deploy.

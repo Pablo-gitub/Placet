@@ -118,8 +118,9 @@ Documentation: [overview](docs/README.md) · [requirements](docs/requirements.md
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m pytest -q                    # backend, bridge, hooks
-npm --prefix frontend ci && npm --prefix frontend test  # PWA
+npm --prefix frontend ci
+npm --prefix frontend test && npm --prefix frontend run build
+.venv/bin/python -m pytest -q                    # API tests also serve the built PWA
 .venv/bin/python run_all.py                      # backend + bridge in one process (development only)
 ```
 
