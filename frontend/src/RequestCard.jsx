@@ -61,8 +61,12 @@ function PromptCard({ req, submitting, highlighted, onDecide, sessions = [], onO
   const [targetSession, setTargetSession] = useState(req.recipient_session_id || "");
   const [allowAutoReturn, setAllowAutoReturn] = useState(false);
   const [deliveryMode, setDeliveryMode] = useState("queue");
-  const targetSessions = sessions.filter((s) => s.agent_id === req.recipient_id && !s.ended_at && s.id !== req.sender_session_id);
-  const target = targetSessions.find((s) => s.id === targetSession);
+  // The recipient agent's sessions first; the user may also choose another agent's.
+  const openSessions = sessions.filter((s) => !s.ended_at && !s.excluded && s.id !== req.sender_session_id);
+  const targetSessions = openSessions.filter((s) => s.agent_id === req.recipient_id);
+  const otherSessions = req.recipient_id === "human" ? [] : openSessions.filter((s) => s.agent_id !== req.recipient_id);
+  const target = openSessions.find((s) => s.id === targetSession);
+  const redirected = target && target.agent_id !== req.recipient_id;
   const canSteer = target?.state === "busy" && ["claude-code", "antigravity"].includes(target.provider);
 
   const isChoice = req.question_type === "single_choice" || req.question_type === "multi_choice";
@@ -163,7 +167,7 @@ function PromptCard({ req, submitting, highlighted, onDecide, sessions = [], onO
               {t("requests.confirmPrompt", { agent: req.recipient_id })}
             </p>
           </section>
-          {targetSessions.length > 0 && (
+          {targetSessions.length + otherSessions.length > 0 && (
             <>
               <label className="prompt-editor-label" htmlFor={`target-${req.id}`}>
                 {t("requests.recipient", { agent: req.recipient_id })}
@@ -181,7 +185,21 @@ function PromptCard({ req, submitting, highlighted, onDecide, sessions = [], onO
                     {sessionName(s)} · {sessionStatus(s).label}
                   </option>
                 ))}
+                {otherSessions.length > 0 && (
+                  <optgroup label={t("requests.otherRecipients")}>
+                    {otherSessions.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.agent_id} · {sessionName(s)} · {sessionStatus(s).label}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
+              {redirected && (
+                <p className="composer-note" data-testid={`redirected-${req.id}`}>
+                  {t("requests.redirected", { from: req.recipient_id, to: target.agent_id })}
+                </p>
+              )}
             </>
           )}
           {req.recipient_id !== "human" && !req.relation_id && (

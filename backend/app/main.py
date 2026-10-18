@@ -677,17 +677,34 @@ def create_app(
         problem = decision_problem(req, decision)
         if problem:
             raise ProductError(422, problem[0], problem[1])
+        relation = db.get_relation(req.relation_id) if req.relation_id else None
+        redirect = None
         if decision.recipient_session_id is not None:
-            check_target_session(decision.recipient_session_id, req.recipient_id)
+            target = db.get_session(decision.recipient_session_id)
+            # The user may send an agent's prompt to a session of another agent.
+            redirect_to = (target.agent_id if target is not None and req.recipient_id != "human"
+                           and req.question_type == QuestionType.PROMPT_REVIEW
+                           and decision.status == RequestStatus.APPROVED
+                           and target.agent_id != req.recipient_id else None)
+            check_target_session(decision.recipient_session_id, redirect_to or req.recipient_id)
             if decision.recipient_session_id == req.sender_session_id:
                 raise ProductError(422, "decision.self_target", "A session cannot send a request to itself.")
+            if req.recipient_id != "human" and decision.recipient_session_id != req.recipient_session_id:
+                # Another recipient: the relation the request came on may no longer apply.
+                relation = relation_of(req.sender_session_id, decision.recipient_session_id)
+                redirect = (redirect_to, relation.id if relation else None)
         if decision.status == RequestStatus.APPROVED and decision.delivery_mode == "now":
             target_id = decision.recipient_session_id or req.recipient_session_id
             target = db.get_session(target_id) if target_id else None
             if (req.question_type != QuestionType.PROMPT_REVIEW or req.recipient_id == "human"
                     or target is None or target.provider not in STEER_PROVIDERS):
                 raise ProductError(422, "decision.now_target", "Now requires a specific Claude or Antigravity session.")
-            check_target_session(target_id, req.recipient_id)
+            check_target_session(target_id, (redirect and redirect[0]) or req.recipient_id)
+
+        if redirect is not None and not db.redirect_request(
+                request_id, redirect[0], redirect[1], decision.recipient_session_id, who.actor):
+            raise ProductError(409, "decision.not_pending",
+                               f"Request {request_id} is no longer in PENDING state.", {"id": request_id})
 
         updated = db.update_request_decision(
             request_id=request_id,
@@ -696,8 +713,7 @@ def create_app(
             selected_options=decision.selected_options,
             custom_text=decision.custom_text,
             actor=who.actor,
-            allow_auto_return=decision.allow_auto_return or reverse_is_automatic(
-                db.get_relation(req.relation_id) if req.relation_id else None),
+            allow_auto_return=decision.allow_auto_return or reverse_is_automatic(relation),
             delivery_mode=decision.delivery_mode if decision.status == RequestStatus.APPROVED and req.recipient_id != "human" else None,
             recipient_session_id=decision.recipient_session_id,
         )

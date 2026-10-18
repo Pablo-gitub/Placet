@@ -58,7 +58,7 @@
     "edit": "Edit",
     "edited": "Edited by you: {{agent}} will receive this version.",
     "confirmPrompt": "Send this prompt to {{agent}}? Only the prompt will be shared, without the context.",
-    "recipient": "Receiving session of {{agent}}:",
+    "recipient": "Receiving session (suggested: {{agent}}):",
     "automatic": "Automatic (first available)",
     "when": "When to deliver",
     "queue": "Queue · after the turn",
@@ -72,7 +72,9 @@
     "otherLabel": "Other answer",
     "noteLabel": "Note for the agent",
     "autoReturn": "Also allow the reply to return automatically",
-    "submitting": "Sending..."
+    "submitting": "Sending...",
+    "otherRecipients": "Other sessions",
+    "redirected": "Sent to {{to}} instead of {{from}}: the relation with {{from}} no longer applies. The reply still comes back to the sender."
   },
   "errors": {
     "returnEmpty": "The reply cannot be empty.",

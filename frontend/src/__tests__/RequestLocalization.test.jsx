@@ -67,7 +67,7 @@ it("preserves multiple selections and free text, and resets Now for a different 
   unmount();
   render(<RequestCard req={prompt} sessions={sessions} onDecide={decide} />);
   fireEvent.click(screen.getByLabelText("Now · during the current turn"));
-  fireEvent.change(screen.getByLabelText("Receiving session of gemini:"), { target: { value: "g2" } });
+  fireEvent.change(screen.getByLabelText("Receiving session (suggested: gemini):"), { target: { value: "g2" } });
   fireEvent.click(screen.getByRole("button", { name: "Approve and send" }));
   expect(decide.mock.lastCall[1]).not.toHaveProperty("delivery_mode");
 });

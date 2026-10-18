@@ -270,6 +270,15 @@ describe("delivery timing for agent approvals", () => {
     fireEvent.click(screen.getByTestId("btn-approve-80"));
     expect(onDecide).toHaveBeenCalledWith(80, { status: "APPROVED", selected_options: [], recipient_session_id: "g2" });
   });
+  it("sends the prompt to another agent's session when the user chooses it", () => {
+    const onDecide = vi.fn();
+    const all = [...sessions, { id: "c9", agent_id: "codex", provider: "codex", title: "Review", state: "idle" }];
+    render(<RequestCard req={req} sessions={all} onDecide={onDecide} />);
+    fireEvent.change(screen.getByTestId("target-session-80"), { target: { value: "c9" } });
+    expect(screen.getByTestId("redirected-80")).toHaveTextContent("codex");
+    fireEvent.click(screen.getByTestId("btn-approve-80"));
+    expect(onDecide).toHaveBeenCalledWith(80, { status: "APPROVED", selected_options: [], recipient_session_id: "c9" });
+  });
   it("does not offer now for Codex or an automatic recipient", () => {
     const { rerender } = render(<RequestCard req={{ ...req, recipient_id: "codex" }}
       sessions={[{ ...sessions[0], agent_id: "codex", provider: "codex" }]} onDecide={vi.fn()} />);

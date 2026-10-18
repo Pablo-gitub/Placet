@@ -1628,6 +1628,31 @@ class Database:
             rows = conn.execute(sql, params).fetchall()
         return self._row_to_relation(rows[0]) if len(rows) == 1 else None
 
+    def redirect_request(self, request_id: int, recipient_id: Optional[str],
+                         relation_id: Optional[int], recipient_session_id: str, actor: str) -> bool:
+        """
+        The user sends a pending prompt to another session, possibly of
+        another agent (recipient_id None keeps the agent). False if no
+        longer pending.
+        """
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            row = cur.execute("SELECT recipient_id, recipient_session_id FROM requests"
+                              " WHERE id = ? AND status = 'PENDING'", (request_id,)).fetchone()
+            if row is None:
+                return False
+            cur.execute(
+                "UPDATE requests SET recipient_id = COALESCE(?, recipient_id), relation_id = ?,"
+                " recipient_session_id = ? WHERE id = ? AND status = 'PENDING'",
+                (recipient_id, relation_id, recipient_session_id, request_id))
+            if cur.rowcount == 0:
+                return False
+            self._log(cur, request_id, actor, "redirected", {
+                "from": row["recipient_id"], "from_session": row["recipient_session_id"],
+                "to": recipient_id or row["recipient_id"], "to_session": recipient_session_id,
+                "relation_id": relation_id})
+            return True
+
     def set_request_relation(self, request_id: int, relation_id: int) -> None:
         with self._get_connection() as conn:
             conn.execute("UPDATE requests SET relation_id = ? WHERE id = ?", (relation_id, request_id))

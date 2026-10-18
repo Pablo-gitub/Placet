@@ -58,7 +58,7 @@
     "edit": "Modifica",
     "edited": "Modificato da te: {{agent}} riceverà questa versione.",
     "confirmPrompt": "Inviare questo prompt a {{agent}}? Riceverà solo il prompt, non il contesto.",
-    "recipient": "Sessione di {{agent}} che lo riceve:",
+    "recipient": "Sessione che lo riceve (proposta: {{agent}}):",
     "automatic": "Automatica (la prima libera)",
     "when": "Quando consegnare",
     "queue": "In coda · a fine turno",
@@ -72,7 +72,9 @@
     "otherLabel": "Risposta Altro",
     "noteLabel": "Nota per l'agente",
     "autoReturn": "Consenti anche il ritorno automatico della risposta",
-    "submitting": "Invio in corso..."
+    "submitting": "Invio in corso...",
+    "otherRecipients": "Altre sessioni",
+    "redirected": "Inviato a {{to}} invece che a {{from}}: la relazione con {{from}} non vale più. La risposta torna comunque al mittente."
   },
   "errors": {
     "returnEmpty": "La risposta non può essere vuota.",

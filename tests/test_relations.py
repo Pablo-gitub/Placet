@@ -127,3 +127,28 @@ async def test_relation_api(env):
     async with agent_client(app, "tok-claude") as client:
         assert (await client.get("/api/relations")).status_code in (401, 403, 404)
         assert (await client.post("/api/relation-types", json={"name": "x"})).status_code in (401, 403, 404)
+
+
+@pytest.mark.asyncio
+async def test_the_user_redirects_a_prompt_to_another_agent(env):
+    app, db = env
+    a, b = await two_nodes(app, db)
+    await event(app, "claude", "cl2", {"event": "start", "provider": "claude-code", "cwd": "/q"})
+    review = db.create_relation_type("review", "")
+    rel = db.create_relation(a.id, b.id, review.id, "manual")
+    req = await send(app)
+    assert req["relation_id"] == rel.id
+    async with human_client(app) as human:
+        # The sender's own session is never a target.
+        resp = await human.post(f"/api/requests/{req['id']}/decision",
+                                json={"status": "APPROVED", "recipient_session_id": "cl"})
+        assert resp.status_code == 422
+        assert db.get_request(req["id"]).recipient_id == "codex"
+        resp = await human.post(f"/api/requests/{req['id']}/decision",
+                                json={"status": "APPROVED", "recipient_session_id": "cl2"})
+        assert resp.status_code == 200, resp.text
+        out = resp.json()
+    assert (out["recipient_id"], out["recipient_session_id"], out["relation_id"]) == ("claude", "cl2", None)
+    assert out["status"] == "APPROVED" and not out["allow_auto_return"]
+    redirected = [e for e in db.list_events(req["id"]) if e.event == "redirected"]
+    assert len(redirected) == 1 and redirected[0].details["from"] == "codex"
