@@ -59,6 +59,7 @@ def test_injection_and_delivery_over_rest(setup):
     assert db.get_request(req.id).status == RequestStatus.DELIVERING
 
     db.record_reply(req.id, "gemini", "Fatto")
+    assert db.decide_return(req.id, True, None, "human:p")
     _age(db, req.id)
     assert daemon.run_loop_step() == 1
     assert tmux.send_keys.call_args.args[0] == "agent-claude"

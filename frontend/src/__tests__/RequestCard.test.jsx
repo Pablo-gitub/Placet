@@ -244,3 +244,62 @@ describe("delivery states in history", () => {
     expect(screen.getByTestId("implicit-51")).toHaveTextContent("implicita");
   });
 });
+
+describe("delivery timing for agent approvals", () => {
+  const req = { ...base, id: 80, recipient_id: "gemini", question_type: "prompt_review",
+    prompt: "Feedback per il lavoro in corso", recipient_session_id: "g1" };
+  const sessions = [
+    { id: "g1", agent_id: "gemini", provider: "antigravity", title: "Sviluppo", state: "busy" },
+    { id: "g2", agent_id: "gemini", provider: "antigravity", title: "Altra sessione", state: "idle" },
+  ];
+  it("defaults to queue and sends now only when explicitly chosen", () => {
+    const onDecide = vi.fn();
+    render(<RequestCard req={req} sessions={sessions} onDecide={onDecide} />);
+    expect(screen.getByRole("radio", { name: /In coda/ })).toBeChecked();
+    fireEvent.click(screen.getByRole("radio", { name: /Subito/ }));
+    fireEvent.click(screen.getByTestId("btn-approve-80"));
+    expect(onDecide).toHaveBeenCalledWith(80, { status: "APPROVED", selected_options: [],
+      recipient_session_id: "g1", delivery_mode: "now" });
+  });
+  it("resets to queue when the selected recipient changes", () => {
+    const onDecide = vi.fn();
+    render(<RequestCard req={req} sessions={sessions} onDecide={onDecide} />);
+    fireEvent.click(screen.getByRole("radio", { name: /Subito/ }));
+    fireEvent.change(screen.getByTestId("target-session-80"), { target: { value: "g2" } });
+    expect(screen.queryByTestId("delivery-mode-80")).toBeNull();
+    fireEvent.click(screen.getByTestId("btn-approve-80"));
+    expect(onDecide).toHaveBeenCalledWith(80, { status: "APPROVED", selected_options: [], recipient_session_id: "g2" });
+  });
+  it("does not offer now for Codex or an automatic recipient", () => {
+    const { rerender } = render(<RequestCard req={{ ...req, recipient_id: "codex" }}
+      sessions={[{ ...sessions[0], agent_id: "codex", provider: "codex" }]} onDecide={vi.fn()} />);
+    expect(screen.queryByTestId("delivery-mode-80")).toBeNull();
+    rerender(<RequestCard req={req} sessions={sessions} onDecide={vi.fn()} />);
+    fireEvent.change(screen.getByTestId("target-session-80"), { target: { value: "" } });
+    expect(screen.queryByTestId("delivery-mode-80")).toBeNull();
+  });
+});
+
+it("holds completed answers for human editing and forwarding", () => {
+  const req = { ...confirm, sender_id: "claude", recipient_id: "gemini", status: "COMPLETED", response: { content: "original" } };
+  const decide = renderCard(req);
+  expect(screen.getByText(/La risposta attende il tuo consenso/)).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Risposta da inoltrare"), { target: { value: "edited" } });
+  fireEvent.click(screen.getByText("Inoltra risposta"));
+  expect(decide).toHaveBeenCalledWith(12, { return_decision: true, approve: true, edited_response: "edited" });
+});
+
+it("can withhold a completed answer", () => {
+  const decide = renderCard({ ...confirm, sender_id: "claude", recipient_id: "gemini", status: "COMPLETED", response: { content: "answer" } });
+  fireEvent.click(screen.getByText("Non inoltrare"));
+  expect(decide).toHaveBeenCalledWith(12, { return_decision: true, approve: false });
+});
+
+it("requires explicit opt-in for automatic return", () => {
+  const decide = renderCard({ ...confirm, sender_id: "claude", recipient_id: "gemini", question_type: "prompt_review" });
+  const checkbox = screen.getByLabelText("Consenti anche il ritorno automatico della risposta");
+  expect(checkbox).not.toBeChecked();
+  fireEvent.click(checkbox);
+  fireEvent.click(screen.getByTestId("btn-approve-12"));
+  expect(decide.mock.calls[0][1].allow_auto_return).toBe(true);
+});

@@ -40,6 +40,9 @@ STEER_NOTE = (
 
 def steer(req: RequestModel) -> str:
     """A message the user sends "now", inside the running turn (RF-35)."""
+    if req.question_type != QuestionType.MESSAGE:
+        # Preserve the sender, edited prompt and explicit reply contract.
+        return injection(req, ack_mode="none", channel="app") + "\n" + STEER_NOTE
     text = f"[Placet Request #{req.id} dall'utente]: {req.prompt}\n{USER_MESSAGE_NOTE}\n{STEER_NOTE}"
     if req.context:
         text += f"\n\n{req.context}"
@@ -93,7 +96,7 @@ def outcome(req: RequestModel, channel: str = "tmux") -> str:
                 " (risposta implicita: ultimo messaggio dell'agente, non inviato con placet_reply)"
                 if req.response.implicit else ""
             )
-            lines.append(f"Risposta di {req.response.responder_id}{origin}: {req.response.content}")
+            lines.append(f"Risposta di {req.response.responder_id}{origin}: {req.return_text if req.return_text is not None else req.response.content}")
     lines.append(
         "Riprendi il lavoro che avevi sospeso in attesa di questo esito "
         f"(dettagli con placet_check_status(request_id={req.id}))."

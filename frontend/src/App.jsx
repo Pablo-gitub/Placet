@@ -1,3 +1,4 @@
+import { needsReturnApproval } from "./decisions";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, CheckCircle, Home as HomeIcon, MessagesSquare, Radio, ShieldCheck } from "lucide-react";
 import Home from "./Home";
@@ -16,6 +17,7 @@ function upsert(list, item) {
 
 /** Where a notification link to a request leads: its session, or home / history. */
 function targetOf(req) {
+  if (needsReturnApproval(req)) return "#/";
   if (req.status === "PENDING") return req.sender_session_id ? `#/sessione/${req.sender_session_id}` : "#/";
   return "#/storico";
 }
@@ -185,14 +187,14 @@ export default function App() {
   const handleDecision = async (requestId, body) => {
     setSubmittingId(requestId);
     try {
-      const res = await fetch(`/api/requests/${requestId}/decision`, {
+      const res = await fetch(`/api/requests/${requestId}/${body.return_decision ? "return-decision" : "decision"}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
       if (res.ok) {
         showFeedback(
-          body.status === "APPROVED" ? `Richiesta #${requestId} inviata.` : `Richiesta #${requestId} rifiutata.`
+          body.return_decision ? (body.approve ? "Risposta autorizzata per l’inoltro." : "Risposta non inoltrata.") : body.status === "APPROVED" ? `Richiesta #${requestId} inviata.` : `Richiesta #${requestId} rifiutata.`
         );
         await fetchRequests();
       } else {
@@ -291,7 +293,7 @@ export default function App() {
   };
 
   const openSession = (id) => navigate(`#/sessione/${id}`);
-  const pendingCount = requests.filter((r) => r.status === "PENDING").length;
+  const pendingCount = requests.filter((r) => r.status === "PENDING" || needsReturnApproval(r)).length;
 
   const homeView = (
     <Home

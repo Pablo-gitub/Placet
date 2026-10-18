@@ -84,6 +84,7 @@ def test_agent_reply_is_injected_into_sender_session(db, tmux):
     db.claim_injection(req.id)
     db.confirm_injection(req.id, actor="agent:gemini", via="mcp")
     db.record_reply(req.id, "gemini", "Complessità O(n log n)")
+    assert db.decide_return(req.id, True, None, "human:p")
     _age(db, req.id, 30)
 
     BridgeDaemon(db=db, config=CONFIG, tmux=tmux).run_loop_step()

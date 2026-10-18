@@ -35,10 +35,12 @@ from backend.app.models import (
     Priority,
     QuestionType,
     RequestDecision,
+    OutcomeDecision,
     SessionMessage,
     SessionModel,
     BRIDGE_PROVIDERS,
     SUSPENDING_PROVIDERS,
+    STEER_PROVIDERS,
     INBOX_WAIT_SECONDS,
     RESULT_GRACE_SECONDS,
     RESULT_MAX_AGE_SECONDS,
@@ -192,6 +194,12 @@ def create_app(
         for ev in list(inbox_waiters):
             ev.set()
         _broadcast(("request", req_id))
+        req = db.get_request(req_id)
+        if (req is not None and req.status == RequestStatus.COMPLETED
+                and req.sender_id != "human" and req.recipient_id != "human"
+                and req.delivered_at is None and not req.allow_auto_return
+                and req.return_decision is None):
+            alert(req_id, "risposta ricevuta: autorizza l’inoltro all’agente richiedente")
 
     def notify_session(session_id: str):
         for ev in list(inbox_waiters):
@@ -295,9 +303,15 @@ def create_app(
         When a settled outcome is returned to its sender, record it as
         delivered so the bridge does not inject it into the session again.
         """
+        if (req is not None and not who.is_human and req.recipient_id != "human"
+                and req.status == RequestStatus.COMPLETED):
+            if not req.allow_auto_return and req.return_decision != "approved":
+                return req.model_copy(update={"response": None, "return_text": None})
+            if req.return_text is not None and req.response is not None:
+                req = req.model_copy(update={"response": req.response.model_copy(update={"content": req.return_text})})
         if req is not None and who.id == req.sender_id and is_settled(req) and req.delivered_at is None:
             db.mark_delivered(req.id, actor=who.actor, via="api")
-            req = db.get_request(req.id)
+            req = req.model_copy(update={"delivered_at": db.get_request(req.id).delivered_at})
         return req
 
     app = FastAPI(title="Placet API", version="1.0.0", lifespan=lifespan)
@@ -561,6 +575,15 @@ def create_app(
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=problem)
         if decision.recipient_session_id is not None:
             check_target_session(decision.recipient_session_id, req.recipient_id)
+            if decision.recipient_session_id == req.sender_session_id:
+                raise HTTPException(status_code=422, detail="Una sessione non può inviare a sé stessa.")
+        if decision.status == RequestStatus.APPROVED and decision.delivery_mode == "now":
+            target_id = decision.recipient_session_id or req.recipient_session_id
+            target = db.get_session(target_id) if target_id else None
+            if (req.question_type != QuestionType.PROMPT_REVIEW or req.recipient_id == "human"
+                    or target is None or target.provider not in STEER_PROVIDERS):
+                raise HTTPException(status_code=422, detail="Subito richiede una sessione specifica di Claude o Antigravity.")
+            check_target_session(target_id, req.recipient_id)
 
         updated = db.update_request_decision(
             request_id=request_id,
@@ -569,10 +592,10 @@ def create_app(
             selected_options=decision.selected_options,
             custom_text=decision.custom_text,
             actor=who.actor,
+            allow_auto_return=decision.allow_auto_return,
+            delivery_mode=decision.delivery_mode if decision.status == RequestStatus.APPROVED and req.recipient_id != "human" else None,
+            recipient_session_id=decision.recipient_session_id,
         )
-        if updated is not None and decision.recipient_session_id is not None:
-            db.set_recipient_session(request_id, decision.recipient_session_id)
-            updated = db.get_request(request_id)
         if updated is None:
             # State changed between the check and the update (e.g. expired or cancelled).
             current = db.get_request(request_id)
@@ -580,6 +603,19 @@ def create_app(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Request {request_id} is in {current.status.value} state, not in PENDING state.",
             )
+        notify_change(request_id)
+        return updated
+
+    @app.post("/api/requests/{request_id}/return-decision", response_model=RequestModel)
+    async def decide_return(request_id: int, payload: OutcomeDecision,
+                            who: Principal = Depends(principal)):
+        require_human(who)
+        get_or_404(request_id)
+        if payload.edited_response is not None and not payload.edited_response.strip():
+            raise HTTPException(status_code=422, detail="La risposta non può essere vuota.")
+        updated = db.decide_return(request_id, payload.approve, payload.edited_response, who.actor)
+        if updated is None:
+            raise HTTPException(status_code=409, detail="Risposta già decisa, inoltrata o non disponibile.")
         notify_change(request_id)
         return updated
 

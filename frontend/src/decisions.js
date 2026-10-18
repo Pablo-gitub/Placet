@@ -5,7 +5,7 @@ export const OTHER = "__altro__";
  * Kept separate from the component so the rules mirror the backend
  * validation (RF-02, RF-03) in one readable place.
  */
-export function buildDecision(req, status, { editedPrompt, selected, otherText, targetSession }) {
+export function buildDecision(req, status, { editedPrompt, selected, otherText, targetSession, deliveryMode, allowAutoReturn }) {
   const text = otherText.trim();
   const body = { status, selected_options: [] };
 
@@ -16,6 +16,8 @@ export function buildDecision(req, status, { editedPrompt, selected, otherText, 
     if (status === "APPROVED" && targetSession) {
       body.recipient_session_id = targetSession;
     }
+    if (status === "APPROVED" && deliveryMode === "now") body.delivery_mode = "now";
+    if (status === "APPROVED" && allowAutoReturn) body.allow_auto_return = true;
     return body;
   }
 
@@ -59,4 +61,9 @@ export function routeFromHash(hash) {
   if (session) return { view: "session", sessionId: session[1] };
   if (hash === "#/storico") return { view: "history" };
   return { view: "home" };
+}
+
+export function needsReturnApproval(req) {
+  return req.status === "COMPLETED" && req.sender_id !== "human" && req.recipient_id !== "human"
+    && req.response && !req.delivered_at && !req.allow_auto_return && !req.return_decision;
 }

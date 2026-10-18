@@ -1,3 +1,4 @@
+import { needsReturnApproval } from "./decisions";
 import React, { useLayoutEffect, useRef, useState } from "react";
 import Attachments from "./Attachments";
 import Composer from "./Composer";
@@ -263,7 +264,7 @@ export default function SessionView({
   const scrollRef = useRef(null);
   const following = useRef(true);
   const anchor = useRef(null);
-  const questions = requests.filter((r) => r.status === "PENDING" && r.sender_session_id === sessionId);
+  const questions = requests.filter((r) => (r.status === "PENDING" || needsReturnApproval(r)) && r.sender_session_id === sessionId);
   const outgoing = requests
     .filter((r) => r.question_type === "message" && r.recipient_session_id === sessionId
       && r.status in OUTGOING_STATES && notStarted(r))

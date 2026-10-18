@@ -46,16 +46,19 @@ async def test_full_agent_to_agent_timeline(setup):
     db.confirm_injection(req["id"], actor="agent:gemini", via="hook")
     async with agent_client(app, "tok-gemini") as gemini:
         await gemini.post(f"/api/requests/{req['id']}/reply", json={"content": "Fatto"})
+    async with human_client(app) as human:
+        await human.post(f"/api/requests/{req['id']}/return-decision", json={"approve": True})
     async with agent_client(app, "tok-claude") as claude:
         await claude.get(f"/api/requests/{req['id']}")
 
     assert _events(db, req["id"]) == [
         ("agent:claude", "created", {"question_type": "prompt_review",
                                      "expires_at": db.get_request(req["id"]).expires_at.isoformat()}),
-        (f"human:{HUMAN_LOGIN}", "decided", {"status": "APPROVED", "edited_prompt": "Analizza bene"}),
+        (f"human:{HUMAN_LOGIN}", "decided", {"status": "APPROVED", "delivery_mode": "queue", "edited_prompt": "Analizza bene"}),
         ("bridge", "injection_claimed", {"attempt": 1}),
         ("agent:gemini", "acked", {"via": "hook"}),
         ("agent:gemini", "replied", {"length": 5}),
+        (f"human:{HUMAN_LOGIN}", "return_decided", {"approve": True, "edited_response": None}),
         ("agent:claude", "delivered", {"via": "api"}),
     ]
 

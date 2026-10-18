@@ -95,6 +95,14 @@ export default function History({ requests, sessions, focusId, onOpenSession }) 
                   </span>
                 )}{" "}
                 {req.response.content}
+                {req.sender_id !== "human" && req.recipient_id !== "human" && (
+                  <p>{req.delivered_at ? "Risposta inoltrata" : req.return_decision === "rejected"
+                    ? "Risposta non inoltrata per tua scelta" : req.allow_auto_return || req.return_decision === "approved"
+                      ? "Inoltro autorizzato, in attesa di consegna" : "Risposta in attesa del tuo consenso"}</p>
+                )}
+                {req.return_text != null && req.return_text !== req.response.content && (
+                  <p><strong>Versione autorizzata:</strong> {req.return_text}</p>
+                )}
               </div>
             )}
             <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.6rem" }}>

@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { ArrowRight, CheckCircle, XCircle, Pencil, Eye, MessagesSquare } from "lucide-react";
 import Markdown from "./Markdown";
-import { OTHER, buildDecision, canApprove } from "./decisions";
+import { OTHER, buildDecision, canApprove, needsReturnApproval } from "./decisions";
 import { sessionName, sessionOrigin, sessionStatus } from "./sessionInfo";
 
 /** Where a request comes from: the sender's session, when known; opens its conversation. */
@@ -25,17 +25,43 @@ export function Origin({ req, sessions, onOpenSession }) {
   );
 }
 
-export default function RequestCard({ req, submitting, highlighted, onDecide, sessions = [], onOpenSession }) {
+function ReturnCard({ req, submitting, onDecide }) {
+  const [text, setText] = useState(req.response.content);
+  return <div className="card" id={`request-${req.id}`} data-testid={`return-card-${req.id}`}>
+    <h3>Risposta di {req.recipient_id} a {req.sender_id} · #{req.id}</h3>
+    <p>Compito completato. La risposta attende il tuo consenso prima di raggiungere l’agente richiedente.</p>
+    <details><summary>Richiesta originale</summary><Markdown>{req.edited_prompt || req.prompt}</Markdown></details>
+    <label className="prompt-editor-label" htmlFor={`return-${req.id}`}>Risposta da inoltrare</label>
+    <textarea id={`return-${req.id}`} className="prompt-textarea" value={text}
+      onChange={(e) => setText(e.target.value)} />
+    <div className="actions-row">
+      <button className="btn btn-primary" disabled={submitting || !text.trim()}
+        onClick={() => onDecide(req.id, { return_decision: true, approve: true, edited_response: text })}>Inoltra risposta</button>
+      <button className="btn btn-danger" disabled={submitting}
+        onClick={() => onDecide(req.id, { return_decision: true, approve: false })}>Non inoltrare</button>
+    </div>
+  </div>;
+}
+
+export default function RequestCard(props) {
+  return needsReturnApproval(props.req) ? <ReturnCard {...props} /> : <PromptCard {...props} />;
+}
+
+function PromptCard({ req, submitting, highlighted, onDecide, sessions = [], onOpenSession }) {
   const [editedPrompt, setEditedPrompt] = useState(undefined);
   const [editing, setEditing] = useState(false);
   const [selected, setSelected] = useState([]);
   const [otherText, setOtherText] = useState("");
   const [targetSession, setTargetSession] = useState(req.recipient_session_id || "");
-  const targetSessions = sessions.filter((s) => s.agent_id === req.recipient_id && !s.ended_at);
+  const [allowAutoReturn, setAllowAutoReturn] = useState(false);
+  const [deliveryMode, setDeliveryMode] = useState("queue");
+  const targetSessions = sessions.filter((s) => s.agent_id === req.recipient_id && !s.ended_at && s.id !== req.sender_session_id);
+  const target = targetSessions.find((s) => s.id === targetSession);
+  const canSteer = target?.state === "busy" && ["claude-code", "antigravity"].includes(target.provider);
 
   const isChoice = req.question_type === "single_choice" || req.question_type === "multi_choice";
   const multi = req.question_type === "multi_choice";
-  const state = { editedPrompt, selected, otherText, targetSession };
+  const state = { allowAutoReturn, editedPrompt, selected, otherText, targetSession, deliveryMode: canSteer ? deliveryMode : "queue" };
 
   const toggle = (value) => {
     if (!multi) {
@@ -141,7 +167,7 @@ export default function RequestCard({ req, submitting, highlighted, onDecide, se
                 data-testid={`target-session-${req.id}`}
                 className="session-select"
                 value={targetSession}
-                onChange={(e) => setTargetSession(e.target.value)}
+                onChange={(e) => { setTargetSession(e.target.value); setDeliveryMode("queue"); }}
               >
                 <option value="">Automatica (la prima libera)</option>
                 {targetSessions.map((s) => (
@@ -151,6 +177,22 @@ export default function RequestCard({ req, submitting, highlighted, onDecide, se
                 ))}
               </select>
             </>
+          )}
+          {canSteer && (
+            <fieldset className="request-section" data-testid={`delivery-mode-${req.id}`} disabled={submitting}>
+              <legend className="section-label">Quando consegnare</legend>
+              <label className="option-item">
+                <input type="radio" name={`delivery-${req.id}`} checked={deliveryMode === "queue"}
+                  onChange={() => setDeliveryMode("queue")} />
+                <span>In coda · a fine turno</span>
+              </label>
+              <label className="option-item">
+                <input type="radio" name={`delivery-${req.id}`} checked={deliveryMode === "now"}
+                  onChange={() => setDeliveryMode("now")} />
+                <span>Subito · nel turno in corso</span>
+              </label>
+              <p className="composer-note">Subito aggiunge il messaggio alla prossima azione utile. Se il turno termina prima, resta in coda.</p>
+            </fieldset>
           )}
         </>
       ) : (
@@ -194,6 +236,12 @@ export default function RequestCard({ req, submitting, highlighted, onDecide, se
         />
       )}
 
+      {req.question_type === "prompt_review" && req.recipient_id !== "human" && req.sender_id !== "human" && (
+        <label className="option-item">
+          <input type="checkbox" checked={allowAutoReturn} onChange={(e) => setAllowAutoReturn(e.target.checked)} />
+          <span>Consenti anche il ritorno automatico della risposta</span>
+        </label>
+      )}
       <div className="actions-row">
         <button
           data-testid={`btn-approve-${req.id}`}

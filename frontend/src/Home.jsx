@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { CheckCircle, ChevronDown, ChevronRight, Circle, MessageCircleQuestion, Plus } from "lucide-react";
 import RequestCard from "./RequestCard";
+import { needsReturnApproval } from "./decisions";
 import AddSessionsDialog from "./AddSessionsDialog";
 import {
   activityOf,
@@ -111,7 +112,7 @@ export default function Home({
       }
       return next;
     });
-  const pending = requests.filter((r) => r.status === "PENDING");
+  const pending = requests.filter((r) => r.status === "PENDING" || needsReturnApproval(r));
   const pinned = sessions.filter((s) => s.pinned).sort(byActivity);
   const questionsOf = (id) => pending.filter((r) => r.sender_session_id === id).length;
   // pinned is sorted by activity: a provider's first session is its latest.

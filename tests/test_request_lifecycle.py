@@ -101,7 +101,10 @@ async def test_long_poll_agent_request_waits_for_reply_not_approval(setup):
 
         result = (await asyncio.wait_for(create, timeout=2)).json()
         assert result["status"] == "COMPLETED"
-        assert result["response"]["content"] == "Fatto"
+        assert result["response"] is None
+        await human.post(f"/api/requests/{req_id}/return-decision", json={"approve": True})
+        approved = await client.get(f"/api/requests/{req_id}", headers=AUTH_CLAUDE)
+        assert approved.json()["response"]["content"] == "Fatto"
 
 
 @pytest.mark.asyncio

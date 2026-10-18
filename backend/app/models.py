@@ -136,13 +136,20 @@ class RequestCreate(BaseModel):
         return self
 
 
+class OutcomeDecision(BaseModel):
+    approve: bool
+    edited_response: Optional[str] = None
+
+
 class RequestDecision(BaseModel):
+    allow_auto_return: bool = False
     status: RequestStatus
     edited_prompt: Optional[str] = None
     selected_options: List[str] = Field(default_factory=list)
     custom_text: Optional[str] = None
     # For prompt review: deliver to this session of the recipient agent.
     recipient_session_id: Optional[str] = None
+    delivery_mode: Literal["queue", "now"] = "queue"
 
     @field_validator("status")
     @classmethod
@@ -158,6 +165,9 @@ class RequestDecision(BaseModel):
 
 
 class RequestModel(BaseModel):
+    allow_auto_return: bool = False
+    return_decision: Optional[str] = None
+    return_text: Optional[str] = None
     id: int
     sender_id: str
     recipient_id: str
@@ -330,4 +340,3 @@ def is_settled(req: RequestModel) -> bool:
     if req.recipient_id == "human":
         return req.status != RequestStatus.PENDING
     return req.status in FINAL_STATUSES
-

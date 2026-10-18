@@ -410,6 +410,9 @@ async def test_same_agent_sessions_talk_without_self_delivery(agent):
         await _event(claude, "B", event="prompt", request_id=created["id"])
         await claude.post(f"/api/requests/{created['id']}/reply", json={"content": "Rivisto"})
         await _event(claude, "B", event="stop")
+        assert (await claude.get("/api/sessions/A/inbox")).status_code == 204
+        async with human_client(app) as human:
+            assert (await human.post(f"/api/requests/{created['id']}/return-decision", json={"approve": True})).status_code == 200
         outcome = (await claude.get("/api/sessions/A/inbox")).json()
     assert outcome["kind"] == "outcome" and "Rivisto" in outcome["text"]
 

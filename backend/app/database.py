@@ -232,6 +232,10 @@ class Database:
                         cursor.execute(f"ALTER TABLE requests ADD COLUMN {col} TEXT;")
                 cursor.execute("ALTER TABLE requests ADD COLUMN turn_mixed INTEGER NOT NULL DEFAULT 0;")
                 cursor.execute(_BACKFILL_ASPECTS_SQL)
+            for name, definition in (("allow_auto_return", "INTEGER NOT NULL DEFAULT 0"),
+                                     ("return_decision", "TEXT"), ("return_text", "TEXT")):
+                if name not in cols:
+                    cursor.execute(f"ALTER TABLE requests ADD COLUMN {name} {definition}")
             if "delivery_mode" not in cols:
                 cursor.execute("ALTER TABLE requests ADD COLUMN delivery_mode TEXT;")
             if "queue_released_at" not in cols:
@@ -384,6 +388,9 @@ class Database:
             start_unconfirmed_at=_ts(row["start_unconfirmed_at"]),
             queue_released_at=_ts(row["queue_released_at"]),
             delivery_mode=row["delivery_mode"] or "queue",
+            allow_auto_return=bool(row["allow_auto_return"]),
+            return_decision=row["return_decision"],
+            return_text=row["return_text"],
         )
 
     def list_requests(
@@ -442,6 +449,9 @@ class Database:
         selected_options: Optional[List[str]] = None,
         custom_text: Optional[str] = None,
         actor: str = "system",
+        allow_auto_return: bool = False,
+        delivery_mode: Optional[str] = None,
+        recipient_session_id: Optional[str] = None,
     ) -> Optional[RequestModel]:
         """
         Applies the human decision (PENDING -> APPROVED/REJECTED). Returns
@@ -460,17 +470,22 @@ class Database:
             cursor.execute(
                 f"""
                 UPDATE requests
-                SET status = ?, edited_prompt = ?, selected_options = ?, custom_text = ?,
-                    decided_at = ?, updated_at = ?
+                SET allow_auto_return = ?, status = ?, edited_prompt = ?, selected_options = ?, custom_text = ?,
+                    decided_at = ?, updated_at = ?,
+                    delivery_mode = COALESCE(?, delivery_mode),
+                    recipient_session_id = COALESCE(?, recipient_session_id)
                 WHERE id = ? AND status IN ({placeholders})
                 """,
                 [
+                    int(allow_auto_return),
                     status.value,
                     edited_prompt,
                     json.dumps(selected_options) if selected_options is not None else None,
                     custom_text,
                     now,
                     now,
+                    delivery_mode,
+                    recipient_session_id,
                     request_id,
                     *allowed_sources,
                 ],
@@ -478,6 +493,12 @@ class Database:
             if cursor.rowcount == 0:
                 return None
             details: Dict[str, Any] = {"status": status.value}
+            if allow_auto_return:
+                details["allow_auto_return"] = True
+            if delivery_mode is not None:
+                details["delivery_mode"] = delivery_mode
+            if recipient_session_id is not None:
+                details["recipient_session_id"] = recipient_session_id
             if edited_prompt is not None:
                 details["edited_prompt"] = edited_prompt
             if selected_options:
@@ -1044,13 +1065,28 @@ class Database:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "UPDATE requests SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL",
+                "UPDATE requests SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL AND (sender_id = 'human' OR recipient_id = 'human' OR status != 'COMPLETED' OR allow_auto_return = 1 OR return_decision = 'approved')",
                 (now, request_id),
             )
             if cursor.rowcount == 0:
                 return False
             self._log(cursor, request_id, actor, "delivered", {"via": via} if via else None, at=now)
             return True
+
+    def decide_return(self, request_id: int, approve: bool, text: Optional[str], actor: str):
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "UPDATE requests SET return_decision = ?, return_text = ?, updated_at = ?"
+                " WHERE id = ? AND status = 'COMPLETED' AND sender_id != 'human'"
+                " AND recipient_id != 'human' AND delivered_at IS NULL"
+                " AND allow_auto_return = 0 AND return_decision IS NULL",
+                ("approved" if approve else "rejected", text if approve else None,
+                 datetime.now(timezone.utc).isoformat(), request_id))
+            if not cursor.rowcount:
+                return None
+            self._log(conn.cursor(), request_id, actor, "return_decided",
+                      {"approve": approve, "edited_response": text})
+        return self.get_request(request_id)
 
     def clear_delivered(self, request_id: int, actor: str = "system") -> None:
         """Undoes mark_delivered after a failed delivery, so it is retried."""
@@ -1075,7 +1111,7 @@ class Database:
             cursor.execute(
                 """
                 SELECT id FROM requests
-                WHERE delivered_at IS NULL AND status != ?
+                WHERE delivered_at IS NULL AND status != ? AND (sender_id = 'human' OR recipient_id = 'human' OR status != 'COMPLETED' OR allow_auto_return = 1 OR return_decision = 'approved')
                   -- the user's own messages: the outcome is in the conversation
                   AND sender_id != 'human'
                   AND updated_at IS NOT NULL AND updated_at <= ? AND updated_at > ?
@@ -1329,7 +1365,7 @@ class Database:
 
     _OUTCOMES_SQL = """
         SELECT id FROM requests
-        WHERE sender_session_id = ? AND delivered_at IS NULL AND status != ?
+        WHERE sender_session_id = ? AND delivered_at IS NULL AND status != ? AND (sender_id = 'human' OR recipient_id = 'human' OR status != 'COMPLETED' OR allow_auto_return = 1 OR return_decision = 'approved')
         ORDER BY updated_at ASC
     """
     _INJECTIONS_SQL = """
