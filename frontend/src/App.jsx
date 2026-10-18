@@ -392,8 +392,12 @@ export default function App() {
         </div>
         {wide && navTabs}
         <div className="header-controls">
-          <LanguageSelect />
-          <BackgroundLanguage />
+          {route.view !== "session" && (
+            <>
+              <LanguageSelect />
+              <BackgroundLanguage />
+            </>
+          )}
           <div className="live-indicator" data-testid="live-indicator">
             <Radio size={12} className={connected ? "text-emerald-400 animate-pulse" : "text-amber-400"} />
             {t(connected ? "app.live" : "app.reconnecting")}
