@@ -32,6 +32,12 @@ def injection(req: RequestModel, ack_mode="mcp", channel="tmux", language=None) 
     else:
         prompt = req.edited_prompt if req.edited_prompt is not None else req.prompt
         message = text("envelope.agent", language, id=req.id, sender=req.sender_id, prompt=prompt) + "\n"
+        # RFC-06: whether the user reviewed this prompt; approval is not a blank cheque.
+        if req.approval == "automatic":
+            message += text("envelope.automatic", language) + "\n"
+        elif req.approval == "manual":
+            edited = req.edited_prompt is not None and req.edited_prompt != req.prompt
+            message += text("envelope.reviewed_edited" if edited else "envelope.reviewed", language) + "\n"
         if ack_mode == "mcp" and channel == "tmux":
             message += text("envelope.ack", language, id=req.id)
         message += text("envelope.reply", language, id=req.id)

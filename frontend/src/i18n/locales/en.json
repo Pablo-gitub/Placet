@@ -424,6 +424,12 @@
     "deleteConfirm": "Delete this relation? Future prompts will need your review.",
     "createFromRequest": "Create relation",
     "explanation": "This request continues as usual. The relation applies to future requests between these two sessions.",
-    "created": "Relation created: it applies to future requests."
+    "created": "Relation created: it applies to future requests.",
+    "rule": "General rule for automatic relations",
+    "ruleHint": "Agents must read it before every prompt they send on an automatic relation; Placet sends nothing until they confirm it. Applies to all relations.",
+    "rulePlaceholder": "E.g. Before starting processes, if you have important doubts, ask the user through Placet's tools.",
+    "ruleSave": "Save rule",
+    "ruleActive": "Rule active: agents read it before each automatic send.",
+    "ruleEmpty": "No rule: automatic relations deliver at once."
   }
 }

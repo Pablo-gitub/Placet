@@ -63,13 +63,16 @@ class PlacetClient:
 
     def send_to_agent(
         self,
-        target_agent: str,
+        target_agent: Optional[str],
         prompt: str,
-        context: Optional[str] = None,
         timeout_seconds: int = 180,
         priority: Optional[str] = None,
         target_session: Optional[str] = None,
         prompt_source: Optional[str] = None,
+        target_node: Optional[str] = None,
+        relation_type: Optional[str] = None,
+        rule_acknowledged: bool = False,
+        context: Optional[str] = None,
     ) -> Dict[str, Any]:
         timeout = max(5, min(int(timeout_seconds), 600))
         url = f"{self.base_url}/api/requests"
@@ -77,6 +80,9 @@ class PlacetClient:
             "sender_id": self.agent_id,
             "recipient_id": target_agent,
             "recipient_session_id": target_session,
+            "target_node": target_node,
+            "relation_type": relation_type,
+            "rule_acknowledged": rule_acknowledged,
             "prompt_source": prompt_source,
             "question_type": "prompt_review",
             "prompt": prompt,
@@ -92,9 +98,19 @@ class PlacetClient:
                 headers=self._headers(),
                 params={"wait_seconds": timeout},
             )
+            if resp.status_code == 428:
+                # The general rule must be read first: nothing was sent.
+                return resp.json()
             resp.raise_for_status()
             return resp.json()
 
+    def list_relations(self, session_id: Optional[str] = None) -> Dict[str, Any]:
+        params = {"session_id": session_id} if session_id else None
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get(f"{self.base_url}/api/agents/me/relations",
+                              headers=self._headers(), params=params)
+            resp.raise_for_status()
+            return resp.json()
 
     def reply(
         self,

@@ -100,7 +100,7 @@ class RequestCreate(BaseModel):
     # Filled in by the backend from the authenticated agent; if a client sends
     # it, it must match.
     sender_id: Optional[str] = None
-    recipient_id: str
+    recipient_id: Optional[str] = None  # or `target_node`
     question_type: QuestionType = QuestionType.PROMPT_REVIEW
     prompt: str
     context: Optional[str] = None
@@ -115,6 +115,11 @@ class RequestCreate(BaseModel):
     # RFC-08: the relation type the sender means; needed when A -> B has
     # relations of several types.
     relation_type_id: Optional[int] = None
+    # RFC-08: address a node by name and a relation type by name.
+    target_node: Optional[str] = Field(None, max_length=40)
+    relation_type: Optional[str] = Field(None, max_length=40)
+    # RFC-06: the sender read the general rule for automatic relations.
+    rule_acknowledged: bool = False
     # Lifetime of the request, independent of how long the caller waits for it.
     expires_in_seconds: int = Field(
         DEFAULT_EXPIRES_IN_SECONDS, ge=10, le=MAX_EXPIRES_IN_SECONDS
@@ -173,6 +178,8 @@ class RequestModel(BaseModel):
     allow_auto_return: bool = False
     return_decision: Optional[str] = None
     return_text: Optional[str] = None
+    # Who let the prompt go: "automatic" (a rule or relation) or "manual" (the user).
+    approval: Optional[str] = None
     # The reply went, by the user's choice, to another session on this request.
     return_forward_id: Optional[int] = None
     # RFC-04: the relation the request travelled on, if any.

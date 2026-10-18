@@ -1,7 +1,7 @@
 import React from "react";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { CreateRelation, NodeRelations } from "../Relations";
+import { CreateRelation, NodeRelations, RelationRule } from "../Relations";
 import { json, mockFetch } from "./testUtils";
 
 const bodies = (fetch, method, url) =>
@@ -42,5 +42,18 @@ describe("Relations", () => {
     const select = await screen.findByTestId("relation-approval-4");
     fireEvent.change(select, { target: { value: "automatic" } });
     await waitFor(() => expect(bodies(fetch, "PATCH", "/api/relations/4")).toEqual([{ approval: "automatic" }]));
+  });
+
+  it("edits the general rule for automatic relations", async () => {
+    const fetch = mockFetch([
+      ["/api/settings/relation-rule", (url, o) => (o.method === "PUT" ? json(JSON.parse(o.body)) : { rule: "" })],
+    ]);
+    vi.stubGlobal("fetch", fetch);
+    render(<RelationRule />);
+    fireEvent.click(screen.getByTestId("relation-rule-open"));
+    const text = await screen.findByTestId("relation-rule-text");
+    fireEvent.change(text, { target: { value: "Ask first" } });
+    fireEvent.click(screen.getByTestId("relation-rule-save"));
+    await waitFor(() => expect(bodies(fetch, "PUT", "/api/settings/relation-rule")).toEqual([{ rule: "Ask first" }]));
   });
 });

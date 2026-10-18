@@ -279,20 +279,24 @@ Add Placet to your client's MCP configuration (e.g. `claude_desktop_config.json`
 
 ## Available MCP tools
 
-1. `placet_ask_human(question, options, multiple, context, timeout_seconds)`
+1. `placet_ask_human(question, options, multiple, context, timeout_seconds)` (`context` optional)
    - Asks the human for a decision or a choice on the phone.
    - Without `options` it is a confirmation question (approve/reject) with an optional note. With `options` it is a single choice, or a multiple one with `multiple=True`. The free-text "Other" option is always available and must not be passed among the options. The server waits at least 60 seconds for questions to the human.
-2. `placet_send_to_agent(target_agent, prompt, context, timeout_seconds)`
-   - Sends a task to another registered session or agent (e.g. `codex`). Specify `target_session` with its full ID when addressing a particular conversation; `prompt_file` can supply a Markdown prompt.
-3. `placet_ack(request_id)`
+2. `placet_send_to_agent(target_node | target_agent, prompt, relation_type, rule_acknowledged, timeout_seconds)`
+   - Sends a task to another session. `target_node` (with `relation_type` when several types connect the two nodes) uses the relations the user created; `target_agent` (optionally with `target_session`) is an ad hoc request, always reviewed. `prompt_file` can supply a Markdown prompt. The result reports `delivery_policy` (`automatic` or `manual`).
+   - On an automatic relation, when the user has set a general rule, the first call sends nothing and returns `RULE_ACKNOWLEDGEMENT_REQUIRED` with the rule; the agent sends again with `rule_acknowledged=true` only if the rule does not tell it to stop or ask first. This happens on every automatic send.
+   - The tool no longer takes `context` (RF-05b): the reviewer can read the sender's chat.
+3. `placet_list_relations(session_id)`
+   - Lists the relations the calling session can use: target node, type and description, approval, reply policy, and the general rule.
+4. `placet_ack(request_id)`
    - Acknowledges a request injected into the session (with `ack_mode: mcp`).
-4. `placet_reply(request_id, response)`
+5. `placet_reply(request_id, response)`
    - Returns the reply once the task is done.
-5. `placet_share_file(path, title)`
+6. `placet_share_file(path, title)`
    - Shows an allowed PDF or image on the phone. Files must satisfy the home, hidden-folder, ownership, type, size and exclusion checks in the architecture.
-6. `placet_list_agents()`
+7. `placet_list_agents()`
    - Lists the active agents, their roles and routing rules.
-7. `placet_check_status(request_id)`
+8. `placet_check_status(request_id)`
    - Checks the state of a request still pending after the timeout.
 
 `timeout_seconds` is only how long the tool waits (5–600 s for agent requests; at least 60 s for human questions). The request stays valid until it expires (`expires_at`, default 24 hours), so you can decide even after the tool has returned `PENDING`.

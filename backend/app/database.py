@@ -125,6 +125,17 @@ class Database:
             conn.execute("INSERT INTO app_settings (key, value) VALUES ('background_language', ?)"
                          " ON CONFLICT(key) DO UPDATE SET value = excluded.value", (language,))
 
+    def get_relation_rule(self) -> str:
+        """The general rule agents read before each automatic relation (RFC-06)."""
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT value FROM app_settings WHERE key = 'relation_rule'").fetchone()
+        return row[0] if row else ""
+
+    def set_relation_rule(self, rule: str) -> None:
+        with self._get_connection() as conn:
+            conn.execute("INSERT INTO app_settings (key, value) VALUES ('relation_rule', ?)"
+                         " ON CONFLICT(key) DO UPDATE SET value = excluded.value", (rule,))
+
     def init_db(self):
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         with self._get_connection() as conn:
@@ -318,6 +329,9 @@ class Database:
                     "UPDATE requests SET queue_released_at = COALESCE(updated_at, created_at)"
                     " WHERE status NOT IN ('PENDING', 'APPROVED', 'DELIVERING');"
                 )
+            if "approval" not in cols:
+                # Who let the prompt go: "automatic" (rule or relation) or "manual" (the user).
+                cursor.execute("ALTER TABLE requests ADD COLUMN approval TEXT;")
             if "return_forward_id" not in cols:
                 # The request a reply was forwarded on, to another session.
                 cursor.execute("ALTER TABLE requests ADD COLUMN return_forward_id INTEGER;")
@@ -470,6 +484,7 @@ class Database:
             return_text=row["return_text"],
             relation_id=row["relation_id"],
             return_forward_id=row["return_forward_id"],
+            approval=row["approval"],
         )
 
     def list_requests(
@@ -549,7 +564,7 @@ class Database:
             cursor.execute(
                 f"""
                 UPDATE requests
-                SET allow_auto_return = ?, status = ?, edited_prompt = ?, selected_options = ?, custom_text = ?,
+                SET allow_auto_return = ?, approval = ?, status = ?, edited_prompt = ?, selected_options = ?, custom_text = ?,
                     decided_at = ?, updated_at = ?,
                     delivery_mode = COALESCE(?, delivery_mode),
                     recipient_session_id = COALESCE(?, recipient_session_id)
@@ -557,6 +572,7 @@ class Database:
                 """,
                 [
                     int(allow_auto_return),
+                    "automatic" if actor.startswith("system:") else "manual",
                     status.value,
                     edited_prompt,
                     json.dumps(selected_options) if selected_options is not None else None,
@@ -1677,6 +1693,22 @@ class Database:
                 "to": recipient_id or row["recipient_id"], "to_session": recipient_session_id,
                 "relation_id": relation_id})
             return True
+
+    def node_by_name(self, name: str) -> Optional[NodeModel]:
+        with self._get_connection() as conn:
+            row = conn.execute(f"{self._NODES_SQL} WHERE nodes.name = ? COLLATE NOCASE", (name,)).fetchone()
+            return self._row_to_node(row) if row else None
+
+    def relation_type_by_name(self, name: str) -> Optional[RelationTypeModel]:
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT * FROM relation_types WHERE name = ? COLLATE NOCASE", (name,)).fetchone()
+            return self._row_to_type(row) if row else None
+
+    def outgoing_relations(self, node_id: int) -> List[RelationModel]:
+        with self._get_connection() as conn:
+            rows = conn.execute(f"{self._RELATIONS_SQL} WHERE r.from_node = ? ORDER BY t.name, y.name",
+                                (node_id,)).fetchall()
+            return [self._row_to_relation(r) for r in rows]
 
     def set_request_relation(self, request_id: int, relation_id: int) -> None:
         with self._get_connection() as conn:

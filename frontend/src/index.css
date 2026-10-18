@@ -1293,3 +1293,4 @@ body.chat-open { overflow: hidden; }
 .relation-route { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 0.25rem; flex-wrap: wrap; }
 .relation-route small { color: var(--text-muted); margin-left: 0.3rem; }
 .relation-row .session-select { width: auto; margin: 0; }
+.relation-rule { margin: 0.5rem 0 0.75rem; }

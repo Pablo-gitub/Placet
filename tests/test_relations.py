@@ -193,3 +193,87 @@ async def test_the_user_forwards_a_reply_to_another_session(env):
         seen = (await client.get(f"/api/requests/{req['id']}")).json()
         assert seen["return_decision"] == "forwarded"
         assert seen["response"] is None or "report" not in str(seen["response"])
+
+
+async def post(app, body, agent="claude"):
+    async with agent_client(app, f"tok-{agent}") as client:
+        return await client.post("/api/requests", json={"prompt": "do it", **body})
+
+
+@pytest.mark.asyncio
+async def test_agents_address_nodes_and_read_the_rule_each_time(env):
+    app, db = env
+    a, b = await two_nodes(app, db)
+    review = db.create_relation_type("review", "Ask for a code review")
+    db.create_relation(a.id, b.id, review.id, "automatic")
+    db.set_relation_rule("If in doubt, ask the human first.")
+    before = len(db.list_requests())
+    resp = await post(app, {"target_node": "Builder", "relation_type": "review"})
+    assert resp.status_code == 428
+    body = resp.json()
+    assert body["rule"] == "If in doubt, ask the human first." and body["relation"]["to"] == "builder"
+    assert len(db.list_requests()) == before  # nothing was created
+    resp = await post(app, {"target_node": "builder", "rule_acknowledged": True})
+    assert resp.status_code == 201, resp.text
+    out = resp.json()
+    assert out["status"] == "APPROVED" and out["delivery_policy"] == "automatic"
+    assert (out["recipient_id"], out["recipient_session_id"]) == ("codex", "cx")
+    # Each send needs it again.
+    assert (await post(app, {"target_node": "builder"})).status_code == 428
+    # Manual relations and ad hoc requests never ask for it.
+    db.set_relation_approval(db.find_relation(a.id, b.id).id, "manual")
+    resp = await post(app, {"target_node": "builder"})
+    assert resp.status_code == 201 and resp.json()["delivery_policy"] == "manual"
+    assert (await post(app, {"target_node": "nobody"})).json()["code"] == "node.not_found"
+    assert (await post(app, {"target_node": "builder", "relation_type": "x"})).status_code == 404
+    assert (await post(app, {})).json()["code"] == "request.no_recipient"
+
+
+@pytest.mark.asyncio
+async def test_a_relation_opens_a_route_agents_md_does_not_list(env, tmp_path):
+    db = Database(str(tmp_path / "other.db"))
+    db.init_db()
+    config = PlacetConfig(agents={
+        "claude": AgentSpec(tmux_session="a", token="tok-claude", allowed_targets=["human"]),
+        "codex": AgentSpec(tmux_session="b", token="tok-codex", allowed_targets=["human"]),
+    })
+    app = create_app(db=db, config=config)
+    a, b = await two_nodes(app, db)
+    assert (await post(app, {"target_node": "builder"})).status_code == 403
+    db.create_relation(a.id, b.id, db.create_relation_type("review", "").id, "manual")
+    assert (await post(app, {"target_node": "builder"})).status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_agents_list_their_relations(env):
+    app, db = env
+    a, b = await two_nodes(app, db)
+    review = db.create_relation_type("review", "Ask for a code review")
+    db.create_relation(a.id, b.id, review.id, "automatic")
+    db.create_relation(b.id, a.id, review.id, "manual")
+    db.set_relation_rule("Ask first.")
+    async with agent_client(app, "tok-claude") as client:
+        out = (await client.get("/api/agents/me/relations")).json()
+    assert out["node"] == "planner" and out["rule"] == "Ask first."
+    [rel] = out["relations"]
+    assert (rel["to"], rel["type"], rel["approval"], rel["reply_policy"]) == ("builder", "review", "automatic", "manual")
+    assert rel["description"] == "Ask for a code review" and rel["target_agent"] == "codex"
+    # Another agent's session is never read.
+    async with agent_client(app, "tok-codex") as client:
+        out = (await client.get("/api/agents/me/relations", params={"session_id": "cl"})).json()
+    assert out["session_id"] is None and out["relations"] == []
+    async with human_client(app) as human:
+        assert (await human.put("/api/settings/relation-rule", json={"rule": " New "})).json() == {"rule": "New"}
+
+
+def test_the_recipient_sees_whether_the_user_reviewed(env):
+    from backend.app import envelopes
+    from backend.app.models import RequestModel
+    from datetime import datetime, timezone
+    base = dict(id=1, sender_id="claude", recipient_id="codex", question_type="prompt_review",
+                prompt="p", created_at=datetime.now(timezone.utc))
+    auto = envelopes.injection(RequestModel(**base, approval="automatic"), language="en")
+    assert "without human review" in auto and "placet_ask_human" in auto
+    assert "reviewed and approved" in envelopes.injection(RequestModel(**base, approval="manual"), language="en")
+    edited = RequestModel(**base, approval="manual", edited_prompt="q")
+    assert "edited" in envelopes.injection(edited, language="en")

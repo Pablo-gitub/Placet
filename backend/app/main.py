@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, status, Requ
 from fastapi import Path as FastAPIPath
 from fastapi.middleware.cors import CORSMiddleware
 
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from backend.app.errors import ProductError, product_error_response
 from backend.app.i18n import text
@@ -162,6 +162,10 @@ class RelationCreate(BaseModel):
 
 class RelationUpdate(BaseModel):
     approval: Literal["manual", "automatic"]
+
+
+class RelationRule(BaseModel):
+    rule: str = Field("", max_length=4000)
 
 
 class BridgeJobResult(BaseModel):
@@ -424,6 +428,11 @@ def create_app(
             return None
         return db.find_relation(sender.node_id, recipient.node_id, type_id)
 
+    def relation_brief(relation) -> Dict[str, object]:
+        return {"id": relation.id, "from": relation.from_name, "to": relation.to_name,
+                "type": relation.type_name, "description": relation.type_description,
+                "approval": relation.approval}
+
     def reverse_is_automatic(relation) -> bool:
         """RFC-13: a reply goes back on its own only if B -> A of the same type is automatic."""
         if relation is None:
@@ -518,8 +527,41 @@ def create_app(
             )
         req = req.model_copy(update={"sender_id": who.id})
 
-        # Validate allowed route
-        if not config.is_route_allowed(req.sender_id, req.recipient_id):
+        # RFC-08: a node by name stands for its current session and agent.
+        if req.target_node:
+            node = db.node_by_name(req.target_node.strip())
+            target = db.get_session(node.session_id) if node and node.session_id else None
+            if target is None:
+                raise ProductError(404, "node.not_found", f"No node named {req.target_node!r} with a session.")
+            if req.recipient_id not in (None, target.agent_id):
+                raise ProductError(422, "node.other_agent", f"Node {node.name!r} belongs to {target.agent_id}.")
+            req = req.model_copy(update={"recipient_id": target.agent_id, "recipient_session_id": target.id})
+        if req.relation_type:
+            rtype = db.relation_type_by_name(req.relation_type.strip())
+            if rtype is None:
+                raise ProductError(404, "relation_type.not_found", f"No relation type named {req.relation_type!r}.")
+            req = req.model_copy(update={"relation_type_id": rtype.id})
+        if not req.recipient_id:
+            raise ProductError(422, "request.no_recipient", "Specify recipient_id or target_node.")
+
+        # The relation is known before anything is created (RFC-04/06).
+        sender_session = created_sender_session(who)
+        relation = (relation_of(sender_session, req.recipient_session_id, req.relation_type_id)
+                    if req.recipient_id != "human" else None)
+        rule = db.get_relation_rule().strip()
+        if relation is not None and relation.approval == "automatic" and rule and not req.rule_acknowledged:
+            # Read every time, right before an automatic relation is used.
+            return JSONResponse(status_code=428, content={
+                "status": "RULE_ACKNOWLEDGEMENT_REQUIRED",
+                "code": "relation.rule_ack_required",
+                "relation": relation_brief(relation),
+                "rule": rule,
+                "detail": "Nothing was sent. Read the rule; if it asks you to stop or ask the human "
+                          "first, do that. Otherwise send again with rule_acknowledged=true.",
+            })
+
+        # Validate allowed route: AGENTS.md, or a relation the user created.
+        if relation is None and not config.is_route_allowed(req.sender_id, req.recipient_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Route from {req.sender_id} to {req.recipient_id} not allowed by AGENTS.md rules.",
@@ -574,23 +616,24 @@ def create_app(
             created = db.get_request(created.id)
 
         # RFC-04/05: the relation between the two nodes decides the policy.
-        relation = None
-        if req.recipient_id != "human":
+        by_relation = False
+        if req.recipient_id != "human" and relation is None:
             relation = relation_of(created.sender_session_id, created.recipient_session_id,
                                    req.relation_type_id)
-            if relation is not None:
-                db.set_request_relation(created.id, relation.id)
-                created = db.get_request(created.id)
-                if relation.approval == "automatic":
-                    needs_approval = False
+        if relation is not None:
+            db.set_request_relation(created.id, relation.id)
+            created = db.get_request(created.id)
+            # Never automatic without the rule read (a relation found only now).
+            if relation.approval == "automatic" and (req.rule_acknowledged or not rule):
+                needs_approval = False
+                by_relation = True
 
         if not needs_approval:
             # Auto-approval: AGENTS.md routing, or an automatic relation.
             created = db.update_request_decision(
                 request_id=created.id,
                 status=RequestStatus.APPROVED,
-                actor=f"system:relation#{relation.id}" if relation is not None
-                and relation.approval == "automatic" else "system:auto-routing",
+                actor=f"system:relation#{relation.id}" if by_relation else "system:auto-routing",
                 allow_auto_return=reverse_is_automatic(relation),
             )
         else:
@@ -604,6 +647,11 @@ def create_app(
         notify_change(created.id)
 
         extra: Dict[str, object] = {}
+        if req.recipient_id != "human":
+            # RFC-06: the sender knows whether the user reviews its prompt.
+            extra["delivery_policy"] = "automatic" if not needs_approval else "manual"
+            if relation is not None:
+                extra["relation"] = relation_brief(relation)
         if target_warning:
             extra["warning"] = target_warning
         if wait_seconds > 0:
@@ -1306,6 +1354,49 @@ def create_app(
         if outcome == "in_use":
             raise ProductError(409, "relation_type.in_use", "Relations of this type exist.")
         return Response(status_code=204)
+
+    @app.get("/api/settings/relation-rule", response_model=RelationRule)
+    async def get_relation_rule(who: Principal = Depends(principal)):
+        require_human(who)
+        return {"rule": db.get_relation_rule()}
+
+    @app.put("/api/settings/relation-rule", response_model=RelationRule)
+    async def set_relation_rule(body: RelationRule, who: Principal = Depends(principal)):
+        """The general rule agents must read before each automatic relation (RFC-06)."""
+        require_human(who)
+        db.set_relation_rule(body.rule.strip())
+        return {"rule": db.get_relation_rule()}
+
+    @app.get("/api/agents/me/relations")
+    async def my_relations(session_id: Optional[str] = None, who: Principal = Depends(principal)):
+        """
+        RFC-08: the relations the calling session can use, with each type's
+        description and delivery policy, and the general rule.
+        """
+        require_agent(who)
+        sid = session_id or created_sender_session(who)
+        session = db.get_session(sid) if sid else None
+        if session is not None and session.agent_id != who.id:
+            session = None
+        out: Dict[str, object] = {"session_id": session.id if session else None,
+                                  "node": session.node_name if session else None,
+                                  "rule": db.get_relation_rule(), "relations": []}
+        if session is None:
+            out["note"] = "This session could not be identified (pass session_id); no relations listed."
+        elif session.node_id is None:
+            out["note"] = "This session has no node: the user has not named it, so it has no relations."
+        else:
+            for rel in db.outgoing_relations(session.node_id):
+                node = db.get_node(rel.to_node)
+                target = db.get_session(node.session_id) if node and node.session_id else None
+                out["relations"].append({
+                    **relation_brief(rel),
+                    "target_agent": target.agent_id if target else None,
+                    "target_session": target.id if target else None,
+                    "target_reachable": bool(target and target.reachable),
+                    "reply_policy": "automatic" if reverse_is_automatic(rel) else "manual",
+                })
+        return out
 
     @app.get("/api/relations", response_model=List[RelationModel])
     async def list_relations(node_id: Optional[int] = None, who: Principal = Depends(principal)):

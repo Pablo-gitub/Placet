@@ -149,6 +149,47 @@ function RelationRow({ rel, onChanged }) {
   );
 }
 
+/** RFC-06: the general rule agents read before each automatic relation. */
+export function RelationRule() {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const [rule, setRule] = useState(null);
+  const [saved, setSaved] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  useEffect(() => {
+    if (!open || rule !== null) return;
+    api("GET", "/api/settings/relation-rule")
+      .then((body) => { setRule(body.rule); setSaved(body.rule); })
+      .catch((e) => setError(e.display || { key: "errors.relationSave" }));
+  }, [open, rule]);
+  const save = async () => {
+    setBusy(true); setError(null);
+    try { const body = await api("PUT", "/api/settings/relation-rule", { rule }); setRule(body.rule); setSaved(body.rule); }
+    catch (e) { setError(e.display || { key: "errors.relationSave" }); }
+    finally { setBusy(false); }
+  };
+  if (!open) {
+    return <button type="button" className="link-button" data-testid="relation-rule-open" onClick={() => setOpen(true)}>
+      {t("relations.rule")}
+    </button>;
+  }
+  return <div className="relation-rule" data-testid="relation-rule">
+    <label className="prompt-editor-label" htmlFor="relation-rule-text">{t("relations.rule")}</label>
+    <p className="composer-note">{t("relations.ruleHint")}</p>
+    {rule !== null && <textarea id="relation-rule-text" data-testid="relation-rule-text" className="prompt-textarea relation-description"
+      maxLength={4000} value={rule} disabled={busy} placeholder={t("relations.rulePlaceholder")}
+      onChange={(e) => setRule(e.target.value)} />}
+    <div className="dialog-actions">
+      <button type="button" className="btn btn-primary" data-testid="relation-rule-save"
+        disabled={busy || rule === null || rule === saved} onClick={save}>{t("relations.ruleSave")}</button>
+      <button type="button" className="btn btn-secondary" onClick={() => setOpen(false)}>{t("relations.cancel")}</button>
+    </div>
+    {saved !== null && rule === saved && <p className="composer-note" role="status">{t(saved ? "relations.ruleActive" : "relations.ruleEmpty")}</p>}
+    {error && <p role="alert">{t(error.key, error.params)}</p>}
+  </div>;
+}
+
 /** The relations of a node, from the node dialog. */
 export function NodeRelations({ node }) {
   const { t } = useTranslation();
@@ -166,6 +207,7 @@ export function NodeRelations({ node }) {
   return (
     <section className="node-relations" data-testid="node-relations">
       <h3 className="section-label">{t("relations.title")}</h3>
+      <RelationRule />
       {relations.length === 0 && <p className="composer-note">{t("relations.none")}</p>}
       <ul className="relation-list">
         {relations.map((rel) => <RelationRow key={rel.id} rel={rel} onChanged={refresh} />)}

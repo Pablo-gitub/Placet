@@ -424,6 +424,12 @@
     "deleteConfirm": "Eliminare questa relazione? I prossimi prompt richiederanno la tua revisione.",
     "createFromRequest": "Crea relazione",
     "explanation": "Questa richiesta prosegue come sempre. La relazione vale per le prossime richieste tra queste due sessioni.",
-    "created": "Relazione creata: vale per le prossime richieste."
+    "created": "Relazione creata: vale per le prossime richieste.",
+    "rule": "Regola generale per le relazioni automatiche",
+    "ruleHint": "Gli agenti devono leggerla prima di ogni prompt inviato su una relazione automatica; Placet non invia nulla finché non la confermano. Vale per tutte le relazioni.",
+    "rulePlaceholder": "Es. Prima di lanciare processi, se hai dubbi importanti, esponi le tue domande all'utente con gli strumenti di Placet.",
+    "ruleSave": "Salva regola",
+    "ruleActive": "Regola attiva: gli agenti la leggono prima di ogni invio automatico.",
+    "ruleEmpty": "Nessuna regola: le relazioni automatiche consegnano subito."
   }
 }

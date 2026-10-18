@@ -121,11 +121,12 @@ def test_send_to_agent_reads_prompt_file(tmp_path):
     prompt_file = tmp_path / "PROMPT_GEMINI.md"
     prompt_file.write_text("# Compito\n\n- verifica i casi limite\n", encoding="utf-8")
     with patch.object(client, "send_to_agent", return_value={"id": 1}) as send:
-        placet_send_to_agent("gemini", prompt_file=str(prompt_file), context="perché")
+        placet_send_to_agent("gemini", prompt_file=str(prompt_file))
     kwargs = send.call_args.kwargs
     assert kwargs["prompt"].startswith("# Compito")
     assert kwargs["prompt_source"] == "PROMPT_GEMINI.md"
-    assert kwargs["context"] == "perché"
+    # RF-05b: the reviewer reads the sender's chat; no separate context.
+    assert "context" not in kwargs
 
 
 def test_send_to_agent_rejects_unsafe_prompt_files(tmp_path):

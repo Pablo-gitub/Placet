@@ -60,7 +60,7 @@ def _format_error(e: Exception) -> str:
 @mcp.tool()
 def placet_ask_human(
     question: str,
-    context: str,
+    context: Optional[str] = None,
     options: Optional[List[str]] = None,
     multiple: bool = False,
     timeout_seconds: int = 180,
@@ -68,9 +68,9 @@ def placet_ask_human(
 ) -> str:
     """
     Ask the human supervisor for a decision, approval, or choice on their phone.
-    `context` is required: explain in 1–3 sentences what you are doing, the
-    consequences of each answer, and why a decision is needed. A bare
-    "Proceed?" cannot be evaluated without context.
+    `context` (recommended): in 1–3 sentences, what you are doing, the
+    consequences of each answer, and why a decision is needed. The user can
+    also read your chat, but a bare "Proceed?" is hard to evaluate.
     Without `options`, the user can approve/reject and add a free-text note.
     With `options`, the user selects one (`multiple=False`) or more options.
     The UI always includes an Other/free-text choice; do not add one yourself.
@@ -97,30 +97,38 @@ def placet_ask_human(
 
 @mcp.tool()
 def placet_send_to_agent(
-    target_agent: str,
+    target_agent: Optional[str] = None,
     prompt: Optional[str] = None,
     prompt_file: Optional[str] = None,
-    context: Optional[str] = None,
+    target_node: Optional[str] = None,
+    relation_type: Optional[str] = None,
+    rule_acknowledged: bool = False,
+    target_session: Optional[str] = None,
     timeout_seconds: int = 180,
     priority: Optional[PriorityLevel] = None,
-    target_session: Optional[str] = None,
 ) -> str:
     """
-    Send a prompt to another session of a registered agent, including another
-    session of the same provider when routing rules allow it.
-    `prompt` is the Markdown text the recipient receives. Alternatively,
-    `prompt_file` is an absolute .md/.txt path whose contents become the prompt.
-    `context` explains the request to the human reviewer only; it is NEVER
-    delivered to the recipient. Put all task instructions in the prompt.
-    Routing and human approval follow AGENTS.md. The human may edit or reject
-    the prompt. `target_session` selects an exact session from placet_list_agents;
-    otherwise Placet chooses an available session. Never target this session.
-    The tool waits up to `timeout_seconds`. For PENDING, APPROVED, DELIVERING,
-    or EXECUTING, end the turn without resending. A completed task may still
-    have its reply withheld for human approval: COMPLETED with no `response`
-    does not authorize bypassing that approval or repeating the request. Wait
-    for Placet's outcome message. Automatic reply return requires explicit
-    authorization; never fetch the other session's files to bypass it.
+    Send a prompt to another session through Placet.
+    `prompt` is the Markdown text the recipient receives (or `prompt_file`, an
+    absolute .md/.txt path). Put every instruction in the prompt: the recipient
+    sees only the prompt.
+    Address the recipient in one of these ways:
+    - `target_node` (+ `relation_type` when several types connect you): a node
+      name from placet_list_relations. Prefer this when you have relations.
+    - `target_agent` (+ optional `target_session` from placet_list_agents): an
+      ad hoc request, always reviewed by the human.
+    The result says `delivery_policy`: "manual" means the human may edit or
+    reject the prompt; "automatic" means it was delivered without review.
+    If the result status is RULE_ACKNOWLEDGEMENT_REQUIRED, NOTHING was sent:
+    read `rule` now. If it tells you to stop or to ask the human first (with
+    placet_ask_human), do that. Only otherwise send the same prompt again with
+    rule_acknowledged=true. Never set rule_acknowledged without reading it.
+    The tool waits up to `timeout_seconds`. For PENDING, APPROVED, DELIVERING
+    or EXECUTING, end the turn without resending. COMPLETED with no `response`
+    means the reply awaits the human's approval: do not repeat the request or
+    fetch the other session's files to bypass it. Placet posts the outcome in
+    this session with a message beginning with "[Placet]". Never target this
+    session.
     """
     try:
         prompt_source = None
@@ -128,16 +136,37 @@ def placet_send_to_agent(
             prompt, prompt_source = read_prompt_file(prompt_file)
         if not prompt:
             raise ValueError("Specify prompt or prompt_file.")
+        if not (target_node or target_agent):
+            raise ValueError("Specify target_node or target_agent.")
         res = client.send_to_agent(
             target_agent=target_agent,
             prompt=prompt,
-            context=context,
             timeout_seconds=timeout_seconds,
             priority=priority,
             target_session=target_session,
             prompt_source=prompt_source,
+            target_node=target_node,
+            relation_type=relation_type,
+            rule_acknowledged=rule_acknowledged,
         )
         return json.dumps(res, indent=2, ensure_ascii=False)
+    except Exception as e:
+        return _format_error(e)
+
+
+@mcp.tool()
+def placet_list_relations(session_id: Optional[str] = None) -> str:
+    """
+    List the relations this session can use (RFC-08): for each, the target
+    node, the relation type and its description (when and why to contact that
+    session), `approval` ("automatic": delivered without human review;
+    "manual": the human reviews), and `reply_policy` for the way back. Also
+    returns the user's general `rule` for automatic relations: follow it.
+    Call it before sending to another session. Pass `session_id` if Placet
+    cannot tell which session you are.
+    """
+    try:
+        return json.dumps(client.list_relations(session_id), indent=2, ensure_ascii=False)
     except Exception as e:
         return _format_error(e)
 
