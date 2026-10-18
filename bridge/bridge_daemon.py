@@ -16,6 +16,7 @@ from bridge.attachments import AttachmentError
 from bridge.transcripts import TranscriptError, read_attachment, read_transcript
 from bridge import steer as steer_files
 from bridge.titles import codex_titles
+from bridge.claude_desktop import ClaudeDesktopWake
 from hooks.placet_common import active
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,7 @@ class BridgeDaemon:
         store: Optional[BridgeStore] = None,
         channels: Optional[dict] = None,
         spool=None,
+        claude_waker=None,
     ):
         # Direct database access (db/config) is the single-process dev mode;
         # in production pass an HttpStore.
@@ -52,6 +54,8 @@ class BridgeDaemon:
         self.channels = channels if channels is not None else default_channels()
         # forwards the hooks' local event queue to the backend
         self.spool = spool
+        self.claude_waker = claude_waker if claude_waker is not None else ClaudeDesktopWake()
+        self._claude_wake_at: dict = {}
         self._reconciled_at: dict = {}
         self._folders_at = -FOLDERS_EVERY_SECONDS
         self._excluded: Optional[Set[str]] = None
@@ -326,12 +330,30 @@ class BridgeDaemon:
                 self._steer_orphans.pop(request_id, None)
         return inserted
 
+    def wake_claude_sessions(self, sessions: List[dict]) -> None:
+        """Load only: the engine's asyncRewake hook owns all inbox delivery."""
+        now = time.monotonic()
+        current = {s['id'] for s in sessions}
+        self._claude_wake_at = {k: v for k, v in self._claude_wake_at.items() if k in current}
+        for session in sessions:
+            sid = session['id']
+            if now - self._claude_wake_at.get(sid, -300) < 300:
+                continue
+            self._claude_wake_at[sid] = now
+            try:
+                if self.claude_waker.open(sid, session.get('cwd')):
+                    logger.info('Requested Claude conversation opening for %s; waiting for its hook.', sid)
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+                logger.warning('Cannot open Claude session %s (%s); mail stays pending. Open it manually.',
+                               sid, type(exc).__name__)
+
     def run_loop_step(self) -> int:
         # At most one injection per session per tick, outcomes first: they
         # unblock work that is already waiting.
         work: Work = self.store.work()
         self.check_folders(work.folders)
         self.refresh_titles(work.titles)
+        self.wake_claude_sessions(work.claude_wake_sessions)
         busy_sessions: Set[str] = set()
         busy_agents = set(work.busy_agents)
         delivered = self.process_pending_results(busy_sessions, work.results, busy_agents)

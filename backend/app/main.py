@@ -11,9 +11,9 @@ from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, status, Requ
 from fastapi import Path as FastAPIPath
 from fastapi.middleware.cors import CORSMiddleware
 
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
-from fastapi.staticfiles import StaticFiles
+from backend.app.pwa import mount_pwa
 from sse_starlette.sse import EventSourceResponse
 
 
@@ -857,7 +857,8 @@ def create_app(
                 db.set_execution(session.turn_request_id, "interrupted", actor=f"{who.actor}:hook",
                                  source=source)
                 notify_change(session.turn_request_id)
-            if (payload.provider or session.provider) in SUSPENDING_PROVIDERS:
+            if ((payload.provider or session.provider) in SUSPENDING_PROVIDERS
+                    or (session.provider == 'claude-code' and session.entrypoint == 'claude-desktop')):
                 db.suspend_session(session_id)
             else:
                 db.end_session(session_id)
@@ -1173,6 +1174,9 @@ def create_app(
             "injections": injections,
             "results": results,
             "busy_agents": sorted(set(db.busy_agents(AGENT_BUSY_TTL_SECONDS)) | set(busy)),
+            "claude_wake_sessions": [
+                {"id": s.id, "cwd": s.cwd} for s in db.claude_sessions_to_wake()
+            ],
             # Sessions the bridge wakes itself (Codex, Antigravity) with mail.
             "sessions": [
                 {"id": s.id, "agent_id": s.agent_id, "provider": s.provider}
@@ -1385,19 +1389,7 @@ def create_app(
 
     # Serve built PWA if frontend/dist exists
     dist_path = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
-    if dist_path.exists():
-        assets_path = dist_path / "assets"
-        if assets_path.exists():
-            app.mount("/assets", StaticFiles(directory=assets_path), name="assets")
-
-        @app.get("/{full_path:path}")
-        async def serve_pwa(full_path: str):
-            if full_path.startswith("api/"):
-                raise HTTPException(status_code=404, detail="API route not found")
-            file_candidate = dist_path / full_path
-            if file_candidate.is_file():
-                return FileResponse(file_candidate)
-            return FileResponse(dist_path / "index.html")
+    mount_pwa(app, dist_path)
 
     return app
 

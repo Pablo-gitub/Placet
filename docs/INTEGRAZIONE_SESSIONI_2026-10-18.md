@@ -67,3 +67,16 @@ creare una richiesta; #53, incarico esplicito, tradotto nella richiesta #54
 verso lo stesso ID e completato con TEST-COLLAB-OK. Il risultato valida
 questi due casi in Codex, non garantisce l'interpretazione di ogni messaggio
 ambiguo né costituisce una verifica equivalente sugli altri provider.
+
+## Aggiornamenti della PWA e cache
+
+Il server invia `Cache-Control: no-store` per la pagina iniziale, l'accesso
+diretto a index.html e i percorsi della SPA. Manifest, icone e asset senza
+versione richiedono rivalidazione; gli asset Vite con hash nel nome conservano
+la cache annuale immutable. Il cambio di build aggiorna i nomi dei file.
+I file mancanti sotto /assets restano 404, senza restituire HTML al loro posto.
+
+La regola vale quando il client riceve la risposta aggiornata: non può revocare
+una vecchia pagina già conservata da iPadOS/iOS né ricarica una pagina aperta.
+La verifica HTTP automatizzata non sostituisce la riapertura reale della PWA
+sull'iPhone dopo l'installazione. Non è presente un service worker nel progetto.

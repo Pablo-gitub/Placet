@@ -182,7 +182,9 @@ function Outgoing({ req, session, onDelivery, onEdit }) {
           : req.delivery_mode === "now" && ["APPROVED", "DELIVERING"].includes(req.status)
             ? OUTGOING_STATES.NOW
             : req.status === "APPROVED" && session?.suspended_at
-              ? "In attesa: parte quando riapri la conversazione in Codex"
+              ? session.provider === "claude-code"
+                ? "In attesa: Placet prova a riaprire la conversazione in Claude"
+                : "In attesa dell’accodamento e della riapertura in Codex"
               : req.status === "EXECUTING" && session?.provider === "codex"
                 ? "Accodato in Codex: esecuzione non ancora vista, non si può più ritirare"
                 : OUTGOING_STATES[req.status]}

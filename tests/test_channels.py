@@ -183,3 +183,15 @@ def test_open_failure_after_acceptance_never_releases_or_resends(failure):
     channel.open_conversation.assert_called_once()
     store.release_injection.assert_not_called()
     store.runtime_ready.assert_not_called()
+
+
+def test_codex_waiting_session_is_queued_without_opening_a_window():
+    channel = CodexChannel()
+    channel.send = MagicMock()
+    channel.open_conversation = MagicMock()
+    store = MagicMock()
+    store.take_session_mail.return_value = SessionMail('injection', 101, 'test')
+    daemon = BridgeDaemon(store=store, tmux=MagicMock(), channels={'codex': channel})
+    assert daemon.process_session_mail([{'id': 'waiting', 'provider': 'codex'}]) == 1
+    channel.send.assert_called_once_with('waiting', 'test')
+    channel.open_conversation.assert_not_called()

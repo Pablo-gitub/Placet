@@ -212,6 +212,17 @@ class Database:
                     "UPDATE sessions SET suspended_at = ended_at, ended_at = NULL"
                     " WHERE provider = 'codex' AND ended_at IS NOT NULL;"
                 )
+            cursor.execute("CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY)")
+            migration = 'claude_desktop_end_is_suspension_v1'
+            if cursor.execute("SELECT 1 FROM schema_migrations WHERE name = ?", (migration,)).fetchone() is None:
+                # SessionEnd stops the desktop engine, not the saved conversation.
+                # CLI sessions and unknown entrypoints remain genuinely closed.
+                cursor.execute(
+                    "UPDATE sessions SET suspended_at = COALESCE(suspended_at, ended_at),"
+                    " ended_at = NULL, waiter_seen_at = NULL WHERE provider = 'claude-code'"
+                    " AND entrypoint = 'claude-desktop' AND ended_at IS NOT NULL"
+                )
+                cursor.execute("INSERT INTO schema_migrations (name) VALUES (?)", (migration,))
             # The three aspects of a request (RF-29); older rows are backfilled
             # from their status once.
             if "delivery_state" not in cols:
@@ -1414,7 +1425,7 @@ class Database:
             ).fetchone()
             return row["id"] if row else None
 
-    def inbox_has_message(self, session: SessionModel) -> bool:
+    def inbox_has_message(self, session: SessionModel, explicit_only: bool = False) -> bool:
         """Whether take_inbox_message would hand something out now (read only)."""
         if session.state != "idle" or session.ended_at is not None or session.excluded:
             return False
@@ -1423,7 +1434,9 @@ class Database:
             cursor.execute(self._OUTCOMES_SQL, (session.id, RequestStatus.PENDING.value))
             outcome_ids = [r["id"] for r in cursor.fetchall()]
             cursor.execute(
-                self._INJECTIONS_SQL,
+                (self._INJECTIONS_SQL.replace(
+                    "(recipient_session_id = ? OR recipient_session_id IS NULL)",
+                    "recipient_session_id = ?") if explicit_only else self._INJECTIONS_SQL),
                 (RequestStatus.APPROVED.value, session.agent_id, session.id, session.id),
             )
             if cursor.fetchone() is not None and self.request_in_flight(session.id) is None:
@@ -1431,6 +1444,12 @@ class Database:
         return any(
             (req := self.get_request(i)) is not None and is_settled(req) for i in outcome_ids
         )
+
+    def claude_sessions_to_wake(self) -> List[SessionModel]:
+        """Only explicitly addressed idle desktop sessions with no fresh waiter."""
+        return [s for s in self.list_sessions()
+                if s.provider == 'claude-code' and s.entrypoint == 'claude-desktop'
+                and not s.reachable and self.inbox_has_message(s, explicit_only=True)]
 
     def bridge_sessions_with_mail(self, include_suspended: bool = False) -> List[SessionModel]:
         """Open sessions the bridge wakes (Codex, Antigravity) with a message waiting."""

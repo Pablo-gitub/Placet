@@ -81,3 +81,43 @@ def test_codex_sessions_ended_before_become_suspended(tmp_path):
     codex, claude = db.get_session("cx1"), db.get_session("c1")
     assert codex.ended_at is None and codex.suspended_at is not None
     assert claude.ended_at is not None and claude.suspended_at is None
+
+@pytest.mark.asyncio
+async def test_claude_desktop_end_suspends_and_can_receive_mail(setup):
+    app, db = setup
+    sid = 'e24d69ad-faf5-43c9-94c4-a8e8a6e886a0'
+    await event(app, 'claude', sid, event='start', provider='claude-code',
+                entrypoint='claude-desktop', cwd='/lab')
+    await event(app, 'claude', sid, event='end')
+    session = db.get_session(sid)
+    assert session.ended_at is None and session.suspended_at is not None
+    assert not session.reachable
+    response = await write(app, sid, 'wake existing conversation')
+    assert response.status_code == 201
+    assert [s.id for s in db.claude_sessions_to_wake()] == [sid]
+    await event(app, 'claude', sid, event='stop')
+    assert db.get_session(sid).suspended_at is not None
+    await event(app, 'claude', sid, event='start')
+    db.touch_waiter(sid)
+    assert db.get_session(sid).reachable
+    assert db.claude_sessions_to_wake() == []
+
+
+def test_old_closed_claude_desktop_recovers_once_without_reopening_cli(tmp_path):
+    path = str(tmp_path / 'placet.db')
+    db = Database(path)
+    db.init_db()
+    db.upsert_session('desktop', 'claude', provider='claude-code', entrypoint='claude-desktop')
+    db.upsert_session('cli', 'claude', provider='claude-code', entrypoint='cli')
+    for sid in ('desktop', 'cli'):
+        db.end_session(sid)
+    with sqlite3.connect(path) as conn:
+        conn.execute('DELETE FROM schema_migrations WHERE name = ?', ('claude_desktop_end_is_suspension_v1',))
+    db.init_db()
+    desktop, cli = db.get_session('desktop'), db.get_session('cli')
+    assert desktop.ended_at is None and desktop.suspended_at is not None
+    assert cli.ended_at is not None and cli.suspended_at is None
+    # A later genuine closure is not repeatedly undone at every startup.
+    db.end_session('desktop')
+    db.init_db()
+    assert db.get_session('desktop').ended_at is not None

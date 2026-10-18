@@ -12,20 +12,19 @@ import {
 } from "./sessionInfo";
 
 /**
- * Choose a provider, see its open sessions, tick the ones to follow in the
+ * Choose a provider, see all its sessions, tick the ones to follow in the
  * home (RF-41). Sessions already added are ticked.
  */
 export default function AddSessionsDialog({ sessions, onToggle, onOpen, onClose }) {
-  const open = sessions.filter((s) => !s.ended_at);
   const providers = [
     ...PROVIDERS,
-    ...[...new Map(open.map((s) => [providerOf(s).key, providerOf(s)])).values()].filter(
+    ...[...new Map(sessions.map((s) => [providerOf(s).key, providerOf(s)])).values()].filter(
       (p) => !PROVIDERS.some((known) => known.key === p.key)
     ),
   ];
-  const firstWithSessions = providers.find((p) => open.some((s) => providerOf(s).key === p.key));
+  const firstWithSessions = providers.find((p) => sessions.some((s) => providerOf(s).key === p.key));
   const [provider, setProvider] = useState((firstWithSessions || providers[0]).key);
-  const listed = open.filter((s) => providerOf(s).key === provider).sort(byActivity);
+  const listed = sessions.filter((s) => providerOf(s).key === provider).sort(byActivity);
 
   return (
     <div className="dialog-backdrop" onClick={onClose}>
@@ -38,7 +37,7 @@ export default function AddSessionsDialog({ sessions, onToggle, onOpen, onClose 
         onClick={(e) => e.stopPropagation()}
       >
         <div className="dialog-header">
-          <h2>Sessioni aperte</h2>
+          <h2>Sessioni da seguire</h2>
           <button type="button" className="icon-button" aria-label="Chiudi" onClick={onClose}>
             <X size={18} />
           </button>
@@ -55,14 +54,15 @@ export default function AddSessionsDialog({ sessions, onToggle, onOpen, onClose 
               onClick={() => setProvider(p.key)}
             >
               {p.label}
-              <span className="provider-count">{open.filter((s) => providerOf(s).key === p.key).length}</span>
+              <span className="provider-count">{sessions.filter((s) => providerOf(s).key === p.key).length}</span>
             </button>
           ))}
         </div>
         <div className="dialog-body">
+          <p className="empty-hint">La spunta mostra la sessione nella Home, anche se chiusa. Toglila per nasconderla.</p>
           {listed.length === 0 && (
             <p className="empty-hint" data-testid="no-open-sessions">
-              Nessuna sessione aperta. Le sessioni compaiono qui quando gli hook di Placet sono attivi.
+              Nessuna sessione registrata per questo provider.
             </p>
           )}
           {listed.map((s) => {

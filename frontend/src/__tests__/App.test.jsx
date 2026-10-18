@@ -128,6 +128,29 @@ describe("Placet PWA", () => {
     expect(within(dialog).getByTestId("provider-tab-antigravity")).toHaveTextContent("0");
   });
 
+  it("lets the user remove a closed followed session without changing another session with the same title", async () => {
+    const closed = session("closed", { title: "Primo sviluppatore", pinned: true, ended_at: ago(10) });
+    const open = session("open", { title: "Primo sviluppatore", pinned: true });
+    const fetchMock = setup([
+      ["/api/sessions?include_ended=true", [closed, open]],
+      [(url, o) => url === "/api/sessions/closed/pin" && o.method === "PUT",
+        { ...closed, pinned: false }],
+    ]);
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId("session-row-closed")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("open-add-sessions"));
+    const dialog = screen.getByTestId("add-sessions-dialog");
+    expect(within(dialog).getByRole("heading", { name: "Sessioni da seguire" })).toBeInTheDocument();
+    expect(within(dialog).getByTestId("pick-closed")).toHaveTextContent("Chiusa");
+    expect(within(dialog).getByTestId("pick-toggle-closed")).toBeChecked();
+    fireEvent.click(within(dialog).getByTestId("pick-toggle-closed"));
+    await waitFor(() => expect(screen.queryByTestId("session-row-closed")).toBeNull());
+    expect(screen.getByTestId("session-row-open")).toBeInTheDocument();
+    expect(within(dialog).getByTestId("pick-toggle-open")).toBeChecked();
+    expect(within(dialog).getByTestId("pick-toggle-closed")).not.toBeChecked();
+    expect(fetchMock.mock.calls.filter(([url, o]) => url.endsWith("/pin") && o.method === "PUT")).toHaveLength(1);
+  });
+
   it("opens a session's conversation with its question at the bottom", async () => {
     setup();
     render(<App />);

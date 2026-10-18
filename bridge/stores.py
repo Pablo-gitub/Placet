@@ -56,8 +56,9 @@ class Work:
     # before they got in: {"request_id", "session_id", "provider"}.
     steer: List[dict] = field(default_factory=list)
     steer_waiting: List[dict] = field(default_factory=list)
-    # Suspended Codex sessions; considered only by the opt-in desktop adapter.
+    # Suspended Codex sessions: queue once, then request native opening.
     wake_sessions: List[dict] = field(default_factory=list)
+    claude_wake_sessions: List[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -117,6 +118,8 @@ class LocalStore:
             lambda agent_id: getattr(self.config.get_agent(agent_id), "tmux_session", None),
         )
         return Work(
+            claude_wake_sessions=[{"id": s.id, "cwd": s.cwd}
+                                 for s in self.db.claude_sessions_to_wake()],
             wake_sessions=[{"id": s.id, "provider": s.provider, "suspended": True}
                            for s in self.db.bridge_sessions_with_mail(include_suspended=True)
                            if s.suspended_at is not None],
@@ -227,6 +230,7 @@ class HttpStore:
         resp.raise_for_status()
         data = resp.json()
         return Work(
+            claude_wake_sessions=list(data.get("claude_wake_sessions", [])),
             wake_sessions=list(data.get("wake_sessions", [])),
             injections=[RequestModel(**r) for r in data["injections"]],
             results=[RequestModel(**r) for r in data["results"]],

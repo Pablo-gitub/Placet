@@ -127,7 +127,9 @@ export default function Composer({ session, sessions = [], onSend, draft }) {
       {closed && <p className="composer-note">La sessione è chiusa: non puoi più scriverle.</p>}
       {suspended && (
         <p className="composer-note" data-testid="composer-suspended">
-          Codex ha sospeso la conversazione: il messaggio aspetta in Placet e parte quando la riapri nell’app.
+          {session.provider === "claude-code"
+            ? "Claude ha sospeso la conversazione. Quando invii, Placet prova a riaprirla; il messaggio resta in attesa finché torna raggiungibile."
+            : "Codex ha sospeso la conversazione. Quando invii, Placet accoda il messaggio e prova a riaprirla nell’app."}
         </p>
       )}
       {refiles.length > 0 && (
@@ -137,7 +139,9 @@ export default function Composer({ session, sessions = [], onSend, draft }) {
       )}
       {unreachable && (
         <p className="composer-note" data-testid="composer-unreachable">
-          La sessione non è raggiungibile ora: il messaggio partirà quando torna attiva.
+          {session.provider === "claude-code" && session.entrypoint === "claude-desktop"
+            ? "Quando invii, Placet prova a riaprire la conversazione in Claude. Se resta non raggiungibile, aprila nell’app: il messaggio rimane in attesa."
+            : "La sessione non è raggiungibile ora: il messaggio partirà quando torna attiva."}
         </p>
       )}
       {busy && (

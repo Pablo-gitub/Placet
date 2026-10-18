@@ -342,10 +342,21 @@ describe("suspended sessions and messages still in Placet", () => {
         message(3, "EXECUTING", { execution: "started" })] });
     await waitFor(() => expect(screen.getByText("ciao")).toBeInTheDocument());
     expect(screen.getByTestId("composer-suspended")).toBeInTheDocument();
-    expect(screen.getByTestId("outgoing-1")).toHaveTextContent("quando riapri la conversazione in Codex");
+    expect(screen.getByTestId("outgoing-1")).toHaveTextContent("riapertura in Codex");
     expect(screen.getByTestId("outgoing-2")).toHaveTextContent("Accodato in Codex");
     expect(screen.queryByTestId("cancel-2")).toBeNull();
     expect(screen.queryByTestId("outgoing-3")).toBeNull(); // its turn started: it is in the conversation
+  });
+
+  it("allows writing to a suspended Claude desktop conversation", async () => {
+    mockFetch([[transcriptOf("s1"), latest]]);
+    renderView({ session: { ...codex, provider: "claude-code", agent_id: "claude",
+      entrypoint: "claude-desktop" }, onSend: vi.fn(),
+      requests: [message(1, "APPROVED")] });
+    await waitFor(() => expect(screen.getByText("ciao")).toBeInTheDocument());
+    expect(screen.getByTestId("composer-suspended")).toHaveTextContent("Claude ha sospeso");
+    expect(screen.getByTestId("outgoing-1")).toHaveTextContent("riaprire la conversazione in Claude");
+    expect(screen.getByPlaceholderText(/Scrivi alla sessione/)).not.toBeDisabled();
   });
 
   it("Modifica withdraws the message and puts it back in the composer", async () => {
