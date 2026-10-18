@@ -49,7 +49,7 @@ ACK_TIMEOUT_SECONDS = 90.0
 MAX_DELIVERY_ATTEMPTS = 3
 # One request at a time per session (RF-29b). Time never frees the queue: a
 # delivered request whose turn is not seen starting within this long only
-# raises a warning ("avvio non confermato"); the queue moves on with a proof
+# raises a warning ("start unconfirmed"); the queue moves on with a proof
 # that the turn ended, or when the user says so.
 START_UNCONFIRMED_SECONDS = 120.0
 # An agent that declared itself busy is trusted for at most this long (a

@@ -133,7 +133,7 @@ def test_install_merges_and_is_idempotent(tmp_path):
     assert agy["placet"]["Stop"][0]["command"].endswith("antigravity.py --agent gemini --event Stop")
 
     # A second run changes nothing, and makes no backup.
-    assert all("già a posto" in line for line in run_install(tmp_path))
+    assert all("already up to date" in line for line in run_install(tmp_path))
     backups = list(tmp_path.rglob("*.bak-placet-*"))
     assert len(backups) == 2  # claude and antigravity existed before the first run
 
@@ -158,7 +158,7 @@ def test_a_broken_file_is_never_overwritten(tmp_path):
 
 def test_dry_run_writes_nothing(tmp_path):
     out = run_install(tmp_path, "--dry-run")
-    assert all("verrebbe aggiornato" in line for line in out)
+    assert all("would be updated" in line for line in out)
     assert not list(tmp_path.rglob("*.json"))
 
 

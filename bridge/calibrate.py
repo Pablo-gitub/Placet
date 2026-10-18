@@ -7,7 +7,7 @@ busy_patterns in AGENTS.md against the real agent TUI.
 
 Try it with the agent idle at an empty prompt, while it is working, while
 you are typing, and with a menu or dialog open: only the first must say
-LIBERA.
+IDLE.
 """
 import argparse
 import time
@@ -20,11 +20,11 @@ def report(tmux: TmuxController, session: str, idle_patterns, busy_patterns) -> 
     check = tmux.check_idle(session, idle_patterns, busy_patterns)
     lines = [line.rstrip() for line in check.screen.splitlines() if line.strip()]
     tail = lines[-TmuxController.IDLE_TAIL_LINES:]
-    print(f"--- ultime {len(tail)} righe non vuote di {session}:")
+    print(f"--- last {len(tail)} non-empty lines from {session}:")
     for line in tail:
         mark = "=>" if line == check.matched_line else "  "
         print(f"{mark} {line}")
-    print(f"--- verdetto: {'LIBERA' if check.idle else 'OCCUPATA'} ({check.reason})")
+    print(f"--- verdict: {'IDLE' if check.idle else 'BUSY'} ({check.reason})")
 
 
 def main() -> None:
@@ -41,8 +41,8 @@ def main() -> None:
     if not tmux.session_exists(spec.tmux_session):
         raise SystemExit(f"tmux session {spec.tmux_session!r} is not running.")
 
-    print(f"idle_patterns: {spec.idle_patterns or '(prompt di shell)'}")
-    print(f"busy_patterns aggiuntivi: {spec.busy_patterns or '-'}")
+    print(f"idle_patterns: {spec.idle_patterns or '(shell prompt)'}")
+    print(f"additional busy_patterns: {spec.busy_patterns or '-'}")
     while True:
         report(tmux, spec.tmux_session, spec.idle_patterns, spec.busy_patterns)
         if not args.watch:

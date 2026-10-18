@@ -22,22 +22,22 @@ SUFFIXES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "a
 
 def validate_uploads(files):
     if not 1 <= len(files) <= MAX_FILES:
-        raise AttachmentError("too_large", "Scegli da 1 a 4 allegati.")
+        raise AttachmentError("too_large", "Choose between 1 and 4 attachments.")
     decoded, total = [], 0
     for item in files:
         encoded = item.get("data", "")
         if len(encoded) > ((MAX_FILE_BYTES + 2) // 3) * 4:
-            raise AttachmentError("too_large", "Ogni allegato può occupare al massimo 10 MB.")
+            raise AttachmentError("too_large", "Each attachment must be at most 10 MB.")
         try:
             data = base64.b64decode(encoded, validate=True)
         except (ValueError, binascii.Error):
-            raise AttachmentError("unsupported", "Allegato non leggibile.") from None
+            raise AttachmentError("unsupported", "Unreadable attachment.") from None
         total += len(data)
         if len(data) > MAX_FILE_BYTES or total > MAX_TOTAL_BYTES:
-            raise AttachmentError("too_large", "Limite di 10 MB per file e 20 MB per messaggio.")
+            raise AttachmentError("too_large", "Limit: 10 MB per file and 20 MB per message.")
         mime = check_content(data)
         # Names are display data only, never interpreted as filesystem paths.
-        name = str(item.get("name") or "allegato")[:200]
+        name = str(item.get("name") or "attachment")[:200]
         decoded.append((name, mime, data))
     return decoded
 
@@ -46,7 +46,7 @@ def _private_dir(path):
     path.mkdir(mode=0o700, exist_ok=True)
     info = path.lstat()
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
-        raise AttachmentError("forbidden", "La cartella degli allegati non è sicura.")
+        raise AttachmentError("forbidden", "Unsafe attachment directory.")
     path.chmod(0o700)
 
 
@@ -63,7 +63,7 @@ def save_uploads(session_id, files, home=None, cwd=None):
         if component == ".cache":
             root.mkdir(mode=0o700, exist_ok=True)
             if root.is_symlink() or not root.is_dir() or root.stat().st_uid != os.getuid():
-                raise AttachmentError("forbidden", "Cartella cache non sicura.")
+                raise AttachmentError("forbidden", "Unsafe cache directory.")
         else:
             _private_dir(root)
     folder = root / hashlib.sha256(session_id.encode()).hexdigest()
@@ -73,7 +73,7 @@ def save_uploads(session_id, files, home=None, cwd=None):
                  for _, mime, data in decoded}
     needed = sum(size for name, size in new_bytes.items() if not (folder / name).exists())
     if stored + needed > MAX_STORED_BYTES:
-        raise AttachmentError("too_large", "Spazio Placet per gli allegati esaurito (256 MB).")
+        raise AttachmentError("too_large", "Placet attachment storage limit reached (256 MB).")
     result = []
     for name, mime, data in decoded:
         digest = hashlib.sha256(data).hexdigest()
@@ -81,7 +81,7 @@ def save_uploads(session_id, files, home=None, cwd=None):
         if dest.exists() or dest.is_symlink():
             info = dest.lstat()
             if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or hashlib.sha256(dest.read_bytes()).hexdigest() != digest:
-                raise AttachmentError("forbidden", "Allegato salvato non valido.")
+                raise AttachmentError("forbidden", "Invalid stored attachment.")
         else:
             fd, temporary = tempfile.mkstemp(prefix=".upload-", dir=folder)
             try:

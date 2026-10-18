@@ -36,7 +36,7 @@ The conversation reader, action/tool summaries, outgoing and queue-hold states, 
 
 Bridge-owned media captions now carry `label_key` (`shared_file` or `generated_image`) with an English fallback `text` for older clients. The UI translates only these recognized metadata labels; arbitrary captions and original transcript content remain unchanged. Older bridges without `label_key` continue to display their original caption text.
 
-Notifications and generated conversation envelopes now use explicit backend English/Italian catalogs. MCP tool descriptions and share-file diagnostics are in English. Canonical documentation and remaining legacy CLI/provider diagnostics still need their English cleanup. Notifications and provider message wrappers still use their existing language. The new browser preference intentionally does not pretend to configure these server-side surfaces.
+Notifications and generated conversation envelopes use explicit backend English/Italian catalogs and the shared background-language preference described below. MCP tool descriptions, CLI output and bridge diagnostics are in English. Canonical documentation still needs its English cleanup. The browser interface preference remains independent of these server-side surfaces.
 
 ## Background language: shared installation setting
 
@@ -105,3 +105,9 @@ The shared-language panel was exercised in Chromium at 390px and 1280px with moc
 Known pre-existing limitation: crossing the 900px mobile/desktop layout boundary while an approval is being edited recreates the form, discarding its unsent local choices. Locale switching within a layout preserves them. Responsive draft retention requires a separate fix; the viewport checks do not claim that behavior is supported.
 
 Continue with one user workflow at a time. Complete catalog coverage before claiming an entirely English interface or changing the public readiness status.
+
+## Developer diagnostics
+
+Hook installation (including dry-run, idempotent reinstall and removal), tmux calibration and idle-check reasons use English diagnostic text. Upload validation and private-cache errors also use English diagnostics; their stable error codes continue to select localized PWA messages. The generated fallback filename is `attachment`; filenames supplied by users remain unchanged.
+
+These changes do not alter provider hook configuration, approval requirements, idle detection, transfer limits or filesystem checks. The historical audit reason `progetto escluso` remains unchanged for compatibility, as do bilingual transcript parser patterns and user-authored content. Diagnostic output is intended for developers and is not a localized product interface.

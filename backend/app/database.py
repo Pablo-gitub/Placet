@@ -1408,7 +1408,7 @@ class Database:
         """
         Applies what the bridge found: sessions in an excluded folder are
         hidden and get nothing delivered, their messages not yet delivered
-        are cancelled ("progetto escluso"); a folder no longer excluded comes
+        are cancelled with the historical project-exclusion reason; a folder no longer excluded comes
         back. Returns (sessions changed, requests cancelled).
         """
         now = datetime.now(timezone.utc).isoformat()

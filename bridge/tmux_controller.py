@@ -137,12 +137,12 @@ class TmuxController:
     ) -> IdleCheck:
         screen = self.strip_ansi(self.capture_pane(session_name))
         if not screen.strip():
-            return IdleCheck(False, "schermo vuoto o sessione non leggibile", screen)
+            return IdleCheck(False, "empty screen or unreadable session", screen)
 
         lower = screen.lower()
         for marker in list(DEFAULT_BUSY_PATTERNS) + list(busy_patterns or []):
             if marker.lower() in lower:
-                return IdleCheck(False, f"indicatore di lavoro: {marker!r}", screen, busy_marker=marker)
+                return IdleCheck(False, f"busy indicator: {marker!r}", screen, busy_marker=marker)
 
         lines = [line.rstrip() for line in screen.splitlines() if line.strip()]
         if idle_patterns:
@@ -156,15 +156,15 @@ class TmuxController:
             None,
         )
         if matched is None:
-            return IdleCheck(False, "nessun prompt di input vuoto riconosciuto", screen)
+            return IdleCheck(False, "no empty input prompt recognized", screen)
 
         if self.stability_seconds > 0:
             time.sleep(self.stability_seconds)
             again = self.strip_ansi(self.capture_pane(session_name))
             if again != screen:
-                return IdleCheck(False, "lo schermo sta cambiando", screen, matched_line=matched)
+                return IdleCheck(False, "screen is changing", screen, matched_line=matched)
 
-        return IdleCheck(True, "prompt vuoto e schermo stabile", screen, matched_line=matched)
+        return IdleCheck(True, "empty prompt and stable screen", screen, matched_line=matched)
 
     def is_session_idle(
         self,

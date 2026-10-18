@@ -151,15 +151,15 @@ def apply(provider: str, hooks_dir: str, uninstall: bool, dry_run: bool, home: P
     current = load(path)
     updated = merge(current, ours(hooks_dir), hooks_dir, uninstall)
     if updated == current:
-        return f"{provider}: {path} già a posto"
+        return f"{provider}: {path} already up to date"
     if dry_run:
-        return f"{provider}: {path} verrebbe aggiornato\n{json.dumps(updated, indent=2)}"
+        return f"{provider}: {path} would be updated\n{json.dumps(updated, indent=2)}"
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         backup = path.with_name(f"{path.name}.bak-placet-{time.strftime('%Y%m%d%H%M%S')}")
         shutil.copy2(path, backup)
     path.write_text(json.dumps(updated, indent=2) + "\n")
-    return f"{provider}: {path} {'ripulito' if uninstall else 'aggiornato'}"
+    return f"{provider}: {path} {'Placet hooks removed' if uninstall else 'updated'}"
 
 
 def main(argv=None) -> int:
@@ -173,7 +173,7 @@ def main(argv=None) -> int:
     status = 0
     for provider in [p.strip() for p in args.providers.split(",") if p.strip()]:
         if provider not in PROVIDERS:
-            print(f"{provider}: provider sconosciuto", file=sys.stderr)
+            print(f"{provider}: unknown provider", file=sys.stderr)
             status = 2
             continue
         try:
@@ -182,7 +182,7 @@ def main(argv=None) -> int:
             print(f"{provider}: {e}", file=sys.stderr)
             status = 1
     if not args.uninstall and not args.dry_run and "codex" in args.providers:
-        print("Codex: apri una sessione CLI (`codex`) e approva gli hook di Placet con /hooks.")
+        print("Codex: open a CLI session (`codex`) and review Placet hooks with /hooks.")
     return status
 
 
