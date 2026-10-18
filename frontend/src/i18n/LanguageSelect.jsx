@@ -13,7 +13,7 @@ export default function LanguageSelect() {
   return <select className="language-select" aria-label={t("language.label")}
     value={preference} onChange={change}>
     <option value="auto">{t("language.auto")}</option>
-    <option value="en">English</option>
-    <option value="it">Italiano</option>
+    <option value="en" title="English">EN</option>
+    <option value="it" title="Italiano">IT</option>
   </select>;
 }

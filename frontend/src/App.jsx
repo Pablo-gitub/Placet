@@ -398,9 +398,9 @@ export default function App() {
               <BackgroundLanguage />
             </>
           )}
-          <div className="live-indicator" data-testid="live-indicator">
+          <div className="live-indicator" data-testid="live-indicator" title={t(connected ? "app.live" : "app.reconnecting")}>
             <Radio size={12} className={connected ? "text-emerald-400 animate-pulse" : "text-amber-400"} />
-            {t(connected ? "app.live" : "app.reconnecting")}
+            <span className="live-label">{t(connected ? "app.live" : "app.reconnecting")}</span>
           </div>
         </div>
       </header>
