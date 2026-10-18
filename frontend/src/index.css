@@ -786,6 +786,7 @@ fieldset.options-list {
 .pick-label { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.1rem; cursor: pointer; }
 .pick-label strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-meta-line { font-size: 0.75rem; color: var(--text-muted); overflow-wrap: anywhere; }
+.session-model { display: block; }
 
 /* --- Session conversation ---------------------------------------------------------- */
 

@@ -395,3 +395,20 @@ describe("provider at its usage limit", () => {
     expect(screen.getByTestId("composer-limited")).toBeInTheDocument();
   });
 });
+
+describe("model and context", () => {
+  it("shows the model, effort and context of the session", async () => {
+    mockFetch([[transcriptOf("s1"), { ...latest, meta: {
+      model: "gpt-6.1-sol", effort: "low", context_tokens: 123558, context_window: 475000 } }]]);
+    renderView();
+    await waitFor(() => expect(screen.getByTestId("session-model")).toHaveTextContent("gpt-6.1-sol"));
+    expect(screen.getByTestId("session-model")).toHaveTextContent(/effort low/);
+    expect(screen.getByTestId("session-model")).toHaveTextContent(/26%/);
+  });
+
+  it("uses the model the hooks reported when the conversation has none", async () => {
+    mockFetch([[transcriptOf("s1"), latest]]);
+    renderView({ session: { ...session, provider: "antigravity", model: "gemini-3.8-flash-medium" } });
+    await waitFor(() => expect(screen.getByTestId("session-model")).toHaveTextContent("gemini-3.8-flash-medium"));
+  });
+});

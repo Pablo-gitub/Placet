@@ -58,7 +58,7 @@ def test_antigravity_turn_lifecycle(tmp_path):
     ])
     assert agy_event("SessionStart", payload(path)) == {
         "event": "start", "provider": "antigravity", "entrypoint": "antigravity", "cwd": "/home/p/lab",
-        "adapter": "antigravity.py/2"}
+        "adapter": "antigravity.py/2", "model": "gemini-x"}
     first = agy_event("PreInvocation", payload(path, invocationNum=0))
     assert first["event"] == "prompt" and first["request_id"] == 12
     assert agy_event("PreInvocation", payload(path, invocationNum="1")) is None

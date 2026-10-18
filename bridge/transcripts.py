@@ -497,6 +497,69 @@ def read_page(
         return {"messages": messages, "before": oldest if oldest > 0 else None, "end": complete}
 
 
+# Model, effort and context are near the end of the conversation file; a long
+# turn can push Codex's last turn_context further back, so look this far.
+META_MAX_BYTES = 16 * 1024 * 1024
+
+
+def _tail_objects(path: Path) -> Iterator[dict]:
+    """The JSON objects of a conversation file, newest first, within META_MAX_BYTES."""
+    with path.open("rb") as f:
+        end = f.seek(0, 2)
+        for offset, line in _lines_backwards(f, end):
+            if end - offset > META_MAX_BYTES:
+                return
+            # Skip huge lines (tool outputs) without parsing them.
+            if b'"turn_context"' not in line and b'"token_count"' not in line and b'"assistant"' not in line:
+                continue
+            try:
+                obj = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(obj, dict):
+                yield obj
+
+
+def session_meta(provider: str, path: Path) -> dict:
+    """
+    RF-61: the model, reasoning effort and context in use, as the latest
+    entries of the conversation say. Antigravity's files do not carry them:
+    its model comes from the hooks, on the session.
+    """
+    meta: dict = {}
+    try:
+        objects = _tail_objects(path)
+        if provider == "claude-code":
+            for obj in objects:
+                message = obj.get("message") if obj.get("type") == "assistant" else None
+                if not isinstance(message, dict) or obj.get("isSidechain") or not message.get("model"):
+                    continue
+                usage = message.get("usage") or {}
+                meta = {
+                    "model": message["model"],
+                    "effort": obj.get("perTurnEffort") or obj.get("effort"),
+                    "context_tokens": sum(int(usage.get(k) or 0) for k in (
+                        "input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")) or None,
+                }
+                break
+        elif provider == "codex":
+            for obj in objects:
+                payload = obj.get("payload") if isinstance(obj.get("payload"), dict) else {}
+                if obj.get("type") == "turn_context" and "model" not in meta:
+                    meta.update(model=payload.get("model"), effort=payload.get("effort"))
+                elif payload.get("type") == "token_count" and "context_tokens" not in meta:
+                    info = payload.get("info") or {}
+                    last = info.get("last_token_usage") or {}
+                    if last.get("input_tokens") is not None:
+                        meta.update(context_tokens=int(last["input_tokens"]),
+                                    context_window=info.get("model_context_window"))
+                if "model" in meta and "context_tokens" in meta:
+                    break
+    except OSError:
+        return {}
+    return {k: v for k, v in meta.items() if v is not None}
+
+
 def read_transcript(
     provider: Optional[str],
     session_id: str,
@@ -512,7 +575,10 @@ def read_transcript(
         raise TranscriptError("unsupported", f"Provider {provider!r} is not supported.")
     path = locate(resolved, session_id, home)
     page = read_page(path, PROVIDERS[resolved][1], before=before, after=after, limit=limit)
-    return {"session_id": session_id, "provider": resolved, **page}
+    out = {"session_id": session_id, "provider": resolved, **page}
+    if before is None:  # the newest page: the conversation's current state
+        out["meta"] = session_meta(resolved, path)
+    return out
 
 
 # --- Attachments ------------------------------------------------------------------------

@@ -274,6 +274,7 @@ class SessionModel(BaseModel):
     waiter_seen_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
     suspended_at: Optional[datetime] = None
+    model: Optional[str] = None
     # Last turn start or end: orders the PWA home by activity (RF-40).
     activity_at: Optional[datetime] = None
     # Added by the user to the PWA home (RF-41).

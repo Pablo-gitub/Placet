@@ -99,6 +99,8 @@ def build_event(event_name: str, payload: dict):
         "entrypoint": "antigravity",
         "cwd": workspaces[0] if workspaces else None,
         "adapter": ADAPTER,
+        # The model in use (RF-61), e.g. "gemini-3.8-flash-medium".
+        "model": payload.get("modelName") if isinstance(payload.get("modelName"), str) else None,
     }
     transcript = payload.get("transcriptPath") or ""
     if event_name == "SessionStart":

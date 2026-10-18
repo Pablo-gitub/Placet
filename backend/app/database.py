@@ -217,7 +217,8 @@ class Database:
             # pinned_at: the user added the session to the PWA home.
             # excluded_at: the bridge found a `.placet-off` for its folder (RF-45).
             # suspended_at: the app unloaded the conversation; it can be resumed.
-            for col in ("activity_at", "pinned_at", "excluded_at", "suspended_at"):
+            # model: the model in use as the hooks report it (Antigravity, RF-61).
+            for col in ("activity_at", "pinned_at", "excluded_at", "suspended_at", "model"):
                 if col not in session_cols:
                     cursor.execute(f"ALTER TABLE sessions ADD COLUMN {col} TEXT;")
             if "suspended_at" not in session_cols:
@@ -1175,6 +1176,7 @@ class Database:
             waiter_seen_at=waiter,
             ended_at=_ts(row["ended_at"]),
             suspended_at=_ts(row["suspended_at"]),
+            model=row["model"],
             activity_at=_ts(row["activity_at"]) or datetime.fromisoformat(row["started_at"]),
             pinned=row["pinned_at"] is not None,
             reachable=reachable and row["excluded_at"] is None,
@@ -1190,6 +1192,7 @@ class Database:
         cwd: Optional[str] = None,
         title: Optional[str] = None,
         tmux_session: Optional[str] = None,
+        model: Optional[str] = None,
     ) -> bool:
         """
         Registers a session or refreshes it. Returns False if the id is
@@ -1207,10 +1210,10 @@ class Database:
                 cursor.execute(
                     """
                     INSERT INTO sessions (id, agent_id, provider, entrypoint, cwd, title,
-                                          tmux_session, state, started_at, last_seen_at, activity_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?, ?)
+                                          tmux_session, model, state, started_at, last_seen_at, activity_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?, ?)
                     """,
-                    (session_id, agent_id, provider, entrypoint, cwd, title, tmux_session, now, now, now),
+                    (session_id, agent_id, provider, entrypoint, cwd, title, tmux_session, model, now, now, now),
                 )
             else:
                 cursor.execute(
@@ -1218,11 +1221,11 @@ class Database:
                     UPDATE sessions SET
                         provider = COALESCE(?, provider), entrypoint = COALESCE(?, entrypoint),
                         cwd = COALESCE(?, cwd), title = COALESCE(?, title),
-                        tmux_session = COALESCE(?, tmux_session),
+                        tmux_session = COALESCE(?, tmux_session), model = COALESCE(?, model),
                         last_seen_at = ?
                     WHERE id = ?
                     """,
-                    (provider, entrypoint, cwd, title, tmux_session, now, session_id),
+                    (provider, entrypoint, cwd, title, tmux_session, model, now, session_id),
                 )
             return True
 

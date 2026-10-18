@@ -79,6 +79,7 @@ class SessionEventPayload(BaseModel):
     provider: Optional[str] = None
     entrypoint: Optional[str] = None
     cwd: Optional[str] = None
+    model: Optional[str] = Field(default=None, max_length=100)
     title: Optional[str] = None
     tmux_session: Optional[str] = None
     # prompt: the Placet request the prompt carries ("[Placet Request #N").
@@ -850,6 +851,7 @@ def create_app(
         if not db.upsert_session(
             session_id, who.id, provider=payload.provider, entrypoint=payload.entrypoint,
             cwd=payload.cwd, title=payload.title, tmux_session=payload.tmux_session,
+            model=payload.model,
         ):
             raise HTTPException(status_code=404, detail="Session not found")
         session = db.get_session(session_id)

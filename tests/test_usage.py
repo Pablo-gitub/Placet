@@ -163,3 +163,38 @@ async def test_claude_waiter_gets_nothing_at_the_limit(setup):  # noqa: F811
     db.set_usage("claude-code", json.dumps({"provider": "claude-code", "buckets": [
         {"id": "five_hour", "window": "5h", "used_percent": 40, "resets_at": soon}]}))
     assert db.take_inbox_message(db.get_session("c1")) is not None
+
+
+def test_session_meta_from_conversation_files(tmp_path):
+    from bridge.transcripts import session_meta
+    claude = tmp_path / "c.jsonl"
+    claude.write_text("\n".join(json.dumps(o) for o in [
+        {"type": "assistant", "effort": "high", "message": {"model": "claude-old", "usage": {}}},
+        {"type": "user", "message": {"content": "x"}},
+        {"type": "assistant", "isSidechain": True, "message": {"model": "claude-sub"}},
+        {"type": "assistant", "effort": "low", "perTurnEffort": "max", "message": {"model": "claude-new", "usage": {
+            "input_tokens": 2, "cache_read_input_tokens": 1000, "cache_creation_input_tokens": 10}}},
+    ]) + "\n")
+    assert session_meta("claude-code", claude) == {"model": "claude-new", "effort": "max", "context_tokens": 1012}
+    codex = tmp_path / "x.jsonl"
+    codex.write_text("\n".join(json.dumps(o) for o in [
+        {"type": "turn_context", "payload": {"model": "gpt-a", "effort": "low"}},
+        {"type": "event_msg", "payload": {"type": "token_count", "info": {
+            "last_token_usage": {"input_tokens": 5000}, "model_context_window": 475000}}},
+        {"type": "response_item", "payload": {"type": "message"}},
+    ]) + "\n")
+    assert session_meta("codex", codex) == {"model": "gpt-a", "effort": "low",
+                                            "context_tokens": 5000, "context_window": 475000}
+    assert session_meta("antigravity", codex) == {}
+    assert session_meta("codex", tmp_path / "missing.jsonl") == {}
+
+
+@pytest.mark.asyncio
+async def test_hooks_report_the_model(setup):  # noqa: F811
+    app, db = setup
+    async with agent_client(app, "tok-gemini") as agent:
+        body = {"event": "start", "provider": "antigravity", "model": "gemini-3.8-flash-medium"}
+        assert (await agent.post("/api/sessions/ag1/events", json=body)).status_code == 200
+        # A later event without the model keeps it.
+        await agent.post("/api/sessions/ag1/events", json={"event": "stop", "provider": "antigravity"})
+    assert db.get_session("ag1").model == "gemini-3.8-flash-medium"

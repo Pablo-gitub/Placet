@@ -28,6 +28,8 @@ export function useTranscript(sessionId, refreshKey) {
   const cursors = useRef({ before: null, end: null });
   const busy = useRef(false);
   const [attempt, setAttempt] = useState(0);
+  // RF-61: model, effort and context, from the newest page.
+  const [meta, setMeta] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -41,6 +43,7 @@ export function useTranscript(sessionId, refreshKey) {
         if (cancelled) return;
         cursors.current = { before: page.before, end: page.end };
         setEntries(page.messages);
+        setMeta(page.meta || null);
         setHasOlder(page.before !== null && page.before !== undefined);
         setError(null);
         setStatus("ready");
@@ -63,6 +66,7 @@ export function useTranscript(sessionId, refreshKey) {
       .then((page) => {
         if (cancelled) return;
         cursors.current.end = page.end;
+        if (page.meta) setMeta(page.meta);
         if (page.messages.length) setEntries((prev) => mergeEntries(prev, page.messages));
       })
       .catch(() => {}); // the next turn retries; the page itself stays usable
@@ -94,5 +98,5 @@ export function useTranscript(sessionId, refreshKey) {
 
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
 
-  return { entries, status, error, hasOlder, loadingOlder, loadOlder, retry };
+  return { entries, status, error, hasOlder, loadingOlder, loadOlder, retry, meta };
 }

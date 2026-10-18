@@ -288,7 +288,10 @@
     "start": "Start of conversation",
     "empty": "No messages.",
     "sharedFile": "Shared file",
-    "generatedImage": "Generated image"
+    "generatedImage": "Generated image",
+    "effort": "effort {{effort}}",
+    "context": "{{used}} context",
+    "contextOf": "{{used}} / {{total}} context ({{percent}})"
   },
   "actions": {
     "read": "Reads {{name}}",

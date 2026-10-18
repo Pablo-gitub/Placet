@@ -4,6 +4,7 @@ import React, { useLayoutEffect, useRef, useState } from "react";
 import Attachments from "./Attachments";
 import Composer from "./Composer";
 import { limitReset, resetClock } from "./usage";
+import { formatNumber } from "./i18n/formatters";
 import { splitPrompt } from "./draft";
 import {
   ArrowLeft,
@@ -171,6 +172,24 @@ const OUTGOING_STATES = {
   EXPIRED: "deliveryUi.expired",
 };
 
+/** RF-61: the model, reasoning effort and context the session is using. */
+function ModelLine({ meta }) {
+  const { t } = useTranslation();
+  if (!meta?.model && !meta?.context_tokens) return null;
+  const tokens = (n) => formatNumber(n, { notation: "compact", maximumFractionDigits: 1 });
+  const context = meta.context_tokens
+    ? meta.context_window
+      ? t("chat.contextOf", { used: tokens(meta.context_tokens), total: tokens(meta.context_window),
+          percent: formatNumber(meta.context_tokens / meta.context_window, { style: "percent", maximumFractionDigits: 0 }) })
+      : t("chat.context", { used: tokens(meta.context_tokens) })
+    : null;
+  return (
+    <span className="session-meta-line session-model" data-testid="session-model">
+      {[meta.model, meta.effort && t("chat.effort", { effort: meta.effort }), context].filter(Boolean).join(" · ")}
+    </span>
+  );
+}
+
 // Delivered, but its turn not seen yet: still shown as the user's message.
 const notStarted = (req) => req.status !== "EXECUTING" || req.execution === "unobserved";
 
@@ -271,7 +290,7 @@ export default function SessionView({
   // RF-60: a provider at its usage limit gets nothing until the reset.
   const limitAt = session ? limitReset(usage, session.provider) : null;
   const refreshKey = session ? `${session.state}|${session.activity_at}` : undefined;
-  const { entries, status, error, hasOlder, loadingOlder, loadOlder, retry } = useTranscript(
+  const { entries, status, error, hasOlder, loadingOlder, loadOlder, retry, meta } = useTranscript(
     sessionId,
     refreshKey
   );
@@ -332,6 +351,7 @@ export default function SessionView({
               {sessionPlace(session) && ` · ${sessionPlace(session)}`}
             </span>
           )}
+          <ModelLine meta={{ model: session?.model, ...meta }} />
         </div>
         {state && (
           <span className={`session-state state-${state.key}`} data-testid="session-view-state">

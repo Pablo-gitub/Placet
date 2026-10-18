@@ -288,7 +288,10 @@
     "start": "Inizio della conversazione",
     "empty": "Nessun messaggio.",
     "sharedFile": "File condiviso",
-    "generatedImage": "Immagine generata"
+    "generatedImage": "Immagine generata",
+    "effort": "effort {{effort}}",
+    "context": "contesto {{used}}",
+    "contextOf": "contesto {{used}} / {{total}} ({{percent}})"
   },
   "actions": {
     "read": "Legge {{name}}",
