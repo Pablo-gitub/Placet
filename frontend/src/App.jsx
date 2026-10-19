@@ -5,10 +5,11 @@ import PushControl from "./PushControl";
 import { apiErrorDescriptor } from "./i18n/errors";
 import { needsReturnApproval } from "./decisions";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { AlertCircle, CheckCircle, Home as HomeIcon, MessagesSquare, Radio, ShieldCheck } from "lucide-react";
+import { AlertCircle, CheckCircle, FolderKanban, Home as HomeIcon, MessagesSquare, Radio, ShieldCheck } from "lucide-react";
 import Home from "./Home";
 import History from "./History";
 import SessionView from "./SessionView";
+import { ProjectsView, ProjectDetailView } from "./Projects";
 import { requestIdFromHash, routeFromHash } from "./decisions";
 import { useWide } from "./useWide";
 
@@ -356,12 +357,18 @@ export default function App() {
   const historyView = route.view === "history" && (
     <History requests={requests} sessions={sessions} focusId={focusId} onOpenSession={openSession} />
   );
+  const projectsView = route.view === "projects" && (
+    <ProjectsView onOpenProject={(id) => navigate(`#/progetti/${id}`)} />
+  );
+  const projectDetailView = route.view === "project_detail" && (
+    <ProjectDetailView projectId={route.projectId} onBack={() => navigate("#/progetti")} />
+  );
 
   const navTabs = (
     <nav className="nav-tabs" data-testid="nav-tabs">
       <button
         data-testid="tab-home"
-        className={`nav-tab ${route.view !== "history" ? "active" : ""}`}
+        className={`nav-tab ${route.view !== "history" && route.view !== "projects" && route.view !== "project_detail" ? "active" : ""}`}
         onClick={() => navigate("#/")}
       >
         <HomeIcon size={16} />
@@ -371,6 +378,14 @@ export default function App() {
             {pendingCount}
           </span>
         )}
+      </button>
+      <button
+        data-testid="tab-projects"
+        className={`nav-tab ${route.view === "projects" || route.view === "project_detail" ? "active" : ""}`}
+        onClick={() => navigate("#/progetti")}
+      >
+        <FolderKanban size={16} />
+        {t("app.projects")}
       </button>
       <button
         data-testid="tab-history"
@@ -419,13 +434,13 @@ export default function App() {
 
       {wide ? (
         // Desktop: questions and sessions on the left, the open conversation
-        // (or the history) on the right.
+        // (or the history / projects) on the right.
         <div className="workspace">
           <aside className="sidebar" data-testid="sidebar">
             {homeView}
           </aside>
           <main className="pane" data-testid="pane">
-            {sessionView || historyView || (
+            {sessionView || historyView || projectsView || projectDetailView || (
               <div className="pane-empty" data-testid="pane-empty">
                 <MessagesSquare size={28} />
                 <p>{t("app.openSession")}</p>
@@ -439,6 +454,8 @@ export default function App() {
             {route.view === "home" && homeView}
             {historyView}
             {sessionView}
+            {projectsView}
+            {projectDetailView}
           </main>
           {/* Phone: the bar sits at the bottom, out of the way inside a conversation. */}
           {route.view !== "session" && navTabs}
