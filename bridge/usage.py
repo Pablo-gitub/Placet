@@ -7,22 +7,74 @@ buckets {"id", "group", "window" ("5h" | "7d"), "used_percent", "resets_at"}.
 Times are ISO 8601 UTC. A reader returns None when it has nothing to say.
 """
 import json
+import logging
 import os
+import shutil
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, List, Optional
+
+logger = logging.getLogger(__name__)
 
 # Rollouts are long: the latest limits are near the end.
 TAIL_BYTES = 256 * 1024
 # Only the most recently written rollouts are looked at.
 MAX_ROLLOUTS = 5
 WINDOWS = {300: "5h", 10080: "7d"}
+CLAUDE_RENEW_COOLDOWN_SECONDS = 600.0
+_claude_missing_warned = False
 
 
 def _iso(ts: Optional[float]) -> Optional[str]:
     if ts is None:
         return None
     return datetime.fromtimestamp(float(ts), tz=timezone.utc).isoformat()
+
+
+def claude_token_expiry(home: Optional[Path] = None) -> Optional[float]:
+    """Token expiration time in epoch seconds, or None if missing."""
+    path = Path(home or Path.home()) / ".claude" / ".credentials.json"
+    try:
+        oauth = json.loads(path.read_text()).get("claudeAiOauth") or {}
+    except (OSError, ValueError):
+        return None
+    expires = oauth.get("expiresAt")
+    if expires is None:
+        return None
+    return float(expires) / 1000.0
+
+
+def claude_token_needs_renew(home: Optional[Path] = None, threshold_seconds: float = 600.0) -> bool:
+    """Whether Claude's credentials token is expired or within threshold_seconds of expiring."""
+    expiry = claude_token_expiry(home)
+    if expiry is None:
+        return False
+    now = datetime.now(timezone.utc).timestamp()
+    return (expiry - now) <= threshold_seconds
+
+
+def renew_claude_credentials(claude_bin: Optional[str] = None, timeout: float = 30.0) -> bool:
+    """Runs `claude auth status` without a shell, discarding stdout/stderr."""
+    global _claude_missing_warned
+    bin_path = claude_bin or shutil.which("claude")
+    if not bin_path:
+        if not _claude_missing_warned:
+            _claude_missing_warned = True
+            logger.warning("Claude credential renewal failed: claude CLI binary not found in PATH.")
+        return False
+    try:
+        res = subprocess.run(
+            [bin_path, "auth", "status"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=timeout,
+            check=True,
+        )
+        return res.returncode == 0
+    except (subprocess.SubprocessError, OSError) as e:
+        logger.warning(f"Claude credential renewal failed: {type(e).__name__}")
+        return False
 
 
 def _tail_lines(path: Path) -> List[str]:

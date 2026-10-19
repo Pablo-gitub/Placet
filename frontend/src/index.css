@@ -1267,6 +1267,52 @@ body.chat-open { overflow: hidden; }
   .usage-row { grid-template-columns: 1fr 1fr; row-gap: 0.15rem; }
   .usage-provider { grid-column: 1 / -1; }
 }
+.claude-menu-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.35rem;
+}
+.btn-usage-menu {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.15rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.btn-usage-menu:hover,
+.btn-usage-menu:focus-visible {
+  border-color: var(--border-color);
+  color: var(--text-main);
+  background: var(--bg-hover, rgba(0, 0, 0, 0.05));
+}
+.claude-menu-popover {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 50;
+  margin-top: 0.35rem;
+  padding: 0.5rem 0.65rem;
+  background: var(--bg-primary, #fff);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  white-space: nowrap;
+}
+.claude-menu-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  font-weight: normal;
+  color: var(--text-main);
+  cursor: pointer;
+  user-select: none;
+}
 
 /* RFC-02: the session's node name in the chat header. */
 .node-chip {

@@ -16,7 +16,14 @@ from bridge.attachments import AttachmentError
 from bridge.transcripts import TranscriptError, read_attachment, read_transcript
 from bridge import steer as steer_files
 from bridge.titles import codex_titles
-from bridge.usage import CLAUDE_EVERY_SECONDS, claude_usage, read_all as read_usage
+from bridge.usage import (
+    CLAUDE_EVERY_SECONDS,
+    CLAUDE_RENEW_COOLDOWN_SECONDS,
+    claude_token_needs_renew,
+    claude_usage,
+    read_all as read_usage,
+    renew_claude_credentials,
+)
 from bridge.claude_desktop import ClaudeDesktopWake
 from hooks.placet_common import active
 
@@ -66,6 +73,7 @@ class BridgeDaemon:
         self._titles_at = -TITLES_EVERY_SECONDS
         self._usage_at = -USAGE_EVERY_SECONDS
         self._claude_usage_at = -CLAUDE_EVERY_SECONDS
+        self._claude_renew_at = -CLAUDE_RENEW_COOLDOWN_SECONDS
         self._claude_usage: Optional[dict] = None
         # "now" messages left for a turn that ended, and since when (monotonic)
         self._steer_orphans: Dict[int, float] = {}
@@ -279,9 +287,15 @@ class BridgeDaemon:
             self.store.report_titles(titles)
         return titles
 
-    def refresh_usage(self) -> List[dict]:
+    def refresh_usage(self, auto_renew: bool = False) -> List[dict]:
         """Reads the providers' usage windows and reports them (RF-60)."""
         now = time.monotonic()
+        if auto_renew and now - self._claude_renew_at >= CLAUDE_RENEW_COOLDOWN_SECONDS:
+            if claude_token_needs_renew():
+                self._claude_renew_at = now
+                if renew_claude_credentials():
+                    self._claude_usage_at = -CLAUDE_EVERY_SECONDS
+                    self._usage_at = -USAGE_EVERY_SECONDS
         if now - self._usage_at < USAGE_EVERY_SECONDS:
             return []
         self._usage_at = now
@@ -374,7 +388,7 @@ class BridgeDaemon:
         self.language = work.language
         self.check_folders(work.folders)
         self.refresh_titles(work.titles)
-        self.refresh_usage()
+        self.refresh_usage(auto_renew=work.claude_auto_renew)
         self.wake_claude_sessions(work.claude_wake_sessions)
         busy_sessions: Set[str] = set()
         busy_agents = set(work.busy_agents)

@@ -385,7 +385,9 @@
     "hoursMinutes": "{{h}}h{{m}}",
     "daysHours": "{{d}}d {{h}}h",
     "stale": "Last updated {{time}}.",
-    "staleClaude": "Last updated {{time}}: open Claude Code in a terminal once to renew its login, then Placet can read the usage again."
+    "staleClaude": "Last updated {{time}}: open Claude Code in a terminal once to renew its login, then Placet can read the usage again.",
+    "autoRenew": "Renew Claude access automatically",
+    "claudeOptions": "Claude options"
   },
   "node": {
     "title": "Node name",

@@ -1,6 +1,6 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Gauge, RotateCcw } from "lucide-react";
+import { Gauge, RotateCcw, SlidersHorizontal } from "lucide-react";
 import { formatNumber } from "./i18n/formatters";
 import { providerOf, timeAgo } from "./sessionInfo";
 import { untilReset, usageRows } from "./usage";
@@ -38,6 +38,39 @@ function Window({ name, value, t }) {
 /** RF-60: one row per provider with its 5-hour and weekly windows. */
 export default function UsageBar({ usage }) {
   const { t } = useTranslation();
+  const [showClaudeMenu, setShowClaudeMenu] = useState(false);
+  const [autoRenew, setAutoRenew] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/settings/claude-renew")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && typeof data.enabled === "boolean") {
+          setAutoRenew(data.enabled);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleToggleAutoRenew = () => {
+    const next = !autoRenew;
+    setAutoRenew(next);
+    fetch("/api/settings/claude-renew", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: next }),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && typeof data.enabled === "boolean") {
+          setAutoRenew(data.enabled);
+        }
+      })
+      .catch(() => {
+        setAutoRenew(!next);
+      });
+  };
+
   const rows = usageRows(usage);
   if (rows.length === 0) return null;
   return (
@@ -48,6 +81,33 @@ export default function UsageBar({ usage }) {
             <Gauge size={14} aria-hidden="true" />
             {providerOf({ provider: row.provider }).label}
             {row.group && <small>{row.group}</small>}
+            {row.provider === "claude-code" && (
+              <span className="claude-menu-wrap">
+                <button
+                  type="button"
+                  className="btn-usage-menu"
+                  data-testid="btn-claude-menu"
+                  title={t("usage.claudeOptions")}
+                  aria-label={t("usage.claudeOptions")}
+                  onClick={() => setShowClaudeMenu((prev) => !prev)}
+                >
+                  <SlidersHorizontal size={12} aria-hidden="true" />
+                </button>
+                {showClaudeMenu && (
+                  <div className="claude-menu-popover" data-testid="claude-menu-popover">
+                    <label className="claude-menu-item">
+                      <input
+                        type="checkbox"
+                        data-testid="toggle-claude-auto-renew"
+                        checked={autoRenew}
+                        onChange={handleToggleAutoRenew}
+                      />
+                      <span>{t("usage.autoRenew")}</span>
+                    </label>
+                  </div>
+                )}
+              </span>
+            )}
           </span>
           <Window name={t("usage.window5h")} value={row.windows["5h"]} t={t} />
           <Window name={t("usage.window7d")} value={row.windows["7d"]} t={t} />

@@ -119,6 +119,10 @@ class BackgroundLanguage(BaseModel):
     language: Literal["en", "it"]
 
 
+class ClaudeRenewSetting(BaseModel):
+    enabled: bool
+
+
 class QueueRelease(BaseModel):
     reason: Literal["finished", "queue_next"]
 
@@ -536,6 +540,19 @@ def create_app(
         db.set_background_language(payload.language)
         response.headers["Cache-Control"] = "no-store"
         return {"language": db.get_background_language()}
+
+    @app.get("/api/settings/claude-renew", response_model=ClaudeRenewSetting)
+    async def get_claude_renew_setting(response: Response, who: Principal = Depends(principal)):
+        require_human(who)
+        response.headers["Cache-Control"] = "no-store"
+        return {"enabled": db.get_setting("claude_auto_renew") == "true"}
+
+    @app.put("/api/settings/claude-renew", response_model=ClaudeRenewSetting)
+    async def set_claude_renew_setting(payload: ClaudeRenewSetting, response: Response, who: Principal = Depends(principal)):
+        require_human(who)
+        db.set_setting("claude_auto_renew", "true" if payload.enabled else "false")
+        response.headers["Cache-Control"] = "no-store"
+        return {"enabled": db.get_setting("claude_auto_renew") == "true"}
 
     @app.get("/api/health")
     def health():
@@ -1731,6 +1748,7 @@ def create_app(
                               for r, s in db.steers_waiting()],
             # Codex and Antigravity sessions: the bridge reads their titles.
             "titles": [{"id": s.id, "provider": s.provider} for s in db.untitled_bridge_sessions()],
+            "claude_auto_renew": db.get_setting("claude_auto_renew") == "true",
         }
 
     @app.post("/api/bridge/requests/{request_id}/steer")

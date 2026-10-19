@@ -60,6 +60,7 @@ class Work:
     # Suspended Codex sessions: queue once, then request native opening.
     wake_sessions: List[dict] = field(default_factory=list)
     claude_wake_sessions: List[dict] = field(default_factory=list)
+    claude_auto_renew: bool = False
 
 
 @dataclass
@@ -143,6 +144,7 @@ class LocalStore:
                    for r, s in self.db.steer_candidates()],
             steer_waiting=[{"request_id": r.id, "session_id": s.id, "provider": s.provider}
                            for r, s in self.db.steers_waiting()],
+            claude_auto_renew=self.db.get_setting("claude_auto_renew") == "true",
         )
 
     def take_session_mail(self, session_id: str) -> Optional[SessionMail]:
@@ -246,6 +248,7 @@ class HttpStore:
             titles=list(data.get("titles", [])),
             steer=list(data.get("steer", [])),
             steer_waiting=list(data.get("steer_waiting", [])),
+            claude_auto_renew=bool(data.get("claude_auto_renew", False)),
         )
 
     def take_session_mail(self, session_id: str) -> Optional[SessionMail]:

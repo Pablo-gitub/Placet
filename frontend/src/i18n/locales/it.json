@@ -385,7 +385,9 @@
     "hoursMinutes": "{{h}}h{{m}}",
     "daysHours": "{{d}}g {{h}}h",
     "stale": "Ultimo aggiornamento: {{time}}.",
-    "staleClaude": "Ultimo aggiornamento: {{time}}. Apri una volta Claude Code nel terminale per rinnovare l'accesso, poi Placet torna a leggere i consumi."
+    "staleClaude": "Ultimo aggiornamento: {{time}}. Apri una volta Claude Code nel terminale per rinnovare l'accesso, poi Placet torna a leggere i consumi.",
+    "autoRenew": "Rinnova automaticamente l'accesso di Claude",
+    "claudeOptions": "Opzioni Claude"
   },
   "node": {
     "title": "Nome del nodo",
