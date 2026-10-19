@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import React, { useState } from "react";
-import { X } from "lucide-react";
+import { ChevronRight, Folder, X } from "lucide-react";
 import {
   PROVIDERS,
   activityOf,
@@ -12,6 +12,31 @@ import {
   sessionStatus,
   timeAgo,
 } from "./sessionInfo";
+
+/**
+ * The provider's sessions by working folder, most recently active first.
+ * Folders share a name ("app" in two places): add parent folders until the
+ * labels differ.
+ */
+function folderGroups(sessions) {
+  const groups = new Map();
+  for (const s of [...sessions].sort(byActivity)) {
+    const key = s.cwd || "";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(s);
+  }
+  const parts = (key) => key.split("/").filter(Boolean);
+  const label = (key, depth) => parts(key).slice(-depth).join("/");
+  const keys = [...groups.keys()].filter(Boolean);
+  const labels = {};
+  for (const key of keys) {
+    let depth = 1;
+    while (depth < parts(key).length
+      && keys.some((other) => other !== key && label(other, depth) === label(key, depth))) depth += 1;
+    labels[key] = label(key, depth);
+  }
+  return [...groups.entries()].map(([key, list]) => ({ key, label: labels[key] || null, sessions: list }));
+}
 
 /**
  * Choose a provider, see all its sessions, tick the ones to follow in the
@@ -61,7 +86,7 @@ export default function AddSessionsDialog({ sessions, onToggle, onOpen, onClose 
             </button>
           ))}
         </div>
-        <div className="dialog-body">
+        <div className="dialog-body dialog-scroll" data-testid="add-sessions-body">
           <p className="empty-hint">{t("picker.hint")}</p>
           {listed.length === 0 && (
             <p className="empty-hint" data-testid="no-open-sessions">
@@ -70,29 +95,40 @@ export default function AddSessionsDialog({ sessions, onToggle, onOpen, onClose 
           )}
           {(() => {
             const labels = sessionLabels(listed);
-            return listed.map((s) => {
-              const status = sessionStatus(s);
-              return (
-                <div key={s.id} className="pick-row" data-testid={`pick-${s.id}`}>
-                  <input
-                    type="checkbox"
-                    id={`pick-${s.id}`}
-                    data-testid={`pick-toggle-${s.id}`}
-                    checked={!!s.pinned}
-                    onChange={(e) => onToggle(s, e.target.checked)}
-                  />
-                  <label htmlFor={`pick-${s.id}`} className="pick-label">
-                    <strong>{labels[s.id] || sessionName(s)}</strong>
-                    <span className="session-meta-line">
-                      {[sessionPlace(s), status.label, timeAgo(activityOf(s))].filter(Boolean).join(" · ")}
-                    </span>
-                  </label>
-                  <button type="button" className="link-button" onClick={() => onOpen(s.id)}>
-                    {t("picker.open")}
-                  </button>
-                </div>
-              );
-            });
+            return folderGroups(listed).map((group, index) => (
+              <details key={group.key} className="pick-folder" data-testid={`pick-folder-${group.key}`}
+                open={index === 0 || group.sessions.some((s) => s.pinned)}>
+                <summary title={group.key || undefined}>
+                  <ChevronRight size={14} className="pick-folder-chevron" aria-hidden="true" />
+                  <Folder size={14} aria-hidden="true" />
+                  <span className="pick-folder-name">{group.label || t("picker.noFolder")}</span>
+                  <span className="provider-count" data-testid="pick-folder-count">{group.sessions.length}</span>
+                </summary>
+                {group.sessions.map((s) => {
+                  const status = sessionStatus(s);
+                  return (
+                    <div key={s.id} className="pick-row" data-testid={`pick-${s.id}`}>
+                      <input
+                        type="checkbox"
+                        id={`pick-${s.id}`}
+                        data-testid={`pick-toggle-${s.id}`}
+                        checked={!!s.pinned}
+                        onChange={(e) => onToggle(s, e.target.checked)}
+                      />
+                      <label htmlFor={`pick-${s.id}`} className="pick-label">
+                        <strong>{labels[s.id] || sessionName(s)}</strong>
+                        <span className="session-meta-line">
+                          {[sessionPlace(s), status.label, timeAgo(activityOf(s))].filter(Boolean).join(" · ")}
+                        </span>
+                      </label>
+                      <button type="button" className="link-button" onClick={() => onOpen(s.id)}>
+                        {t("picker.open")}
+                      </button>
+                    </div>
+                  );
+                })}
+              </details>
+            ));
           })()}
         </div>
       </div>

@@ -6,6 +6,7 @@ import { AlertCircle, CheckCircle, FolderKanban, Home as HomeIcon, MessagesSquar
 import Home from "./Home";
 import History from "./History";
 import Settings from "./Settings";
+import Commands from "./Commands";
 import SessionView from "./SessionView";
 import { ProjectsView, ProjectDetailView } from "./Projects";
 import { requestIdFromHash, routeFromHash } from "./decisions";
@@ -361,9 +362,10 @@ export default function App() {
       onBack={() => navigate("#/impostazioni")} />
   );
   const settingsView = route.view === "settings" && (
-    <Settings onOpenHistory={() => navigate("#/storico")} />
+    <Settings onOpenHistory={() => navigate("#/storico")} onOpenCommands={() => navigate("#/comandi")} />
   );
-  const inSettings = route.view === "settings" || route.view === "history";
+  const commandsView = route.view === "commands" && <Commands onBack={() => navigate("#/impostazioni")} />;
+  const inSettings = ["settings", "history", "commands"].includes(route.view);
   const projectsView = route.view === "projects" && (
     <ProjectsView onOpenProject={(id) => navigate(`#/progetti/${id}`)} />
   );
@@ -446,7 +448,7 @@ export default function App() {
             {homeView}
           </aside>
           <main className="pane" data-testid="pane">
-            {sessionView || historyView || settingsView || projectsView || projectDetailView || (
+            {sessionView || historyView || settingsView || commandsView || projectsView || projectDetailView || (
               <div className="pane-empty" data-testid="pane-empty">
                 <MessagesSquare size={28} />
                 <p>{t("app.openSession")}</p>
@@ -460,6 +462,7 @@ export default function App() {
             {route.view === "home" && homeView}
             {historyView}
             {settingsView}
+            {commandsView}
             {sessionView}
             {projectsView}
             {projectDetailView}

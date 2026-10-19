@@ -1805,3 +1805,40 @@ body.chat-open { overflow: hidden; }
 .usage-guard-active { margin: 0 0 0.5rem; font-size: 0.8rem; color: var(--warning); }
 .usage-guard-warning { margin: 0 0 0.5rem; padding: 0.5rem 0.65rem; font-size: 0.78rem; border-left: 3px solid var(--warning); background: rgba(245, 158, 11, 0.08); border-radius: 6px; }
 .automation-usage { margin: 0.35rem 0 0; font-size: 0.78rem; color: var(--warning); }
+
+/* Reserved actions: public intent/status only; signing stays on Placet Admin. */
+.commands { display: flex; flex-direction: column; gap: 0.85rem; min-width: 0; }
+.commands h2 { margin: 0; font-size: 1.05rem; }
+.commands p { margin: 0; overflow-wrap: anywhere; line-height: 1.5; }
+.commands-hint, .commands-history-row small { color: var(--text-muted); font-size: 0.82rem; }
+.commands-card { min-width: 0; display: flex; flex-direction: column; align-items: stretch; gap: 0.7rem; margin: 0; }
+.commands-card h3 { display: flex; align-items: center; gap: 0.55rem; margin: 0; font-size: 1rem; }
+.commands-card .btn { min-height: 44px; align-self: flex-start; max-width: 100%; white-space: normal; text-align: center; }
+.commands-state { font-weight: 600; font-size: 0.88rem; }
+.commands-notice { padding: 0.8rem; border: 1px solid var(--border-color); border-radius: 10px; background: var(--bg-secondary); }
+.commands-notice .btn { margin-top: 0.6rem; min-height: 44px; }
+.commands-confirmation { display: flex; flex-direction: column; align-items: flex-start; gap: 0.65rem; min-width: 0; }
+.commands-confirmation p { font-size: 0.82rem; color: var(--text-muted); }
+.commands-confirmation strong { display: block; color: var(--text-main); overflow-wrap: anywhere; }
+.commands-confirmation a { text-decoration: none; display: inline-flex; align-items: center; gap: 0.4rem; }
+.commands-terminal { margin-top: 0.6rem; min-width: 0; }
+.commands summary { cursor: pointer; min-height: 44px; padding: 0.65rem 0; font-weight: 600; }
+.commands-terminal p { margin: 0.5rem 0; font-size: 0.82rem; }
+.commands-terminal code { display: block; font-size: 0.75rem; white-space: pre-wrap; overflow-wrap: anywhere; padding: 0.65rem; border-radius: 8px; background: var(--bg-primary); }
+.commands-history-row { padding: 0.7rem 0; border-top: 1px solid var(--border-color); overflow-wrap: anywhere; }
+.commands-history-row .commands-state { margin: 0.3rem 0; }
+.commands a:focus-visible, .commands summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+.app-container.with-bottom-bar .commands { padding-bottom: 1rem; }
+
+/* The session picker scrolls inside the sheet on phones (iOS keeps the page still). */
+.dialog { max-height: 85dvh; min-height: 0; }
+.dialog-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.pick-folder { border-bottom: 1px solid var(--border-color); }
+.pick-folder > summary { display: flex; align-items: center; gap: 0.4rem; padding: 0.65rem 0; cursor: pointer; list-style: none; font-weight: 600; font-size: 0.88rem; min-width: 0; }
+.pick-folder > summary::-webkit-details-marker { display: none; }
+.pick-folder-chevron { flex-shrink: 0; transition: transform 0.15s ease; color: var(--text-muted); }
+.pick-folder[open] > summary .pick-folder-chevron { transform: rotate(90deg); }
+.pick-folder-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pick-folder .pick-row { padding-left: 1.2rem; }
+.pick-folder .pick-row:last-child { border-bottom: none; }
+@media (prefers-reduced-motion: reduce) { .pick-folder-chevron { transition: none; } }

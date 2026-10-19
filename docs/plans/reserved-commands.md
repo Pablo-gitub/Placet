@@ -430,7 +430,27 @@ public fields. Missing, unreachable or malformed catalogues expose no actions.
 Lost creation acknowledgements are recovered with the same request key, not a
 new proposal. Job state remains in administrative storage across backend restarts.
 
-The PWA Commands screen, root reconciliation, supervised units and the reviewed
+The PWA Commands screen is implemented under Settings (`#/comandi`), not
+deployed. Run prepares an intent; a second explicit tap opens its HTTPS
+confirmation link, with its destination host shown before navigation. No async
+response, polling event or page restoration opens a window automatically.
+Before creation, the PWA persists a random idempotency key. Lost acknowledgements
+retain that key across reloads and require an explicit retry; a new intention
+after completion/expiry receives a new key. If the reference cannot be persisted,
+creation does not start. Only public proposal IDs are cached, not signing data
+or confirmation URLs. Status recovers from administrative storage with bounded
+backoff during expected backend interruptions; connection loss is not job failure.
+
+Disabled/unconfigured catalogues offer only an explanation and the installation
+guide. Invalid historical entries are skipped without hiding valid actions.
+The root catalogue also exposes the first unresolved `blocked_job_id`, even if
+its proposal has left the ten most recent references. The PWA disables further
+preparation and explains terminal reconciliation without attempting it. The UI
+documents the future E terminal contract (`reconcile --id ... --outcome
+succeeded|failed`); that CLI must be implemented before activation. Bridge
+evidence remains labelled as a user-service report.
+
+Root reconciliation, supervised units and the reviewed
 active-installation upgrade remain pending. No broker or supervisor unit is
 installed by the current bootstrap, and all catalogue entries remain disabled.
 Tests use injected restart handlers and never restart real services.

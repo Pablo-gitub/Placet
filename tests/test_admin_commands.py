@@ -190,3 +190,21 @@ async def test_policy_rejection_and_expired_status_are_not_execution_failures(se
         assert rejected.status_code == 409
         assert rejected.json()['code'] == 'admin.rejected'
         assert rejected.headers['cache-control'] == 'no-store'
+
+
+@pytest.mark.asyncio
+async def test_invalid_recent_entry_does_not_hide_valid_actions(setup):
+    app, adapter, service, *_ = setup
+    valid = service.propose('valid', 'restart-backend', {})
+    original = adapter.call
+    def with_old_entry(method, **params):
+        result = original(method, **params)
+        if method == 'catalogue':
+            result['recent'] = [{'action': 'removed'}, valid]
+        return result
+    adapter.call = with_old_entry
+    async with human_client(app) as client:
+        result = (await client.get('/api/admin/catalogue')).json()
+    assert result['status'] == 'available'
+    assert len(result['actions']) == 2
+    assert result['recent'][0]['id'] == valid['id']

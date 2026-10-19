@@ -316,6 +316,31 @@ If the tool's wait ends before the outcome, the agent ends its turn. When the ou
 
 ---
 
+## Reserved administrative commands
+
+The reserved-command implementation is under review and is **not enabled** by
+the ordinary installer. The existing passkey enrollment page does not itself
+enable command execution. See the [administrative setup](plans/admin-web-setup.md)
+and [trust boundaries](plans/reserved-commands.md#trust-boundaries) before any
+activation. A desktop/agent account with rootful Docker or other root-equivalent
+access cannot satisfy those boundaries; the administrative activation installer
+must reject that configuration. No automatic group/container changes are made.
+
+The PWA entry is **Settings → Commands**. Run prepares a fixed-action proposal;
+then a separate confirmation link displays its host and opens Placet Admin on
+an explicit tap. Passkey authorization happens there. Only backend/bridge
+restart actions are candidates; deploy and arbitrary shell commands are absent.
+An expired proposal requires a new explicit proposal. A lost creation response
+must instead be retried using its saved reference. The PWA retains that reference
+across reloads and never retries execution automatically.
+
+During a backend restart, temporary disconnection/503s are expected: the screen
+checks saved state again with backoff. An uncertain outcome blocks further
+actions and requires a human terminal reconciliation. The displayed terminal
+contract will be installed in the administrative activation step; it must not
+be treated as operational before that separately reviewed upgrade. Ordinary
+Placet deploys must not replace the protected administrative package.
+
 ## Running the tests
 
 ```bash

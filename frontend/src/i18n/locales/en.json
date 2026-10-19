@@ -257,7 +257,8 @@
     "close": "Close",
     "hint": "A checked session appears on Home, even when closed. Uncheck it to hide it.",
     "empty": "No sessions registered for this provider.",
-    "open": "Open"
+    "open": "Open",
+    "noFolder": "No folder"
   },
   "composer": {
     "remove": "Remove {{name}}",
@@ -576,5 +577,50 @@
     "save": "Save",
     "saveError": "Could not save.",
     "loadError": "Settings unavailable."
+  },
+  "commands": {
+    "title": "Commands",
+    "settingsHint": "Reserved actions, confirmed separately with your passkey.",
+    "intro": "Run prepares a proposal. Then open the administrative host shown below and confirm the operation with your passkey.",
+    "loading": "Loading the administrative catalogue…",
+    "notConfigured": "Administrative commands are not configured or the service is unavailable.",
+    "disabled": "No reserved action is enabled.",
+    "installationGuide": "Installation guide",
+    "reconnecting": "Reconnecting… Saved state will be checked again automatically. No command is resent.",
+    "blocked": "Outcome to be checked from the administrator terminal. Further commands are blocked until reconciliation.",
+    "terminalInstructions": "Terminal instructions",
+    "reconcileHelp": "Check the actual outcome first. An administrator must run exactly one of these commands in a terminal; neither command retries the job.",
+    "reconcileSuccess": "If the original action succeeded:",
+    "reconcileFailure": "If the original action failed:",
+    "creationUnconfirmed": "Proposal preparation is not confirmed. Retry preparation to recover the same reference.",
+    "retryCreation": "Retry preparation",
+    "preparing": "Preparing your proposal…",
+    "storageUnavailable": "The retry reference could not be saved. Check browser storage before preparing a proposal.",
+    "run": "Run",
+    "newProposal": "New proposal",
+    "confirm": "Confirm with a passkey",
+    "confirmationHost": "Confirmation host:",
+    "recent": "Recent outcomes",
+    "reference": "Reference {{id}}",
+    "bridgeEvidence": "Restart requested; the outcome is reported by the desktop user service. It is not independent proof of service health.",
+    "actions": {
+      "restart-backend": {
+        "title": "Restart backend",
+        "description": "Placet will disconnect briefly while its backend restarts."
+      },
+      "restart-bridge": {
+        "title": "Restart bridge",
+        "description": "Message delivery will pause briefly while the desktop user service restarts."
+      }
+    },
+    "states": {
+      "awaiting_confirmation": "Waiting for your passkey confirmation.",
+      "expired": "Proposal expired. Prepare a new proposal to continue.",
+      "authorized": "Authorized, waiting for execution.",
+      "running": "In progress.",
+      "succeeded": "Completed.",
+      "failed": "Failed.",
+      "outcome_unknown": "Outcome to be checked from the administrator terminal."
+    }
   }
 }
