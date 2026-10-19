@@ -274,8 +274,8 @@ describe("Projects views (RFC-09, RF-44)", () => {
     expect(within(screen.getByTestId("project-node-101")).getByText("planner")).toBeInTheDocument();
     // RF-44: the diagram draws every node and relation of the project.
     const graph = screen.getByTestId("relation-graph");
-    expect(within(graph).getByText("planner")).toBeInTheDocument();
-    expect(within(graph).getByText("builder")).toBeInTheDocument();
+    expect(within(graph).getAllByText("planner").length).toBeGreaterThan(0);
+    expect(within(graph).getAllByText("builder").length).toBeGreaterThan(0);
     expect(within(graph).getByTestId("graph-edge-201")).toHaveTextContent("review");
     expect(screen.getByTestId("relation-badge-shared-201")).toHaveTextContent("Other Project");
 

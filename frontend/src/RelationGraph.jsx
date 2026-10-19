@@ -6,7 +6,22 @@ const CENTER = SIZE / 2;
 const NODE_R = 20;
 const MAX_LABEL = 14;
 
-const short = (text) => (text.length > MAX_LABEL ? `${text.slice(0, MAX_LABEL - 1)}…` : text);
+const short = (text, max = MAX_LABEL) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+
+/**
+ * Node names often share a project prefix ("Placet_claude_FS",
+ * "Placet_gemini_dev"): drop it in the drawing, up to its last separator,
+ * so truncated labels stay distinguishable. The full name stays in the title.
+ */
+function commonPrefix(names) {
+  if (names.length < 2) return "";
+  let prefix = names[0];
+  for (const name of names) {
+    while (!name.startsWith(prefix)) prefix = prefix.slice(0, -1);
+  }
+  const cut = Math.max(...["_", "-", ".", " "].map((sep) => prefix.lastIndexOf(sep)));
+  return cut > 0 && names.every((n) => n.length > cut + 1) ? prefix.slice(0, cut + 1) : "";
+}
 
 /** Nodes on a circle (one node in the middle), first one at the top. */
 function layout(nodes) {
@@ -43,6 +58,7 @@ export default function RelationGraph({ nodes = [], relations = [] }) {
     return <p className="composer-note" data-testid="relation-graph-empty">{t("projects.graphEmpty")}</p>;
   }
   const pos = layout(nodes);
+  const prefix = commonPrefix(nodes.map((n) => n.name));
   // Bend: pairs (unordered) get 0, ±1, ±2… steps; the reverse direction
   // bends the other way by construction of the perpendicular.
   const seen = {};
@@ -57,7 +73,7 @@ export default function RelationGraph({ nodes = [], relations = [] }) {
     <figure className="relation-graph" data-testid="relation-graph">
       <svg viewBox={`0 0 ${SIZE} ${SIZE}`} role="img" aria-label={t("projects.graphTitle")}>
         <defs>
-          <marker id="rg-arrow-auto" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <marker id="rg-arrow-automatic" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M 0 0 L 10 5 L 0 10 z" className="rg-arrow-auto" />
           </marker>
           <marker id="rg-arrow-manual" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -76,9 +92,12 @@ export default function RelationGraph({ nodes = [], relations = [] }) {
         ))}
         {nodes.map((n) => (
           <g key={n.id} data-testid={`graph-node-${n.id}`}>
+            <title>{n.name}</title>
             <circle cx={pos[n.id].x} cy={pos[n.id].y} r={NODE_R} className={`rg-node prov-${n.provider}`} />
-            <text x={pos[n.id].x} y={pos[n.id].y + NODE_R + 13} className="rg-node-label" textAnchor="middle">
-              {short(n.name)}
+            {/* Outside the circle of nodes, away from the edges that leave it. */}
+            <text x={pos[n.id].x} y={pos[n.id].y < CENTER - 1 ? pos[n.id].y - NODE_R - 6 : pos[n.id].y + NODE_R + 13}
+              className="rg-node-label" textAnchor="middle">
+              {short(n.name.slice(prefix.length), 16)}
             </text>
           </g>
         ))}
