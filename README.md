@@ -7,7 +7,14 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/desktop.png" alt="Placet on the desktop: questions and sessions on the left, a Claude Code conversation on the right" width="900">
+  <a href="https://github.com/Pablo-gitub/Placet/actions/workflows/checks.yml"><img src="https://github.com/Pablo-gitub/Placet/actions/workflows/checks.yml/badge.svg?branch=main" alt="Checks"></a>
+  <img src="https://img.shields.io/badge/status-alpha-orange" alt="Status: alpha">
+  <img src="https://img.shields.io/badge/agents-Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20Antigravity-6366f1" alt="Agents: Claude Code, Codex, Antigravity">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="License: Apache 2.0"></a>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/desktop-project.png" alt="Placet on the desktop: usage, a pending agent-to-agent prompt waiting for approval, a project and its live relations diagram" width="900">
 </p>
 
 > *Placet* (Latin, "it pleases"): the formal word for giving your consent. Nothing crosses from one agent to another without it.
@@ -24,6 +31,27 @@ If you run Claude Code, Codex and Antigravity side by side, you know the problem
 
 Placet sits between your agents and your phone. Every session registers itself; you read its conversation, answer its questions and write to it from anywhere. When one agent wants another to do something, the request comes to you first: approve it, edit the prompt, or reject it.
 
+## Agent teams, under your eye
+
+<table>
+  <tr>
+    <td width="48%"><img src="docs/screenshots/agent-team.gif" alt="Animated relations diagram: eight agents of one project pulse while working, prompts travel along the arrows, a reply travels back, and a yellow dot waits halfway for the human's approval" width="440"></td>
+    <td>
+      Name your sessions as <b>nodes</b>, group them into a <b>project</b> and connect them with typed <b>relations</b>: <i>Implement</i>, <i>Review</i>, <i>Test</i>, <i>Ship</i>…<br><br>
+      The diagram is live:
+      <ul>
+        <li><b>pulsing nodes</b> are working right now;</li>
+        <li><b>a dot runs along an arrow</b> while a prompt is delivered, and <b>back</b> while the reply returns;</li>
+        <li><b>a lit arrow</b>: the recipient is executing;</li>
+        <li><b>a yellow dot halfway</b>: the chain waits for you.</li>
+      </ul>
+      <b>Automatic</b> relations (solid) deliver on their own, within your rule, loop limits and usage thresholds; <b>manual</b> ones (dashed) always ask first. Each project and each node in it can carry short instructions repeated with every prompt.
+    </td>
+  </tr>
+</table>
+
+<sub>Simulated activity on the real PWA: eight sessions across Claude Code, Codex and Antigravity working on a refund feature.</sub>
+
 ## Features
 
 <table>
@@ -38,7 +66,8 @@ Placet sits between your agents and your phone. Every session registers itself; 
 - **One inbox for all your agents.** Questions from Claude, Codex and Antigravity arrive as cards in a PWA you add to your home screen, with push notifications that open it on the request (Web Push) and, optionally, through a self-hosted [ntfy](https://ntfy.sh).
 - **Read and write to any session.** The conversation as you see it on the PC: Markdown, highlighted code, tool calls collapsed into one line. Write a message and it wakes the session, as if you had typed it at the desk.
 - **An approval bus between agents.** `placet_send_to_agent` lets an agent ask another one for a review, a test run or a second opinion. You approve, edit, reject or send it to another session; the reply returns after your separate approval, or you forward it elsewhere.
-- **Relations, projects and automation.** Name sessions as stable nodes and group them into projects. Connect nodes with typed relations, each `manual` or `automatic`. Projects can have their own rules, shared project and role instructions, and stricter anti-loop limits. Agents see the policy, read your effective rule before every automatic send, and stop at loop limits; **Stop all** pauses everything.
+- **Relations, projects and automation.** Name sessions as stable nodes and group them into projects. Connect nodes with typed relations, each `manual` or `automatic`. Projects can have their own rules, shared project and role instructions, and stricter anti-loop limits. Agents see the policy, read your effective rule before every automatic send, and stop at loop limits; **Stop all** pauses everything. Near a provider's 5-hour or weekly usage limit, its automatic relations can fall back to your review.
+- **Reserved commands (in progress).** Restarting the services from the phone, authorized with a passkey (Face ID) on a separate administrative origin; agents can propose, never authorize.
 - **Attachments both ways.** Images you pasted in the desktop apps, pictures an agent generated, PDFs it shared with `placet_share_file`, and photos or files you attach from the phone.
 - **Reliable by design.** Hooks write to a local queue and never block a turn. Each request tracks *delivery*, *execution* and *reply* separately; an uncertain delivery is never re-sent behind your back. One request at a time per session, and time alone never frees the queue.
 - **Adaptive.** Two columns on the desktop, a bottom bar on the phone, a theme per provider.
@@ -110,8 +139,10 @@ Placet is **alpha**, used every day by its author on one machine. The interface 
 - ✅ Attachments: viewing, `placet_share_file`, uploads from the phone; `@` mentions
 - 🚧 "Right now" messages inside a running turn, distinct notifications, waiter health
 - ✅ Nodes, typed relations with manual / automatic policy, a general rule for automatic relations, loop limits and Stop all; change of recipient on approval
+- ✅ Projects with per-project rules, limits and instructions; a live relations diagram; usage guard
 - ✅ Web Push to the installed PWA (a tap opens the request)
-- 🗺️ Projects and a graph editor for relations; a local model provider (OpenJarvis/Ollama)
+- 🚧 Reserved commands confirmed with a passkey: restarts first, then deploys of attested GitHub releases
+- 🗺️ A graph editor for relations; a local model provider (OpenJarvis/Ollama)
 - ✅ Provider usage windows and session model/context/effort where provider data is available
 - 🗺️ Creating sessions from the phone; remote compact/effort controls
 
