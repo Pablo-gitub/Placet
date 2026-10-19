@@ -133,3 +133,13 @@ def test_bridge_disabled_without_token():
     assert resp.status_code == 401
     with pytest.raises(SystemExit):
         HttpStore(token="", client=client)
+
+
+def test_agents_are_known_right_after_boot(setup, monkeypatch):
+    # time.monotonic() counts from boot: a bridge started in the first minute
+    # (login, a fresh CI runner) must still load the agents at once.
+    import bridge.stores
+    monkeypatch.setattr(bridge.stores.time, "monotonic", lambda: 5.0)
+    _, _, daemon, _ = setup
+    spec = daemon.store.session_for("gemini")
+    assert spec is not None and spec.name == "agent-gemini"

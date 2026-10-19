@@ -229,7 +229,8 @@ class HttpStore:
         self.jobs_client.base_url = base_url
         self.jobs_client.headers["Authorization"] = f"Bearer {token}"
         self._sessions: Dict[str, SessionSpec] = {}
-        self._sessions_at = 0.0
+        # None until the first load: monotonic time starts near zero at boot.
+        self._sessions_at: Optional[float] = None
 
     def work(self) -> Work:
         resp = self.client.get("/api/bridge/work")
@@ -307,7 +308,7 @@ class HttpStore:
         self._call_ok("DELETE", f"/api/bridge/requests/{request_id}/delivered")
 
     def session_for(self, agent_id: str) -> Optional[SessionSpec]:
-        if time.monotonic() - self._sessions_at > self.AGENTS_CACHE_SECONDS:
+        if self._sessions_at is None or time.monotonic() - self._sessions_at > self.AGENTS_CACHE_SECONDS:
             resp = self.client.get("/api/agents")
             resp.raise_for_status()
             self._sessions = {
