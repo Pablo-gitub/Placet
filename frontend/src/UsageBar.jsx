@@ -2,13 +2,21 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { Gauge, RotateCcw } from "lucide-react";
 import { formatNumber } from "./i18n/formatters";
-import { providerOf } from "./sessionInfo";
+import { providerOf, timeAgo } from "./sessionInfo";
 import { untilReset, usageRows } from "./usage";
 
 const level = (used) => (used >= 90 ? "high" : used >= 70 ? "mid" : "low");
 
 function Window({ name, value, t }) {
   if (!value) return null;
+  if (value.used === null) {
+    return (
+      <span className="usage-window usage-unknown">
+        <span className="usage-name">{name}</span>
+        <span className="usage-value">—</span>
+      </span>
+    );
+  }
   const reset = value.resetsAt && value.used > 0 ? untilReset(value.resetsAt, t) : null;
   return (
     <span className={`usage-window usage-${level(value.used)}`}>
@@ -43,6 +51,11 @@ export default function UsageBar({ usage }) {
           </span>
           <Window name={t("usage.window5h")} value={row.windows["5h"]} t={t} />
           <Window name={t("usage.window7d")} value={row.windows["7d"]} t={t} />
+          {row.staleSince && (
+            <span className="usage-stale" data-testid={`usage-stale-${row.key}`}>
+              {t(row.provider === "claude-code" ? "usage.staleClaude" : "usage.stale", { time: timeAgo(row.staleSince) })}
+            </span>
+          )}
         </div>
       ))}
     </section>

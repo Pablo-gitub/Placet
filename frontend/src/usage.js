@@ -17,10 +17,16 @@ export function untilReset(iso, t, now = Date.now()) {
   return t("usage.daysHours", { d: Math.floor(hours / 24), h: hours % 24 });
 }
 
+// Providers asked periodically: old data means the reading failed, not that
+// nothing was used (Claude needs a valid Claude Code login on this PC).
+const POLLED = new Set(["claude-code", "antigravity"]);
+export const STALE_MS = 20 * 60 * 1000;
+
 /**
  * The rows to show: one per provider, or one per model group when a provider
  * has several (Antigravity: Gemini, and Claude/GPT). A window whose reset time
- * has passed counts as unused: the data may predate the reset.
+ * has passed counts as unused, unless the provider's data is stale: then the
+ * value is unknown (`used: null`), since usage after the reset was not read.
  */
 export function usageRows(providers, now = Date.now()) {
   const rows = [];
@@ -30,18 +36,23 @@ export function usageRows(providers, now = Date.now()) {
   list.sort((a, b) => order(a?.provider) - order(b?.provider));
   for (const usage of list) {
     const buckets = Array.isArray(usage?.buckets) ? usage.buckets : [];
+    const observed = usage?.observed_at ? new Date(usage.observed_at).getTime() : null;
+    const stale = POLLED.has(usage?.provider) && observed !== null && now - observed > STALE_MS;
     const groups = [...new Set(buckets.map((b) => b.group || ""))];
     for (const group of groups) {
       const windows = {};
       for (const b of buckets.filter((x) => (x.group || "") === group)) {
         const expired = b.resets_at && new Date(b.resets_at).getTime() <= now;
-        windows[b.window] = { used: expired ? 0 : b.used_percent, resetsAt: expired ? null : b.resets_at };
+        windows[b.window] = expired
+          ? { used: stale ? null : 0, resetsAt: null }
+          : { used: b.used_percent, resetsAt: b.resets_at };
       }
       rows.push({
         key: `${usage.provider}:${group}`,
         provider: usage.provider,
         group: group.replace(/\s+models$/i, ""),
         windows,
+        staleSince: stale ? usage.observed_at : null,
       });
     }
   }

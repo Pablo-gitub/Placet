@@ -383,7 +383,9 @@
     "resetIn": "reset {{time}}",
     "minutes": "{{m}} min",
     "hoursMinutes": "{{h}}h{{m}}",
-    "daysHours": "{{d}}g {{h}}h"
+    "daysHours": "{{d}}g {{h}}h",
+    "stale": "Ultimo aggiornamento: {{time}}.",
+    "staleClaude": "Ultimo aggiornamento: {{time}}. Apri una volta Claude Code nel terminale per rinnovare l'accesso, poi Placet torna a leggere i consumi."
   },
   "node": {
     "title": "Nome del nodo",

@@ -1309,3 +1309,5 @@ body.chat-open { overflow: hidden; }
 .automation-limits label { display: grid; gap: 0.2rem; color: var(--text-muted); }
 .automation-limits input { width: 5rem; font: inherit; padding: 0.3rem; border-radius: 6px;
   border: 1px solid var(--border-color); background: var(--bg-card, transparent); color: var(--text-main); }
+.usage-stale { grid-column: 1 / -1; font-size: 0.72rem; color: var(--text-muted); }
+.usage-unknown .usage-value { color: var(--text-muted); }

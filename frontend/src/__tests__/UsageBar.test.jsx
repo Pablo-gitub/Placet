@@ -77,3 +77,21 @@ describe("usage limit", () => {
       new Date("2026-10-18T20:00:00Z").getTime())).toBeNull();
   });
 });
+
+describe("stale usage", () => {
+  it("shows an unknown value, not 0%, when a polled provider's data predates the reset", () => {
+    const old = { provider: "claude-code", observed_at: "2026-10-18T08:00:00Z", buckets: [
+      { id: "five_hour", group: null, window: "5h", used_percent: 40, resets_at: "2026-10-18T10:00:00Z" },
+      { id: "seven_day", group: null, window: "7d", used_percent: 30, resets_at: "2026-10-23T10:00:00Z" },
+    ] };
+    const [row] = usageRows([old], NOW);
+    expect(row.windows["5h"].used).toBeNull();
+    expect(row.windows["7d"].used).toBe(30);
+    expect(row.staleSince).toBe(old.observed_at);
+    // Codex reports on use: no newer data after a reset means nothing was used.
+    const [codexRow] = usageRows([{ ...old, provider: "codex" }], NOW);
+    expect(codexRow.windows["5h"].used).toBe(0);
+    expect(codexRow.staleSince).toBeNull();
+  });
+});
+

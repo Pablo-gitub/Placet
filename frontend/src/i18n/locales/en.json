@@ -383,7 +383,9 @@
     "resetIn": "reset {{time}}",
     "minutes": "{{m}} min",
     "hoursMinutes": "{{h}}h{{m}}",
-    "daysHours": "{{d}}d {{h}}h"
+    "daysHours": "{{d}}d {{h}}h",
+    "stale": "Last updated {{time}}.",
+    "staleClaude": "Last updated {{time}}: open Claude Code in a terminal once to renew its login, then Placet can read the usage again."
   },
   "node": {
     "title": "Node name",
