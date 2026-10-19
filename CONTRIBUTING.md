@@ -35,8 +35,10 @@ The administrative package (`admin_executor/`) is tested in its own environment,
 ```bash
 python3 -m venv /tmp/admin-venv
 /tmp/admin-venv/bin/pip install -r admin_executor/requirements.txt pytest pytest-asyncio httpx
-PLACET_TEST_SYSTEMD=1 /tmp/admin-venv/bin/python -m pytest -q --noconftest $(ls tests/test_admin_*.py | grep -v test_admin_commands.py)
+/tmp/admin-venv/bin/python -m pytest -q --noconftest $(ls tests/test_admin_*.py | grep -v test_admin_commands.py)
 ```
+
+Before installing on the PC, also set `PLACET_TEST_SYSTEMD=1`: it checks the generated units against this host's binaries (CI skips it).
 
 GitHub Actions (`.github/workflows/checks.yml`) runs four jobs on every pull request and on `main`: documentation links, PWA (tests, lint, build), backend (with the built PWA) and the administrative package in its separate environment. Actions are pinned to commit SHAs; Dependabot proposes weekly updates as pull requests. CI never deploys: a release is installed only through a reserved command confirmed with a passkey (see [reserved commands](docs/plans/reserved-commands.md)).
 

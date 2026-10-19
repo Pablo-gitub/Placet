@@ -104,8 +104,8 @@ jobs:
         # Never the application requirements: this proves the protected code
         # needs nothing from the application environment.
         run: python -m pip install -r admin_executor/requirements.txt pytest pytest-asyncio httpx
-      - name: Test the administrative package, with the systemd unit checks
-        env:
-          PLACET_TEST_SYSTEMD: '1'
-        # No shared conftest: it imports the application.
+      - name: Test the administrative package
+        # No shared conftest: it imports the application. The systemd unit
+        # checks (PLACET_TEST_SYSTEMD=1) resolve this host's binaries, such as
+        # tailscaled: they run on the PC before installing, not here.
         run: python -m pytest -q --noconftest $(ls tests/test_admin_*.py | grep -v test_admin_commands.py)
