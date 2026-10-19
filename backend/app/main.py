@@ -1789,6 +1789,24 @@ def create_app(
         require_human(who)
         return stored_usage()
 
+    @app.post("/api/usage/claude/renew")
+    async def renew_claude_usage(who: Principal = Depends(principal)):
+        require_human(who)
+
+        def local():
+            from bridge.usage import renew_claude_credentials, claude_usage, reset_usage_caches
+            if not renew_claude_credentials():
+                raise ProductError(502, "claude_renew.failed", "Claude credential renewal failed.")
+            reset_usage_caches()
+            row = claude_usage()
+            if row is not None:
+                db.set_usage(row.provider, row.model_dump_json())
+                _broadcast(("usage", None))
+            return {"renewed": True}
+
+        errors = {"failed": (502, "Claude credential renewal failed.")}
+        return await bridge_call("claude_renew", {}, local, errors)
+
     @app.post("/api/bridge/folders")
     async def bridge_folders(payload: FoldersReport, who: Principal = Depends(principal)):
         """Which folders have a `.placet-off` (RF-45), as the bridge found them."""

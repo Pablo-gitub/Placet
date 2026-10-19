@@ -426,6 +426,20 @@ class BridgeDaemon:
                     agent_id=job.get("agent_id"),
                 )
                 page = {"mime": mime, "data": base64.b64encode(data).decode("ascii")}
+            elif kind == "claude_renew":
+                ok = renew_claude_credentials()
+                if not ok:
+                    return {"ok": False, "error": "failed", "message": "Claude renewal failed."}
+                self._claude_usage_at = -CLAUDE_EVERY_SECONDS
+                self._usage_at = -USAGE_EVERY_SECONDS
+                usage = claude_usage()
+                if usage:
+                    self._claude_usage = usage
+                    try:
+                        self.store.report_usage([usage])
+                    except Exception as e:
+                        logger.debug(f"Usage report: {e}")
+                page = {"renewed": True, "usage": usage}
             else:
                 return {"ok": False, "error": "unknown_job", "message": f"Unknown job {kind!r}."}
             return {"ok": True, "page": page}

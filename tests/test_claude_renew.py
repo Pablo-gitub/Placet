@@ -1,6 +1,7 @@
 """Tests for Claude credential renewal (Part A: automatic renewal)."""
 import json
 import logging
+import os
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -120,20 +121,61 @@ def test_renew_missing_claude_logs_warning_once(caplog):
     bu._claude_missing_warned = False
 
     with patch("shutil.which", return_value=None):
-        with patch("subprocess.run") as mock_run:
-            with caplog.at_level(logging.WARNING):
-                # First attempt logs warning
-                ok1 = renew_claude_credentials()
-                assert ok1 is False
-                assert mock_run.call_count == 0
-                assert any("claude CLI binary not found" in record.message for record in caplog.records)
+        with patch("pathlib.Path.home", return_value=Path("/nonexistent")):
+            with patch("subprocess.run") as mock_run:
+                with caplog.at_level(logging.WARNING):
+                    # First attempt logs warning
+                    ok1 = renew_claude_credentials()
+                    assert ok1 is False
+                    assert mock_run.call_count == 0
+                    assert any("claude CLI binary not found" in record.message for record in caplog.records)
 
-                caplog.clear()
-                # Second attempt does NOT log warning again
-                ok2 = renew_claude_credentials()
-                assert ok2 is False
-                assert mock_run.call_count == 0
-                assert not any("claude CLI binary not found" in record.message for record in caplog.records)
+                    caplog.clear()
+                    # Second attempt does NOT log warning again
+                    ok2 = renew_claude_credentials()
+                    assert ok2 is False
+                    assert mock_run.call_count == 0
+                    assert not any("claude CLI binary not found" in record.message for record in caplog.records)
+
+
+def test_renew_claude_env_var(monkeypatch):
+    monkeypatch.setenv("PLACET_CLAUDE_BIN", "/custom/bin/claude")
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0)
+        ok = renew_claude_credentials()
+        assert ok is True
+        mock_run.assert_called_once()
+        assert mock_run.call_args[0][0][0] == "/custom/bin/claude"
+
+
+def test_renew_claude_fallback_local_bin(tmp_path, monkeypatch):
+    monkeypatch.delenv("PLACET_CLAUDE_BIN", raising=False)
+    fake_home = tmp_path / "user"
+    local_bin = fake_home / ".local" / "bin"
+    local_bin.mkdir(parents=True)
+    fake_claude = local_bin / "claude"
+    fake_claude.write_text("#!/bin/sh\nexit 0\n")
+    fake_claude.chmod(0o755)
+
+    with patch("pathlib.Path.home", return_value=fake_home):
+        with patch("shutil.which", return_value=None):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(returncode=0)
+                ok = renew_claude_credentials()
+                assert ok is True
+                mock_run.assert_called_once()
+                assert mock_run.call_args[0][0][0] == str(fake_claude)
+
+            # If not owned by current user -> rejected
+            with patch("subprocess.run") as mock_run:
+                fake_stat = fake_claude.stat()
+                with patch("os.stat") as mock_stat:
+                    mock_stat_res = MagicMock(st_uid=os.getuid() + 999, st_mode=fake_stat.st_mode)
+                    mock_stat.return_value = mock_stat_res
+                    with patch.object(Path, "stat", return_value=mock_stat_res):
+                        ok = renew_claude_credentials()
+                        assert ok is False
+                        mock_run.assert_not_called()
 
 
 def test_bridge_auto_renew_condition_and_cooldown(monkeypatch):
@@ -170,3 +212,80 @@ def test_bridge_auto_renew_condition_and_cooldown(monkeypatch):
                 daemon._claude_renew_at -= (CLAUDE_RENEW_COOLDOWN_SECONDS + 1)
                 daemon.run_loop_step()
                 assert mock_renew.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_manual_renew_endpoint_requires_human_and_rejects_agents(setup):
+    app, db = setup
+    for token in ["tok-claude", "tok-bridge", "tok-gemini"]:
+        async with agent_client(app, token) as caller:
+            res = await caller.post("/api/usage/claude/renew")
+            assert res.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_manual_renew_endpoint_offline_and_success(setup):
+    import asyncio
+    app, db = setup
+    # 1. Bridge offline -> 503 bridge.offline
+    async with human_client(app) as human:
+        res = await human.post("/api/usage/claude/renew")
+        assert res.status_code == 503
+        assert res.json()["code"] == "bridge.offline"
+
+    # 2. Bridge failure -> 502 claude_renew.failed
+    async def run_fail_bridge():
+        async with agent_client(app, "tok-bridge") as bridge:
+            resp = await bridge.get("/api/bridge/jobs?wait_seconds=5")
+            if resp.status_code == 200:
+                for job in resp.json()["jobs"]:
+                    await bridge.post(f"/api/bridge/jobs/{job['id']}/result", json={"ok": False, "error": "failed"})
+
+    task = asyncio.create_task(run_fail_bridge())
+    await asyncio.sleep(0.05)
+    async with human_client(app) as human:
+        res = await human.post("/api/usage/claude/renew")
+        assert res.status_code == 502
+        assert res.json()["code"] == "claude_renew.failed"
+    await task
+
+    # 3. Bridge success -> 200
+    async def run_success_bridge():
+        async with agent_client(app, "tok-bridge") as bridge:
+            resp = await bridge.get("/api/bridge/jobs?wait_seconds=5")
+            if resp.status_code == 200:
+                for job in resp.json()["jobs"]:
+                    await bridge.post(f"/api/bridge/jobs/{job['id']}/result", json={"ok": True, "page": {"renewed": True}})
+
+    task = asyncio.create_task(run_success_bridge())
+    await asyncio.sleep(0.05)
+    async with human_client(app) as human:
+        res = await human.post("/api/usage/claude/renew")
+        assert res.status_code == 200
+        assert res.json() == {"renewed": True}
+    await task
+
+
+def test_bridge_handle_job_claude_renew():
+    store = MagicMock()
+    daemon = BridgeDaemon(store=store)
+
+    # Success case: runs renewal, resets cache, reads usage and reports to store
+    with patch("bridge.bridge_daemon.renew_claude_credentials", return_value=True) as mock_renew:
+        with patch("bridge.bridge_daemon.claude_usage", return_value={"provider": "claude-code", "buckets": [{"id": "5h"}]}) as mock_usage:
+            result = daemon.handle_job({"kind": "claude_renew", "id": "job1"})
+            assert result["ok"] is True
+            assert result["page"]["renewed"] is True
+            mock_renew.assert_called_once()
+            mock_usage.assert_called_once()
+            store.report_usage.assert_called_once_with([{"provider": "claude-code", "buckets": [{"id": "5h"}]}])
+
+    # Error case: renewal command returns False
+    store.reset_mock()
+    with patch("bridge.bridge_daemon.renew_claude_credentials", return_value=False):
+        result = daemon.handle_job({"kind": "claude_renew", "id": "job2"})
+        assert result["ok"] is False
+        assert result["error"] == "failed"
+        # No sensitive details or output in the message
+        assert "command output" not in result.get("message", "").lower()
+        store.report_usage.assert_not_called()

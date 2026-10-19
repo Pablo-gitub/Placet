@@ -1357,3 +1357,22 @@ body.chat-open { overflow: hidden; }
   border: 1px solid var(--border-color); background: var(--bg-card, transparent); color: var(--text-main); }
 .usage-stale { grid-column: 1 / -1; font-size: 0.72rem; color: var(--text-muted); }
 .usage-unknown .usage-value { color: var(--text-muted); }
+.btn-renew-claude {
+  margin-left: 0.5rem;
+  padding: 0.15rem 0.45rem;
+  font-size: 0.72rem;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card, transparent);
+  color: var(--text-main);
+  cursor: pointer;
+}
+.btn-renew-claude:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.usage-renew-error {
+  grid-column: 1 / -1;
+  font-size: 0.72rem;
+  color: var(--danger, #ef4444);
+}

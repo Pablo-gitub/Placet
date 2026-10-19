@@ -76,6 +76,7 @@ cd ..
 | `PLACET_BRIDGE_TOKEN` | Bridge token, accepted only on the `/api/bridge/*` endpoints |
 | `PLACET_API_URL` | For the bridge and the MCP server: the backend address (default `http://127.0.0.1:8000`) |
 | `PLACET_CODEX_BIN` | For the bridge: the `codex` binary with the `queue` command (default: the app's own, `/usr/lib/chatgpt/resources/codex`, then the one in `PATH`) |
+| `PLACET_CLAUDE_BIN` | For the bridge: the Claude Code CLI binary used for credential renewal (default: `PATH`, then `~/.local/bin/claude`) |
 | `PLACET_TRANSCRIPTS_LOCAL` | `1` = the backend reads session conversations itself instead of asking the bridge. Single-process development only (`run_all.py` sets it); never in production, where the backend has no access to the user's files |
 | `PLACET_BASE_URL` | PWA address as seen from the phone (e.g. `https://server.tail1234.ts.net`), used in notification links |
 | `PLACET_NTFY_URL`, `PLACET_NTFY_TOPIC`, `PLACET_NTFY_TOKEN` | ntfy server, topic and access token. Without URL, topic and `PLACET_BASE_URL`, notifications are off |

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Gauge, RotateCcw, SlidersHorizontal } from "lucide-react";
 import { formatNumber } from "./i18n/formatters";
+import { apiErrorDescriptor } from "./i18n/errors";
 import { providerOf, timeAgo } from "./sessionInfo";
 import { untilReset, usageRows } from "./usage";
 
@@ -36,10 +37,12 @@ function Window({ name, value, t }) {
 }
 
 /** RF-60: one row per provider with its 5-hour and weekly windows. */
-export default function UsageBar({ usage }) {
+export default function UsageBar({ usage, onRefresh }) {
   const { t } = useTranslation();
   const [showClaudeMenu, setShowClaudeMenu] = useState(false);
   const [autoRenew, setAutoRenew] = useState(false);
+  const [renewing, setRenewing] = useState(false);
+  const [renewError, setRenewError] = useState(null);
 
   useEffect(() => {
     fetch("/api/settings/claude-renew")
@@ -69,6 +72,26 @@ export default function UsageBar({ usage }) {
       .catch(() => {
         setAutoRenew(!next);
       });
+  };
+
+  const handleManualRenew = async () => {
+    setRenewing(true);
+    setRenewError(null);
+    try {
+      const res = await fetch("/api/usage/claude/renew", { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        setRenewError(apiErrorDescriptor(data, res.status));
+      } else {
+        if (typeof onRefresh === "function") {
+          onRefresh();
+        }
+      }
+    } catch {
+      setRenewError({ key: "errors.connection" });
+    } finally {
+      setRenewing(false);
+    }
   };
 
   const rows = usageRows(usage);
@@ -114,7 +137,23 @@ export default function UsageBar({ usage }) {
           {row.staleSince && (
             <span className="usage-stale" data-testid={`usage-stale-${row.key}`}>
               {t(row.provider === "claude-code" ? "usage.staleClaude" : "usage.stale", { time: timeAgo(row.staleSince) })}
+              {row.provider === "claude-code" && (
+                <button
+                  type="button"
+                  className="btn-renew-claude"
+                  data-testid="btn-claude-renew"
+                  disabled={renewing}
+                  onClick={handleManualRenew}
+                >
+                  {renewing ? t("usage.renewing") : t("usage.renewClaude")}
+                </button>
+              )}
             </span>
+          )}
+          {row.provider === "claude-code" && renewError && (
+            <div className="usage-renew-error" role="alert" data-testid="claude-renew-error">
+              {t(renewError.key, renewError.params)}
+            </div>
           )}
         </div>
       ))}

@@ -144,3 +144,80 @@ describe("Claude auto-renew menu in UsageBar", () => {
   });
 });
 
+describe("Claude manual renew in UsageBar", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("does not show renew button when Claude data is fresh", () => {
+    const freshClaude = {
+      provider: "claude-code",
+      observed_at: new Date().toISOString(),
+      buckets: [
+        { id: "five_hour", group: null, window: "5h", used_percent: 50, resets_at: new Date(Date.now() + 3600000).toISOString() },
+      ],
+    };
+    render(<UsageBar usage={[freshClaude]} />);
+    expect(screen.queryByTestId("btn-claude-renew")).toBeNull();
+  });
+
+  it("shows renew button when Claude data is stale, handles click, error and success", async () => {
+    const { fireEvent } = await import("@testing-library/react");
+    const staleClaude = {
+      provider: "claude-code",
+      observed_at: new Date(Date.now() - 3600000).toISOString(),
+      buckets: [
+        { id: "five_hour", group: null, window: "5h", used_percent: 50, resets_at: new Date(Date.now() - 1800000).toISOString() },
+      ],
+    };
+
+    let renewResolve;
+    global.fetch = vi.fn().mockImplementation((url, opts) => {
+      if (url === "/api/settings/claude-renew") {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ enabled: false }) });
+      }
+      if (url === "/api/usage/claude/renew" && opts?.method === "POST") {
+        return new Promise((resolve) => { renewResolve = resolve; });
+      }
+      return Promise.reject(new Error(`unexpected fetch ${url}`));
+    });
+
+    const onRefresh = vi.fn();
+    render(<UsageBar usage={[staleClaude]} onRefresh={onRefresh} />);
+
+    const renewBtn = screen.getByTestId("btn-claude-renew");
+    expect(renewBtn).not.toBeNull();
+
+    // Click triggers POST and shows renewing state
+    fireEvent.click(renewBtn);
+    expect(renewBtn).toBeDisabled();
+
+    // 1. Error response shows alert
+    renewResolve({
+      ok: false,
+      status: 502,
+      json: () => Promise.resolve({ code: "claude_renew.failed" }),
+    });
+
+    const errorAlert = await screen.findByTestId("claude-renew-error");
+    expect(errorAlert).not.toBeNull();
+    expect(renewBtn).not.toBeDisabled();
+
+    // 2. Success triggers onRefresh
+    global.fetch = vi.fn().mockImplementation((url, opts) => {
+      if (url === "/api/usage/claude/renew" && opts?.method === "POST") {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ renewed: true }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    fireEvent.click(renewBtn);
+    await vi.waitFor(() => {
+      expect(onRefresh).toHaveBeenCalled();
+    });
+  });
+});
+

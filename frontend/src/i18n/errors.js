@@ -58,6 +58,7 @@ export function apiErrorDescriptor(body, status) {
     "return.empty": "errors.returnEmpty",
     "return.unavailable": "errors.returnUnavailable",
     "return.forward_invalid": "errors.forwardInvalid",
+    "claude_renew.failed": "errors.claudeRenewFailed",
   };
   const key = Object.hasOwn(codes, body?.code) ? codes[body.code] : null;
   if (key) {

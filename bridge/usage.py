@@ -57,7 +57,16 @@ def claude_token_needs_renew(home: Optional[Path] = None, threshold_seconds: flo
 def renew_claude_credentials(claude_bin: Optional[str] = None, timeout: float = 30.0) -> bool:
     """Runs `claude auth status` without a shell, discarding stdout/stderr."""
     global _claude_missing_warned
-    bin_path = claude_bin or shutil.which("claude")
+    bin_path = claude_bin or os.environ.get("PLACET_CLAUDE_BIN")
+    if not bin_path:
+        bin_path = shutil.which("claude")
+    if not bin_path:
+        fallback = Path.home() / ".local" / "bin" / "claude"
+        try:
+            if fallback.is_file() and os.access(fallback, os.X_OK) and fallback.stat().st_uid == os.getuid():
+                bin_path = str(fallback)
+        except OSError:
+            bin_path = None
     if not bin_path:
         if not _claude_missing_warned:
             _claude_missing_warned = True

@@ -119,6 +119,7 @@
     "uploadFailed": "Attachment transfer failed. Your message was not sent.",
     "bridgeOffline": "The PC is not responding: the bridge is offline. Try again when it is connected.",
     "bridgeTimeout": "The PC did not respond in time. Try again.",
+    "claudeRenewFailed": "Unable to renew Claude access. Open Claude Code in a terminal to authenticate.",
     "messageUnavailable": "The session became unavailable. Your message was not sent.",
     "connection": "Connection error. Try again.",
     "transcriptConnection": "Unable to load the conversation. Check the connection and try again.",
@@ -387,7 +388,10 @@
     "stale": "Last updated {{time}}.",
     "staleClaude": "Last updated {{time}}: open Claude Code in a terminal once to renew its login, then Placet can read the usage again.",
     "autoRenew": "Renew Claude access automatically",
-    "claudeOptions": "Claude options"
+    "claudeOptions": "Claude options",
+    "renewClaude": "Renew Claude access",
+    "renewing": "Renewing…",
+    "renewSuccess": "Claude access renewed."
   },
   "node": {
     "title": "Node name",

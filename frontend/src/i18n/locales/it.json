@@ -119,6 +119,7 @@
     "uploadFailed": "Trasferimento degli allegati non riuscito. Messaggio non inviato.",
     "bridgeOffline": "Il PC non risponde: il bridge non è attivo. Riprova quando torna connesso.",
     "bridgeTimeout": "Il PC non ha risposto in tempo. Riprova.",
+    "claudeRenewFailed": "Impossibile rinnovare l'accesso a Claude. Apri Claude Code in un terminale per autenticarti.",
     "messageUnavailable": "Sessione non più disponibile: messaggio non inviato.",
     "connection": "Errore di connessione.",
     "transcriptConnection": "Impossibile caricare la conversazione. Controlla la connessione e riprova.",
@@ -387,7 +388,10 @@
     "stale": "Ultimo aggiornamento: {{time}}.",
     "staleClaude": "Ultimo aggiornamento: {{time}}. Apri una volta Claude Code nel terminale per rinnovare l'accesso, poi Placet torna a leggere i consumi.",
     "autoRenew": "Rinnova automaticamente l'accesso di Claude",
-    "claudeOptions": "Opzioni Claude"
+    "claudeOptions": "Opzioni Claude",
+    "renewClaude": "Rinnova accesso Claude",
+    "renewing": "Rinnovo in corso…",
+    "renewSuccess": "Accesso Claude rinnovato."
   },
   "node": {
     "title": "Nome del nodo",
