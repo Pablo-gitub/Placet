@@ -39,10 +39,10 @@ import placet_common  # noqa: E402
 import spool  # noqa: E402
 
 PLACET_REQUEST = re.compile(r"\[Placet Request #(\d+)\b")
-# RF-29d: continued conversation prompt from Claude Code
-CONTINUED_CONVERSATION = re.compile(
-    r"This session is being continued from a previous conversation.*?\b([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})",
-    re.DOTALL,
+# RF-29d: continued conversation prompt from Claude Code (transcript ending in <uuid>.jsonl)
+CONTINUED_PREFIX = "This session is being continued from a previous conversation"
+CONTINUED_JSONL_UUID = re.compile(
+    r"\b([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl\b"
 )
 # Claude Code names MCP tools mcp__<server>__<tool>; other clients may not.
 PLACET_TOOLS = re.compile(r"(^|__|\.|/)placet_(ask_human|send_to_agent)$")
@@ -110,9 +110,11 @@ def build_event(event: dict, provider: str = "claude-code"):
         match = PLACET_REQUEST.search(prompt_text)
         if match:
             payload["request_id"] = int(match.group(1))
-        cont_match = CONTINUED_CONVERSATION.search(prompt_text)
-        if cont_match:
-            payload["continues"] = cont_match.group(1).lower()
+        cont_idx = prompt_text.find(CONTINUED_PREFIX)
+        if cont_idx != -1:
+            jsonl_uuids = CONTINUED_JSONL_UUID.findall(prompt_text[cont_idx:])
+            if jsonl_uuids:
+                payload["continues"] = jsonl_uuids[-1].lower()
         return payload
     if name == "PostToolUse" and PLACET_TOOLS.search(event.get("tool_name") or ""):
         request_id = _request_id_from_tool_response(event.get("tool_response"))

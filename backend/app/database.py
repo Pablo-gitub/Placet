@@ -365,6 +365,10 @@ class Database:
                     cursor.execute(f"ALTER TABLE sessions ADD COLUMN {col} TEXT;")
             if "prompt_count" not in session_cols:
                 cursor.execute("ALTER TABLE sessions ADD COLUMN prompt_count INTEGER NOT NULL DEFAULT 0;")
+                cursor.execute(
+                    "UPDATE sessions SET prompt_count = 1"
+                    " WHERE activity_at > started_at OR turn_request_id IS NOT NULL OR ended_at IS NOT NULL;"
+                )
             # RFC-02: the stable named node the session is attached to.
             if "node_id" not in session_cols:
                 cursor.execute("ALTER TABLE sessions ADD COLUMN node_id INTEGER;")

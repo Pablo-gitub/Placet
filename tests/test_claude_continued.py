@@ -31,11 +31,31 @@ def test_hook_extracts_continues_uuid():
     payload1 = build_event(event1)
     assert payload1.get("continues") == "11111111-2222-3333-4444-555555555555"
 
-    # Prompt with direct UUID
+    # Prompt with extraneous UUIDs before the .jsonl path: must capture the .jsonl UUID, not the first UUID
+    prompt_with_extraneous = (
+        "This session is being continued from a previous conversation. "
+        "Context mentions request 9254eb8a-6e7c-4566-bd1a-b0d0280304fe and session 483d00d3-8a5a-452a-a303-281448994398. "
+        "read the full transcript at: /home/paolo/.claude/projects/myproj/11111111-2222-3333-4444-555555555555.jsonl"
+    )
+    event_ext = {"hook_event_name": "UserPromptSubmit", "prompt": prompt_with_extraneous, "cwd": "/home/paolo/repo"}
+    payload_ext = build_event(event_ext)
+    assert payload_ext.get("continues") == "11111111-2222-3333-4444-555555555555"
+
+    # Multiple .jsonl files in summary: take the last one
+    prompt_multiple_jsonl = (
+        "This session is being continued from a previous conversation. "
+        "Previous path /old/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.jsonl was archived. "
+        "read the full transcript at: /home/paolo/.claude/projects/myproj/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.jsonl"
+    )
+    event_mult = {"hook_event_name": "UserPromptSubmit", "prompt": prompt_multiple_jsonl, "cwd": "/home/paolo/repo"}
+    payload_mult = build_event(event_mult)
+    assert payload_mult.get("continues") == "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+
+    # Prompt without .jsonl extension: should NOT match
     prompt_uuid = "This session is being continued from a previous conversation: aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
     event2 = {"hook_event_name": "UserPromptSubmit", "prompt": prompt_uuid, "cwd": "/home/paolo/repo"}
     payload2 = build_event(event2)
-    assert payload2.get("continues") == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    assert "continues" not in payload2 or payload2.get("continues") is None
 
     # Regular prompt
     event3 = {"hook_event_name": "UserPromptSubmit", "prompt": "Please review my code", "cwd": "/home/paolo/repo"}
@@ -46,6 +66,46 @@ def test_hook_extracts_continues_uuid():
     event4 = {"hook_event_name": "UserPromptSubmit", "prompt": "This session is being continued from a previous conversation without uuid", "cwd": "/home/paolo/repo"}
     payload4 = build_event(event4)
     assert "continues" not in payload4 or payload4.get("continues") is None
+
+
+def test_migration_sets_prompt_count_for_existing_sessions():
+    import sqlite3
+    tmp_path = os.path.join(tempfile.mkdtemp(), "placet_legacy.db")
+    with sqlite3.connect(tmp_path) as conn:
+        conn.execute("""
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            provider TEXT,
+            entrypoint TEXT,
+            started_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            waiter_seen_at TEXT,
+            activity_at TEXT,
+            ended_at TEXT,
+            turn_request_id INTEGER
+        );
+        """)
+        conn.execute("""
+        INSERT INTO sessions (id, agent_id, started_at, last_seen_at, activity_at, ended_at, turn_request_id)
+        VALUES
+        ('s1', 'claude', '2026-10-19T10:00:00', '2026-10-19T10:05:00', '2026-10-19T10:05:00', NULL, NULL),
+        ('s2', 'claude', '2026-10-19T10:00:00', '2026-10-19T10:00:00', '2026-10-19T10:00:00', NULL, 42),
+        ('s3', 'claude', '2026-10-19T10:00:00', '2026-10-19T10:00:00', '2026-10-19T10:00:00', '2026-10-19T10:02:00', NULL),
+        ('s4', 'claude', '2026-10-19T10:00:00', '2026-10-19T10:00:00', '2026-10-19T10:00:00', NULL, NULL);
+        """)
+
+    db = Database(tmp_path)
+    db.init_db()
+
+    with sqlite3.connect(tmp_path) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = {r["id"]: r["prompt_count"] for r in conn.execute("SELECT id, prompt_count FROM sessions").fetchall()}
+
+    assert rows["s1"] == 1
+    assert rows["s2"] == 1
+    assert rows["s3"] == 1
+    assert rows["s4"] == 0
 
 
 @pytest.mark.asyncio
