@@ -18,7 +18,7 @@ MODULES = ("__init__.py", "jobs.py", "artifacts.py", "releases.py", "bootstrap.p
            "network_bootstrap.py", "web.py", "terminal.py", "serve.py", "web_service.py",
            "web_bootstrap.py", "web_dependencies.py",
            "mailbox_helper.py", "execution.py", "restart.py", "bridge_restart.py", "supervisor.py",
-           "broker.py", "control.py",
+           "broker.py", "control.py", "activation_bootstrap.py", "activation_checks.py", "activation_units.py",
            "web_static/index.html", "web_static/style.css",
            "web_static/app.js", "web_static/en.json", "web_static/it.json")
 CODE = Path("usr/local/lib/placet-admin")
