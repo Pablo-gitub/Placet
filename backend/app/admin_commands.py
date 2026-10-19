@@ -6,6 +6,7 @@ The separate root broker validates the backend UID and requires a human passkey
 on its own origin before creating an executable authorization.
 """
 import json
+import re
 import socket
 import struct
 from typing import Literal
@@ -108,9 +109,18 @@ def public_catalogue(raw):
     actions = [PublicAction.model_validate(action).model_dump() for action in raw['actions']]
     if len({action['id'] for action in actions}) != len(actions) or raw['execution_enabled'] != any(action['enabled'] for action in actions):
         raise AdminUnavailable()
+    blocked = raw.get('blocked_job_id')
+    if blocked is not None and (not isinstance(blocked, str) or not re.fullmatch(r'[a-f0-9]{32}', blocked)):
+        raise AdminUnavailable()
+    recent = []
+    for item in raw.get('recent', []):
+        try:
+            recent.append(public_proposal(item))
+        except (ValueError, KeyError, TypeError, AdminUnavailable):
+            continue
     return {'status': 'available', 'revision': 1, 'execution_enabled': raw['execution_enabled'],
             'actions': [action for action in actions if action['enabled']],
-            'recent': [public_proposal(item) for item in raw.get('recent', [])]}
+            'recent': recent, 'blocked_job_id': blocked}
 
 
 def failure(code, status):

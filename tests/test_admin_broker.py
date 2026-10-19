@@ -239,3 +239,27 @@ def test_proposal_expiring_during_verification_rolls_back_authorization(broker, 
     with sqlite3.connect(service.store.path) as db:
         assert db.execute('SELECT count(*) FROM authorized_jobs').fetchone()[0] == 0
         assert db.execute('SELECT consumed FROM challenges').fetchone()[0] == 0
+
+
+def test_invalid_historical_proposal_does_not_hide_catalogue(broker):
+    service, *_ = broker
+    identifier = proposal(service)
+    with sqlite3.connect(service.store.path) as db:
+        db.execute('INSERT INTO confirmation_proposals VALUES (?,?,?,?)',
+                   ('b' * 32, 'removed-action', '{"action":"removed"}', 99999999999))
+    result = service.catalogue()
+    assert result['execution_enabled'] is True
+    assert result['recent'][0]['id'] == identifier
+
+
+def test_catalogue_exposes_uncertainty_gate_even_outside_recent_history(broker):
+    service, private, _ = broker
+    identifier = proposal(service)
+    challenge = service.challenge(identifier)
+    job = service.authorize(identifier, challenge['id'], assertion(private, challenge))
+    Supervisor(service.execution, enabled={'restart-backend'}, handler=lambda _: 'outcome_unknown').run_once()
+    for i in range(11):
+        service.propose('later-' + str(i), 'restart-bridge', {})
+    result = service.catalogue()
+    assert identifier not in [item['id'] for item in result['recent']]
+    assert result['blocked_job_id'] == job['job_id']

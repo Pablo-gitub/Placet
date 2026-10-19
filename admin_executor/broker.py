@@ -49,10 +49,19 @@ class ConfirmationBroker:
         policy = self._policy()
         with closing(sqlite3.connect(self.store.path)) as db:
             recent = db.execute('SELECT id FROM confirmation_proposals ORDER BY created_at DESC,rowid DESC LIMIT 10').fetchall()
+            blocked = db.execute("SELECT job_id FROM execution_jobs WHERE state='outcome_unknown' ORDER BY claimed_at LIMIT 1").fetchone()
+        public_recent = []
+        for row in recent:
+            try:
+                public_recent.append(self.view(row[0]))
+            except (ValueError, KeyError, TypeError):
+                # History is not catalogue policy. Removed or invalid old
+                # intents must not hide the currently protected action list.
+                continue
         return {'revision': policy.revision, 'execution_enabled': bool(policy.enabled),
                 'actions': [{'id': action, 'summary': SUMMARIES[action], 'parameters': {},
                              'enabled': action in policy.enabled} for action in sorted(ACTIONS)],
-                'recent': [self.view(row[0]) for row in recent]}
+                'recent': public_recent, 'blocked_job_id': blocked[0] if blocked else None}
 
     def propose(self, request_key, action, parameters):
         if not isinstance(request_key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', request_key):

@@ -194,3 +194,20 @@ The interface supports English/Italian, English fallback and a local browser pre
 | 6 | **Project graph/editor** (RF-44), `/` skill picker (RF-36). |
 
 After phase 2, acceptance tests cover all provider pairs (Claude, Codex, Antigravity in both directions). Laboratory observations do not establish all those combinations.
+
+## Reserved-action implementation note (RS-04)
+
+The command path is implemented through the human-only proposal API and
+**Settings → Commands**, with signing isolated on the administrative origin.
+Only fixed backend/bridge restart actions are candidates. A proposal is not an
+execution permit; the passkey binds the protected description and the broker
+creates one durable job per intent. The PWA retains a lost-acknowledgement key
+for explicit retries, recovers state after disconnection, labels user-service
+bridge evidence, and directs uncertain outcomes to terminal reconciliation.
+The UI never provides a shell or performs reconciliation itself.
+
+This is repository implementation status, not operational activation. Root-only
+reconciliation, supervised installation, capability/group checks and the
+root-equivalent-access preflight remain mandatory before enabling actions.
+See the [plan and trust boundaries](plans/reserved-commands.md) and
+[installation guide](installation.md#reserved-administrative-commands).

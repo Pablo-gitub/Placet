@@ -173,6 +173,34 @@ proposals remain readable, show an expiration message and cannot be signed.
 The lifetime is checked inside the cryptographic transaction as well as before
 challenge generation; authorized jobs remain visible after that lifetime.
 
+### Commands screen (implemented, not deployed)
+
+Settings opens `#/comandi`, with a return to Settings and the Settings tab kept
+active. Run prepares a proposal and then exposes a separate confirmation link
+with its HTTPS host visible. Only tapping that link opens the protected page;
+asynchronous responses and polls never navigate or open a window.
+
+Before submitting an intent, the PWA saves its random request key in browser
+storage. It preserves that key after a missing acknowledgement and across
+reloads; Retry preparation is an explicit POST with the same key. A new intent
+after expiration/completion uses a new key. If storage is unavailable, preparation
+does not start. Cached data consists only of public IDs and an unresolved request
+key, never a confirmation URL, passkey, assertion or credential.
+
+GET-only recovery uses bounded backoff up to 30 seconds during connection loss
+and expected 503s. The last known state does not become failed because the
+backend is restarting. Unconfigured/disabled installations expose no executable
+action. The screen displays the global uncertainty gate even when its job has
+left recent history, and shows terminal instructions without executing them.
+The displayed `admin_executor.terminal reconcile --id ... --outcome
+succeeded|failed` contract must be implemented in E before activation.
+
+Chromium at 375 px was checked in English and Italian with a locally mocked
+backend: Settings navigation, explicit confirmation popup, blocked/unconfigured
+states and expanded terminal text. No horizontal overflow or browser runtime
+errors were observed. This is not a real privileged execution or iPhone Face ID
+acceptance test.
+
 Tests cover HTTP origin/host boundaries, invitations, single-use response staging,
 actual WebAuthn signatures/registration, privilege checks, runtime copying and
 systemd syntax. Chromium at 360/390px was checked in English and Italian,
@@ -182,7 +210,7 @@ tested; the privileged DynamicUser installation still needs a live check.
 
 The confirmation endpoints and restart execution core have offline coverage;
 they are not installed or operational. Backend integration is implemented but
-not deployed. The Commands screen,
-root-only reconciliation and supervised activation remain pending, along with
+not deployed. The Commands screen is implemented but not deployed. Root-only
+reconciliation and supervised activation remain pending, along with
 the complete isolated deploy/build path. An enrolled passkey alone grants no
 ability to run a command.

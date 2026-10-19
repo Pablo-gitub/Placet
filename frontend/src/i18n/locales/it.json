@@ -576,5 +576,50 @@
     "save": "Salva",
     "saveError": "Salvataggio non riuscito.",
     "loadError": "Impostazioni non disponibili."
+  },
+  "commands": {
+    "title": "Comandi",
+    "settingsHint": "Azioni riservate, confermate separatamente con la tua passkey.",
+    "intro": "Esegui prepara una proposta. Poi apri l’host amministrativo indicato e conferma l’operazione con la tua passkey.",
+    "loading": "Caricamento del catalogo amministrativo…",
+    "notConfigured": "I comandi amministrativi non sono configurati o il servizio non è disponibile.",
+    "disabled": "Nessuna azione riservata è abilitata.",
+    "installationGuide": "Guida all’installazione",
+    "reconnecting": "Riconnessione… Lo stato salvato verrà ricontrollato automaticamente. Nessun comando viene reinviato.",
+    "blocked": "Esito da verificare dal terminale amministrativo. Gli altri comandi restano bloccati fino alla riconciliazione.",
+    "terminalInstructions": "Istruzioni per il terminale",
+    "reconcileHelp": "Verifica prima l’esito reale. Un amministratore deve eseguire uno solo di questi comandi nel terminale; nessuno dei due ripete il job.",
+    "reconcileSuccess": "Se l’azione originale è riuscita:",
+    "reconcileFailure": "Se l’azione originale è fallita:",
+    "creationUnconfirmed": "La preparazione della proposta non è confermata. Ritenta la preparazione per recuperare lo stesso riferimento.",
+    "retryCreation": "Ritenta preparazione",
+    "preparing": "Preparazione della proposta…",
+    "storageUnavailable": "Non è stato possibile salvare il riferimento per ritentare. Controlla l’archiviazione del browser prima di preparare una proposta.",
+    "run": "Esegui",
+    "newProposal": "Nuova proposta",
+    "confirm": "Conferma con passkey",
+    "confirmationHost": "Host di conferma:",
+    "recent": "Ultimi esiti",
+    "reference": "Riferimento {{id}}",
+    "bridgeEvidence": "Riavvio richiesto; esito riportato dal servizio utente desktop. Non è una verifica indipendente della salute del servizio.",
+    "actions": {
+      "restart-backend": {
+        "title": "Riavvia backend",
+        "description": "Placet si disconnetterà brevemente durante il riavvio del backend."
+      },
+      "restart-bridge": {
+        "title": "Riavvia bridge",
+        "description": "La consegna dei messaggi si interromperà brevemente durante il riavvio del servizio utente desktop."
+      }
+    },
+    "states": {
+      "awaiting_confirmation": "In attesa della tua conferma con passkey.",
+      "expired": "Proposta scaduta. Prepara una nuova proposta per continuare.",
+      "authorized": "Autorizzata, in attesa di esecuzione.",
+      "running": "In corso.",
+      "succeeded": "Completata.",
+      "failed": "Fallita.",
+      "outcome_unknown": "Esito da verificare dal terminale amministrativo."
+    }
   }
 }
