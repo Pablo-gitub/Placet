@@ -262,14 +262,14 @@ bridge → find/read/filter provider file → POST /api/bridge/jobs/{id}/result 
 
 ### Existing core tables
 
-- **`requests`:** `id`, `sender_id`, `recipient_id`, `question_type`, `prompt`, `edited_prompt`, `prompt_source`, `context`, `options`, `selected_options`, `custom_text`, `status`, `priority`, `created_at`, `expires_at`, `decided_at`, `completed_at`, `updated_at`, `delivered_at`, `delivery_attempts`, `delivering_since`, `executing_since`, `sender_session_id`, `recipient_session_id`; three-aspect columns in §3.7; `delivery_mode`; return policy fields `allow_auto_return`, `return_decision`, `return_text`.
+- **`requests`:** `id`, `sender_id`, `recipient_id`, `question_type`, `prompt`, `edited_prompt`, `prompt_source`, `context`, `options`, `selected_options`, `custom_text`, `status`, `priority`, `created_at`, `expires_at`, `decided_at`, `completed_at`, `updated_at`, `delivered_at`, `delivery_attempts`, `delivering_since`, `executing_since`, `sender_session_id`, `recipient_session_id`; three-aspect columns in §3.7; `delivery_mode`; return policy fields `allow_auto_return`, `return_decision`, `return_text`; `project_id` (explicit user project context, RFC-15) and `project_context` (rendered instructions prepended to the prompt).
 - **`responses`:** unique `request_id`, `responder_id`, `content`, `implicit`, `created_at`.
 - **`request_events`:** per-request `actor`, `event`, `details`, `at` timeline.
 - **`sessions`:** provider `id`, `agent_id`, `provider`, `entrypoint`, `cwd`, `title`, `tmux_session`, `state`, `turn_request_id`, `started_at`, `last_seen_at`, `waiter_seen_at`, `ended_at`, `activity_at` (turn activity), `pinned_at`, `model`, `node_id`, and suspension/exclusion metadata. Closed/suspended/reachable are derived using lifecycle observations, not simply an idle label.
 - **`nodes`:** `id`, `name` (unique, case-insensitive), `provider`, `cwd`, `created_at` (RFC-02). A node's current session is its attached session seen most recently. The user names a session from the chat header, attaches it to an existing node of the same provider or detaches it. A Claude Code `SessionStart` with source `clear` takes the node of the conversation that ended within two minutes for the same agent, provider, folder and tmux session, unless the node already has an open conversation.
 - **`relation_types`:** `id`, `name` (unique, case-insensitive), `description` (RFC-03). **`relations`:** `id`, `from_node`, `to_node`, `type_id`, `approval` (`manual` | `automatic`), unique by (from, to, type) (RFC-04). `requests.relation_id` records the relation a request travelled on and `requests.approval` whether it went `automatic` or `manual` (shown to the recipient, RFC-06), and `parent_request_id`/`chain_hops` the automatic chain it belongs to (RFC-14); the approval event's actor is `system:relation#<id>` when it was automatic. Deleting a node deletes its relations; a type in use cannot be deleted.
-- **`projects`:** `id`, `name` (unique, case-insensitive), `description`, `relation_rule`, `max_auto_hops`, `max_auto_per_hour`, `created_at` (RFC-09, RF-44). Groups nodes and relations into workspaces with dedicated policies.
-- **`project_nodes`:** composite primary key `(project_id, node_id)` (RFC-09). Nodes can belong to multiple projects.
+- **`projects`:** `id`, `name` (unique, case-insensitive), `description`, `instructions` (RFC-15), `relation_rule`, `max_auto_hops`, `max_auto_per_hour`, `created_at` (RFC-09, RF-44). Groups nodes and relations into workspaces with dedicated policies and instructions.
+- **`project_nodes`:** composite primary key `(project_id, node_id)`, `instructions` (role of the node within this project, RFC-15). Nodes can belong to multiple projects.
 - **`project_relations`:** composite primary key `(project_id, relation_id)` (RFC-09). Relations can belong to multiple projects. Adding a relation to a project automatically ensures its `from_node` and `to_node` are in `project_nodes`. Removing a node from a project removes its associated project relations. Deletions are cleaned up explicitly without relying on `PRAGMA foreign_keys`.
 - **`agent_states`:** per-agent tmux state.
 - **`app_settings`:** persistent key/value settings; `background_language` is human-controlled, independent of local UI preference; `relation_rule` is the general rule for automatic relations (RFC-08b); `automation_paused`, `max_auto_hops` and `max_auto_per_hour` hold Stop all and the loop limits (RFC-14).
@@ -280,6 +280,32 @@ For any relation, its effective policy combines global defaults and containing p
 - **Effective rule:** The global relation rule always applies first if non-empty; project rules for each project containing the relation are appended sequentially, formatted as `[ProjectName]\n<rule>`.
 - **Effective loop limits:** `max_hops` and `max_per_hour` are computed as the minimum across all projects containing the relation; a project specifying `NULL` inherits the global default. If a relation belongs to no projects, global limits apply. Delivery pause (`automation_paused`) is always global.
 - **Agent exposure:** `/api/agents/me/relations` includes the list of containing `projects` and the composite `rule` for each outgoing relation.
+
+### Project and node instructions (RFC-15)
+
+Projects provide persistent, shared context and node-specific instructions:
+- **Scope & Purpose:** Project and node instructions represent **behavioral and contextual guidance** for agents, not technical sandbox constraints or hard security boundaries.
+- **Data model:**
+  - `projects.instructions`: general project context, guidelines, and conventions (up to 4000 characters).
+  - `project_nodes.instructions`: role and specific instructions for a node within the project (up to 4000 characters).
+  - `requests.project_id`: the project ID associated with an explicit user prompt (NULL for relation requests).
+  - `requests.project_context`: the rendered project instructions block prepended to the prompt envelope.
+- **Composition & Ordering:**
+  - Instructions are structured into distinct blocks:
+    1. Project guidelines: `[Placet · Project <name>]` (or localized `Progetto`).
+    2. Node role: `[Placet · Your role in <name>]` (or localized `Il tuo ruolo in`).
+    3. Outgoing relations available to the node in that project, sorted deterministically (`relation_type.name` ASC, `node.name` ASC, `relation.id` ASC).
+  - For user prompts, context is applied when explicitly selected via `#Project` hash mention in the composer or when entering the session via the project detail/diagram.
+  - For inter-agent requests over relations, instructions are composed for all projects containing that relation.
+- **Prompt Envelope:**
+  When project context is present, the envelope formatted for delivery follows this strict sequence:
+  1. Header line: `[Placet Request #N from <sender>]`
+  2. Delivery note (if automatic or reviewed): `envelope.automatic` / `envelope.reviewed`
+  3. Context header: `envelope.project_context`
+  4. Formatted project blocks
+  5. Divider line: `---`
+  6. Prompt body
+  Without project context, lines 3–5 are omitted.
 
 This is a conceptual inventory; `backend/app/database.py` is the schema/migration source of truth.
 
