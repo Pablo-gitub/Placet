@@ -109,11 +109,12 @@ async def test_project_and_node_instructions_patch_and_limits(env):
         assert detail["instructions"] == "Overall project guidelines."
         assert detail["nodes"][0]["instructions"] is None
 
-        # 2. PATCH node instructions in project
+        # 2. PATCH node instructions in project (with extra whitespace to verify normalization)
         res_patch_node = await client.patch(f"/api/projects/{p_id}/nodes/{n1.id}", json={
-            "instructions": "Lead architect.",
+            "instructions": "  Lead architect.  ",
         })
         assert res_patch_node.status_code == 200
+        assert res_patch_node.json()["instructions"] == "Lead architect."
 
         # Verify in GET /api/projects/{id}
         detail = (await client.get(f"/api/projects/{p_id}")).json()
@@ -130,9 +131,14 @@ async def test_project_and_node_instructions_patch_and_limits(env):
         assert res_clear_p.status_code == 200
         assert res_clear_p.json()["instructions"] is None
 
-        # Clear node instructions with empty string or null -> None
+        # Clear node instructions with whitespace or null -> None
+        res_clear_n_ws = await client.patch(f"/api/projects/{p_id}/nodes/{n1.id}", json={"instructions": "   "})
+        assert res_clear_n_ws.status_code == 200
+        assert res_clear_n_ws.json()["instructions"] is None
+
         res_clear_n = await client.patch(f"/api/projects/{p_id}/nodes/{n1.id}", json={"instructions": None})
         assert res_clear_n.status_code == 200
+        assert res_clear_n.json()["instructions"] is None
         detail_cleared = (await client.get(f"/api/projects/{p_id}")).json()
         assert detail_cleared["nodes"][0]["instructions"] is None
 

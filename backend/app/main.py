@@ -1740,9 +1740,10 @@ def create_app(
             raise ProductError(404, "project.not_found", "Project not found")
         if not db.get_node(node_id):
             raise ProductError(404, "node.not_found", "Node not found")
-        if not db.update_project_node_instructions(project_id, node_id, body.instructions):
+        val = body.instructions.strip() if body.instructions and body.instructions.strip() else None
+        if not db.update_project_node_instructions(project_id, node_id, val):
             raise ProductError(404, "project.node_not_in_project", "Node not in project.")
-        return {"ok": True, "instructions": body.instructions}
+        return {"ok": True, "instructions": val}
 
     @app.delete("/api/projects/{project_id}/nodes/{node_id}")
     async def remove_project_node(project_id: int, node_id: int, who: Principal = Depends(principal)):

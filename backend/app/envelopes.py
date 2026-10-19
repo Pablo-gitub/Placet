@@ -19,71 +19,60 @@ def steer(req: RequestModel, language=None) -> str:
     if req.question_type != QuestionType.MESSAGE:
         return injection(req, ack_mode="none", channel="app", language=language) + "\n" + text("envelope.steer", language)
     has_proj = bool(req.project_context and req.project_context.strip())
+    lines = [
+        text("envelope.user_header" if has_proj else "envelope.user", language, id=req.id, prompt=req.prompt),
+    ]
     if has_proj:
-        lines = [
-            text("envelope.user_header", language, id=req.id),
+        lines.extend([
             text("envelope.project_context", language),
             req.project_context.strip(),
             "---",
             req.prompt,
-            text("envelope.user_note", language),
-            text("envelope.steer", language),
-        ]
-        message = "\n".join(lines)
-    else:
-        message = text("envelope.user", language, id=req.id, prompt=req.prompt)
-        message += "\n" + text("envelope.user_note", language) + "\n" + text("envelope.steer", language)
+        ])
+    lines.append(text("envelope.user_note", language))
+    lines.append(text("envelope.steer", language))
+    message = "\n".join(lines)
     return message + (f"\n\n{req.context}" if req.context else "")
 
 
 def injection(req: RequestModel, ack_mode="mcp", channel="tmux", language=None) -> str:
     has_proj = bool(req.project_context and req.project_context.strip())
+    lines = []
     if req.question_type == QuestionType.MESSAGE:
+        lines.append(text("envelope.user_header" if has_proj else "envelope.user", language, id=req.id, prompt=req.prompt))
         if has_proj:
-            lines = [
-                text("envelope.user_header", language, id=req.id),
+            lines.extend([
                 text("envelope.project_context", language),
                 req.project_context.strip(),
                 "---",
                 req.prompt,
-                text("envelope.user_note", language),
-            ]
-            message = "\n".join(lines)
-        else:
-            message = text("envelope.user", language, id=req.id, prompt=req.prompt)
-            message += "\n" + text("envelope.user_note", language)
+            ])
+        lines.append(text("envelope.user_note", language))
+        message = "\n".join(lines)
         if req.context:
             message += f"\n\n{req.context}"
     else:
         prompt = req.edited_prompt if req.edited_prompt is not None else req.prompt
+        lines.append(text("envelope.agent_header" if has_proj else "envelope.agent", language, id=req.id, sender=req.sender_id, prompt=prompt))
+        # RFC-06: whether the user reviewed this prompt; approval is not a blank cheque.
+        if req.approval == "automatic":
+            lines.append(text("envelope.automatic", language))
+        elif req.approval == "manual":
+            edited = req.edited_prompt is not None and req.edited_prompt != req.prompt
+            lines.append(text("envelope.reviewed_edited" if edited else "envelope.reviewed", language))
         if has_proj:
-            lines = [
-                text("envelope.agent_header", language, id=req.id, sender=req.sender_id),
-            ]
-            if req.approval == "automatic":
-                lines.append(text("envelope.automatic", language))
-            elif req.approval == "manual":
-                edited = req.edited_prompt is not None and req.edited_prompt != req.prompt
-                lines.append(text("envelope.reviewed_edited" if edited else "envelope.reviewed", language))
-            lines.append(text("envelope.project_context", language))
-            lines.append(req.project_context.strip())
-            lines.append("---")
-            lines.append(prompt)
-            if ack_mode == "mcp" and channel == "tmux":
-                lines.append(text("envelope.ack", language, id=req.id))
-            lines.append(text("envelope.reply", language, id=req.id))
-            message = "\n".join(lines)
-        else:
-            message = text("envelope.agent", language, id=req.id, sender=req.sender_id, prompt=prompt) + "\n"
-            # RFC-06: whether the user reviewed this prompt; approval is not a blank cheque.
-            if req.approval == "automatic":
-                message += text("envelope.automatic", language) + "\n"
-            elif req.approval == "manual":
-                edited = req.edited_prompt is not None and req.edited_prompt != req.prompt
-                message += text("envelope.reviewed_edited" if edited else "envelope.reviewed", language) + "\n"
-            if ack_mode == "mcp" and channel == "tmux":
-                message += text("envelope.ack", language, id=req.id)
-            message += text("envelope.reply", language, id=req.id)
+            lines.extend([
+                text("envelope.project_context", language),
+                req.project_context.strip(),
+                "---",
+                prompt,
+            ])
+        footer = ""
+        if ack_mode == "mcp" and channel == "tmux":
+            footer += text("envelope.ack", language, id=req.id)
+        footer += text("envelope.reply", language, id=req.id)
+        lines.append(footer)
+        message = "\n".join(lines)
     return message + ("\n" + hook_preface(language) if channel == "hook" else "")
 
 
