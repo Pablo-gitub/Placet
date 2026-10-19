@@ -90,6 +90,7 @@
     } finally { busy = false; render(); }
   });
   async function loadCommand() {
+    if (!alive || document.visibilityState === "hidden") return;
     const sequence = ++viewSequence;
     clearTimeout(poll);
     try {
@@ -106,7 +107,7 @@
       if (currentView) currentView = { ...currentView, enabled: false };
     }
     render();
-    if (alive && !["succeeded", "failed", "expired"].includes(currentView?.state)) poll = setTimeout(loadCommand, 2000);
+    if (alive && document.visibilityState !== "hidden" && !["succeeded", "failed", "expired"].includes(currentView?.state)) poll = setTimeout(loadCommand, 2000);
   }
   confirm.addEventListener("click", async () => {
     if (busy || changed || !currentView?.enabled || currentView.state !== "awaiting_confirmation") return;
@@ -137,5 +138,9 @@
     } finally { busy = false; render(); }
   });
   render();
+  document.addEventListener("visibilitychange", () => {
+    clearTimeout(poll);
+    if (proposalId && document.visibilityState !== "hidden") loadCommand();
+  });
   if (proposalId) loadCommand();
 })();

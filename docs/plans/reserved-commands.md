@@ -222,8 +222,8 @@ page.
   processes: removing a group from account configuration does not remove it from
   existing processes. Also reject desktop membership in the web/backend socket
   groups, whether primary or supplementary; `SO_PEERCRED` is a second barrier,
-  not a reason to weaken socket permissions. This is a mandatory E preflight,
-  not implemented activation logic in the current bootstrap.
+  not a reason to weaken socket permissions. The separate activation bootstrap implements this mandatory preflight;
+  the ordinary installer cannot enable administrative actions.
 - The operator chooses remediation: rootless Docker (for example for a personal
   ntfy container), root-managed containers without desktop daemon access, or a
   genuinely separate unprivileged agent account. These commits change no groups,
@@ -460,3 +460,33 @@ and enrolled passkey are unchanged by these repository commits. Activating the
 new components requires a separate reviewed administrative upgrade; ordinary
 Placet deploys must not replace them. Existing administrative access (e.g. SSH)
 remains the recovery path.
+
+
+## Part E: reviewed activation, pending human installation
+
+The `codex/admin-activation` change adds a preview-default, digest-pinned upgrade
+for the existing enrollment-only installation. Only `restart-backend` and
+`restart-bridge` can be enabled, after root-equivalent-access and peer-group
+checks. It does not change Tailscale, accounts, containers, sudoers or dependency
+runtimes. It preserves passkeys, retains the old package and takes a private
+SQLite backup. An interrupted upgrade needs human inspection, never an automatic
+rerun. The current desktop Docker membership remains an activation blocker until
+the operator chooses a remedy; no remediation is performed by this change.
+
+The fixed broker and supervisor are separate root services with bounded restart
+rates. The broker has CHOWN solely for socket ownership; the supervisor has
+SETUID/SETGID for dropping the bridge helper to the desktop identity. Neither
+has DAC override or general shell input. Home directories stay inaccessible;
+`/run/user` remains readable for the already-dropped helper's fixed user-bus
+connection. User-service evidence is indicative and never authorizes another job.
+
+Root-terminal reconciliation holds the execution lock and records a terminal
+outcome without repeating an effect. The PWA and installation guide share the
+same CLI contract under a regression test. Unknown outcomes block all new jobs
+until a human verifies the actual service state and reconciles them.
+
+On iPhone the confirmation page asks the user to switch back to the installed
+Placet app manually; a secondary link opens Placet in a browser. Both command
+pages suspend polling while hidden. Real Face ID and both restart actions still
+require the acceptance steps in the [installation guide](../installation.md#activating-the-two-fixed-restart-commands)
+after review and human activation. Deploy/build execution remains out of scope.

@@ -41,15 +41,40 @@ def configured_origin():
     return CONFIG.read_text().strip()
 
 
+def reconcile_job(identifier, outcome):
+    from .execution import ExecutionStore
+    from .supervisor import validate_directory, protected_file
+    module = Path('/usr/local/lib/placet-admin/admin_executor/terminal.py')
+    if Path(__file__) != module:
+        raise ValueError('Reconciliation requires the protected installation')
+    protected_file(module)
+    validate_directory(DATABASE.parent, private=True)
+    for parent in DATABASE.parent.parents:
+        validate_directory(parent, private=False)
+    info = DATABASE.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o077:
+        raise ValueError('Private authorization database required')
+    ExecutionStore(DATABASE).reconcile(identifier, outcome)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=("begin-enrollment", "finish-enrollment"))
+    parser.add_argument("operation", choices=("begin-enrollment", "finish-enrollment", "reconcile"))
     parser.add_argument("--id")
+    parser.add_argument("--outcome", choices=("succeeded", "failed"))
     args = parser.parse_args(argv)
     if os.geteuid() != 0:
         parser.error("Use a root-authorized human terminal; agents cannot provision passkeys")
-    if args.operation == "finish-enrollment" and (not args.id or len(args.id) != 32 or any(c not in "0123456789abcdef" for c in args.id)):
+    if args.operation in ("finish-enrollment", "reconcile") and (not args.id or len(args.id) != 32 or any(c not in "0123456789abcdef" for c in args.id)):
         parser.error("A complete enrollment ID is required")
+    if args.operation == "reconcile":
+        if not args.outcome:
+            parser.error("An observed terminal outcome is required")
+        reconcile_job(args.id, args.outcome)
+        print("Job reconciled; no action was executed or repeated.")
+        return
+    if args.outcome:
+        parser.error("Outcome is only accepted for reconciliation")
     if not MAILBOX.is_file() or MAILBOX.is_symlink():
         parser.error("The administrative web service must create its mailbox first")
     origin = configured_origin()

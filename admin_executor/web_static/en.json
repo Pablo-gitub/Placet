@@ -17,7 +17,7 @@
   "footer": "No sudo password is requested or sent. Placet agents cannot authorize actions through this page.",
   "confirmationHeading": "Confirm this operation",
   "authorize": "Authorize with a passkey",
-  "returnToPlacet": "Return to Placet",
+  "returnToPlacet": "Open Placet in the browser",
   "loadingCommand": "Loading the protected operation…",
   "awaiting_confirmation": "Waiting for your confirmation.",
   "authorized": "Authorized, waiting for execution.",
@@ -33,5 +33,6 @@
   "bridgeEvidence": "Restart requested; the outcome is reported by the desktop user service. It is not independent proof of service health.",
   "restart-backendDescription": "Restart the Placet backend. The PWA will disconnect briefly and recover its saved state.",
   "restart-bridgeDescription": "Restart the bridge in the configured desktop user session. Message delivery will pause briefly.",
-  "expired": "Proposal expired. Create another from the PWA."
+  "expired": "Proposal expired. Create another from the PWA.",
+  "returnToApp": "Return to the Placet app. Switch back manually; the status refreshes when you return."
 }

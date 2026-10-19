@@ -17,7 +17,7 @@
   "footer": "Non viene chiesta né inviata la password sudo. Gli agenti Placet non possono autorizzare operazioni tramite questa pagina.",
   "confirmationHeading": "Conferma questa operazione",
   "authorize": "Autorizza con passkey",
-  "returnToPlacet": "Torna a Placet",
+  "returnToPlacet": "Apri Placet nel browser",
   "loadingCommand": "Caricamento dell’operazione protetta…",
   "awaiting_confirmation": "In attesa della tua conferma.",
   "authorized": "Autorizzata, in attesa di esecuzione.",
@@ -33,5 +33,6 @@
   "bridgeEvidence": "Riavvio richiesto; esito riportato dal servizio utente desktop. Non è una verifica indipendente della salute del servizio.",
   "restart-backendDescription": "Riavvia il backend di Placet. La PWA si disconnetterà brevemente e recupererà lo stato salvato.",
   "restart-bridgeDescription": "Riavvia il bridge nella sessione desktop configurata. La consegna dei messaggi si interromperà brevemente.",
-  "expired": "Proposta scaduta. Creane un’altra dalla PWA."
+  "expired": "Proposta scaduta. Creane un’altra dalla PWA.",
+  "returnToApp": "Torna all’app Placet. Riaprila manualmente: lo stato si aggiorna al ritorno."
 }

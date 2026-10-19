@@ -206,8 +206,10 @@ for explicit retries, recovers state after disconnection, labels user-service
 bridge evidence, and directs uncertain outcomes to terminal reconciliation.
 The UI never provides a shell or performs reconciliation itself.
 
-This is repository implementation status, not operational activation. Root-only
-reconciliation, supervised installation, capability/group checks and the
-root-equivalent-access preflight remain mandatory before enabling actions.
+This is repository implementation status, not operational activation. The reviewed activation installer adds root-only
+reconciliation, supervised units, capability/group checks and a fail-closed
+root-equivalent-access preflight. These are repository implementations, not an
+installed or enabled configuration. Activation and real iPhone acceptance remain
+human operations.
 See the [plan and trust boundaries](plans/reserved-commands.md) and
 [installation guide](installation.md#reserved-administrative-commands).

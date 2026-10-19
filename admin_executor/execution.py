@@ -50,6 +50,39 @@ class ExecutionStore:
         return dict(job_id=job_id, state=row[0], claimed_at=row[1], finished_at=row[2], result_code=row[3],
                     events=[dict(sequence=e[0], timestamp=e[1], code=e[2]) for e in events])
 
+    def reconcile(self, job_id, outcome):
+        """Record a human terminal decision; never run or retry an effect.
+
+        The installed CLI is root-only and validates the protected database.
+        Sharing the supervisor lock prevents reconciling a live invocation.
+        """
+        if (not isinstance(job_id, str) or len(job_id) != 32
+                or any(c not in '0123456789abcdef' for c in job_id)
+                or outcome not in ('succeeded', 'failed')):
+            raise ValueError('A complete job ID and terminal outcome are required')
+        fd = os.open(self.path.with_suffix('.execution.lock'),
+                     os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+        try:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise ValueError('A supervisor is active; wait before reconciliation') from None
+            with closing(sqlite3.connect(self.path)) as db, db:
+                db.execute('BEGIN IMMEDIATE')
+                row = db.execute('SELECT state,result_code FROM execution_jobs WHERE job_id=?', (job_id,)).fetchone()
+                code = 'operator_reconciled_' + outcome
+                if row == (outcome, code):
+                    return self.status(job_id)
+                if row is None or row[0] not in ('running', 'outcome_unknown'):
+                    raise ValueError('Only an uncertain or abandoned job can be reconciled')
+                now = time.time()
+                db.execute('UPDATE execution_jobs SET state=?,finished_at=?,result_code=? WHERE job_id=?',
+                           (outcome, now, code, job_id))
+                db.execute('INSERT INTO execution_events(job_id,timestamp,code) VALUES (?,?,?)', (job_id, now, code))
+            return self.status(job_id)
+        finally:
+            os.close(fd)
+
     def _recover_and_claim(self):
         # Called only while holding the exclusive supervisor lock, including
         # across the external effect. A second process cannot recover a live job.
@@ -64,7 +97,7 @@ class ExecutionStore:
                            (job_id, now, 'interrupted'))
             # A timed-out manager request may still be taking effect. Preserve
             # serialization across uncertain outcomes, not just live processes.
-            # A future root-only reconciliation workflow must clear this gate.
+            # Only root-terminal reconciliation clears this gate.
             if db.execute("SELECT 1 FROM execution_jobs WHERE state='outcome_unknown' LIMIT 1").fetchone():
                 return None
             row = db.execute('''SELECT a.id,a.operation,a.digest FROM authorized_jobs a

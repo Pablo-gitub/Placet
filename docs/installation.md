@@ -349,3 +349,106 @@ npm --prefix frontend run build                 # needed by the API integration 
 .venv/bin/python -m pytest -q                    # backend, bridge, hooks
 ```
 The suites cover configuration and `AGENTS.md` parsing, the SQLite database and state transitions, the REST API, SSE and notifications, the bridge and its provider channels, the hooks, the MCP tools and the PWA.
+
+## Activating the two fixed restart commands
+
+This is a **separate root-reviewed upgrade**, not `deploy/install.sh`. It applies
+only to the existing enrollment-only administrative installation with all actions
+disabled, an enrolled passkey and the protected dependency runtime already built.
+It preserves the administrative origin, enrollment database and Tailscale setup.
+It installs no dependencies and changes no account, group, sudoers or policy.
+Do not run it until its pull request and digests have been reviewed.
+
+First resolve desktop root-equivalent access. Membership in `docker`, `lxd`,
+`lxc` or `disk`, privileged daemon socket access, retained groups in running
+processes, unattended sudo or unassessed virtualization administration blocks
+activation **before changes**. `kvm` alone is not classified as root access.
+Socket peer groups must have no supplementary members and must be distinct
+from the desktop group. Existing ACLs on privileged daemon sockets require review.
+The check is conservative, not a proof that arbitrary local privilege paths do
+not exist. Previously compromised root state cannot be repaired by removing a
+group. Use a trusted machine and review any other agent identities separately.
+
+Human choices include rootless Docker, root-managed containers without desktop
+access to the daemon, or a genuinely separate unprivileged agent account. Merely
+removing a group in account settings is insufficient: existing processes retain
+it until a complete logout/restart. The installer never makes this choice for you.
+
+Read the installer, then run its read-only preview from the checkout:
+
+```bash
+python3 -I admin_executor/activation_bootstrap.py \
+  --desktop-user paolo \
+  --return-url https://YOUR-PLACET-HOST.ts.net/ \
+  --health-port 8000
+sha256sum admin_executor/activation_bootstrap.py
+```
+
+Use the actual backend loopback port from the protected installation; the port
+is written to root-owned `health.json`, never accepted from a proposal. Replace
+the example PWA host with the existing PWA origin, **not** the admin origin.
+The preview prints `bundle_sha256` and `installed_sha256` (which includes the
+previous Host-header fix). If it cannot read the protected installation, run
+only this preview as a human from a root terminal. Review both exact digests.
+
+For applying, use the reviewed standalone source digest as well as both bundle
+pins. The following is a template, **not a command with usable digests**:
+
+```bash
+sudo /usr/bin/python3 -I -c 'import hashlib,pathlib; p=pathlib.Path("admin_executor/activation_bootstrap.py").resolve(); s=p.read_bytes(); assert hashlib.sha256(s).hexdigest()=="REVIEWED_INSTALLER_SHA256"; exec(compile(s,str(p),"exec"),{"__name__":"__main__","__file__":str(p)})' \
+  --desktop-user paolo \
+  --return-url https://YOUR-PLACET-HOST.ts.net/ \
+  --health-port 8000 \
+  --bundle-sha256 REVIEWED_BUNDLE_SHA256 \
+  --installed-sha256 REVIEWED_INSTALLED_SHA256 \
+  --enable-restarts --apply
+```
+
+The upgrade stops only the administrative web service, retains the old protected
+package as `admin_executor.before-activation-<installed_digest>`, takes a
+root-private SQLite backup `activation-before.sqlite`, tightens the live database
+to 0600, writes fixed configuration and installs broker/supervisor units. Only
+after starting them and repeating the access checks does it enable the two
+restart actions. `deploy` remains disabled. There is no restart job created by
+installation. The supervisor has only SETUID/SETGID capabilities for the dropped
+bridge helper; the broker has CHOWN only for peer sockets. Neither has DAC override.
+The broker runtime is root-owned 0711; sockets are root:peer-group 0660, with
+SO_PEERCRED checks in addition. No general root access to the user bus is granted.
+The bridge helper contacts that bus only after dropping to the desktop identity.
+
+An interrupted upgrade refuses automatic rerun. Keep actions disabled and ask for
+an inspection of the retained package, backup, units and live database; do not
+restore a stale authorization database or repeat an uncertain job. Rollback is a
+human-reviewed procedure, not an automatic rewrite of passkeys/authorizations.
+Do not use the old pre-service `--resume-failed-bootstrap` recovery here.
+
+### iPhone acceptance check
+
+1. Open the installed PWA, **Settings → Commands**, and prepare `restart-backend`.
+2. Tap the separate confirmation link after checking its admin hostname. The
+   protected page must show the fixed backend action; authenticate with Face ID.
+3. Return manually to the installed Placet app. A browser return link opens
+   Safari and cannot reopen the installed PWA. Temporary reconnection is expected;
+   the same job must become succeeded after health/stability checks, without a
+   second POST or a second job. Confirm the actual service invocation changed.
+4. Repeat for `restart-bridge`. Its result is explicitly **reported by the user
+   service**, not trusted root evidence. Confirm sessions reconnect.
+5. Verify cancellation, expired proposal, lost connection and reopening the PWA.
+   Background/hidden command screens must not poll. Never approve a fake test
+   action that would affect unrelated services.
+
+### Reconciling an uncertain outcome
+
+Only after inspecting the real service state, a human uses one of these exact
+protected terminal commands. Replace `<job_id>` with the full 32-character job
+ID displayed in Commands. No job is rerun; an audit event records the decision.
+A live supervisor holds the lock and reconciliation is refused until it releases.
+
+```bash
+sudo /usr/bin/env -i PATH=/usr/bin:/bin PYTHONPATH=/usr/local/lib/placet-admin /usr/local/lib/placet-admin-venv/bin/python -s -m admin_executor.terminal reconcile --id <job_id> --outcome succeeded
+sudo /usr/bin/env -i PATH=/usr/bin:/bin PYTHONPATH=/usr/local/lib/placet-admin /usr/local/lib/placet-admin-venv/bin/python -s -m admin_executor.terminal reconcile --id <job_id> --outcome failed
+```
+
+Choose the outcome you actually established. Repeating the same reconciliation
+is idempotent; changing an already recorded decision is rejected. An agent, PWA,
+bridge or backend cannot invoke this terminal operation through the broker.
