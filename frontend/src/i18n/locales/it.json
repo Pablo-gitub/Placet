@@ -531,6 +531,8 @@
     "deleteType": "Elimina tipo",
     "deleteTypeConfirm": "Eliminare il tipo di relazione “{{name}}”?",
     "typesEmpty": "Nessun tipo di relazione definito.",
-    "saveType": "Salva tipo"
+    "saveType": "Salva tipo",
+    "graphTitle": "Schema delle relazioni",
+    "graphEmpty": "Aggiungi nodi e relazioni per vedere lo schema."
   }
 }

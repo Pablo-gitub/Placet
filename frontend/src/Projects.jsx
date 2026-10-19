@@ -13,6 +13,7 @@ import {
 import { apiErrorDescriptor } from "./i18n/errors";
 import { formatDateTime } from "./i18n/formatters";
 import { sessionStatus } from "./sessionInfo";
+import RelationGraph from "./RelationGraph";
 
 async function api(method, url, body) {
   const res = await fetch(url, {
@@ -447,14 +448,15 @@ export function ProjectsView({ onOpenProject }) {
       ) : (
         <div className="projects-grid">
           {projects.map((p) => (
-            <div key={p.id} className="card project-card" data-testid={`project-card-${p.id}`}>
+            <div key={p.id} className="card project-card" data-testid={`project-card-${p.id}`}
+              onClick={() => onOpenProject(p.id)}>
               <div className="card-header project-card-header">
                 <div>
                   <button
                     type="button"
                     className="link-button project-card-name-btn"
                     data-testid={`open-project-${p.id}`}
-                    onClick={() => onOpenProject(p.id)}
+                    onClick={(e) => { e.stopPropagation(); onOpenProject(p.id); }}
                   >
                     {p.name}
                   </button>
@@ -470,7 +472,7 @@ export function ProjectsView({ onOpenProject }) {
                     className="icon-button"
                     data-testid={`edit-project-${p.id}`}
                     aria-label={t("projects.editProject")}
-                    onClick={() => setEditingProject(p)}
+                    onClick={(e) => { e.stopPropagation(); setEditingProject(p); }}
                   >
                     <Edit2 size={15} />
                   </button>
@@ -479,7 +481,7 @@ export function ProjectsView({ onOpenProject }) {
                     className="icon-button"
                     data-testid={`delete-project-${p.id}`}
                     aria-label={t("projects.delete")}
-                    onClick={() => handleDelete(p)}
+                    onClick={(e) => { e.stopPropagation(); handleDelete(p); }}
                   >
                     <Trash2 size={15} />
                   </button>
@@ -828,6 +830,8 @@ export function ProjectDetailView({ projectId, sessions: propSessions, onOpenSes
 
   return (
     <div className="project-detail-view" data-testid="project-detail-view">
+      <div className="project-detail-layout">
+      <div className="project-detail-main">
       <div className="project-detail-nav">
         <button
           type="button"
@@ -1053,6 +1057,13 @@ export function ProjectDetailView({ projectId, sessions: propSessions, onOpenSes
           </div>
         )}
       </section>
+      </div>
+      {/* RF-44: beside the project in landscape, at the bottom in portrait. */}
+      <aside className="card project-graph-panel" aria-label={t("projects.graphTitle")}>
+        <h2 className="project-relations-title">{t("projects.graphTitle")}</h2>
+        <RelationGraph nodes={project.nodes} relations={project.relations} />
+      </aside>
+      </div>
 
       {editingProject && (
         <ProjectFormDialog

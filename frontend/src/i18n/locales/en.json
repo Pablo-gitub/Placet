@@ -531,6 +531,8 @@
     "deleteType": "Delete type",
     "deleteTypeConfirm": "Delete relation type “{{name}}”?",
     "typesEmpty": "No relation types defined.",
-    "saveType": "Save type"
+    "saveType": "Save type",
+    "graphTitle": "Relations diagram",
+    "graphEmpty": "Add nodes and relations to see the diagram."
   }
 }

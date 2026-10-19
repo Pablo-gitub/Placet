@@ -126,7 +126,7 @@ Problems addressed:
 | RF-12 | Edit a prompt before approval; sender is informed of the edit. | [Implemented] |
 | RF-13 | Complete history/audit with per-request timeline. | [Implemented] |
 | RF-45 | **Present but quiet:** sessions register, then act only when Placet messages arrive, returning to silence after the turn. `.placet-off` excludes a folder and descendants across hooks, spool, reads, delivery and PWA. Undelivered messages are cancelled with a reason; stored data is **hidden**, retained for audit and shown again if exclusion is removed. | [Implemented] |
-| RF-44 | **Per-project graph:** nodes and typed directed edges; manual/automatic policy visible to the user. Editor for projects, nodes, relations and types. | [Implemented] October 19, 2026 (first version: Projects PWA view with project memberships, per-project rules and limits, and relation types management). |
+| RF-44 | **Per-project graph:** nodes and typed directed edges; manual/automatic policy visible to the user. Editor for projects, nodes, relations and types. | [Implemented] October 19, 2026 (first version: Projects PWA view with project memberships, per-project rules and limits, and relation types management). The project view draws its relations as a read-only diagram (solid green automatic, dashed manual), beside the project in landscape and on wide screens, at the bottom in portrait; editing stays in the lists. |
 
 ### 3.6 Creating sessions
 

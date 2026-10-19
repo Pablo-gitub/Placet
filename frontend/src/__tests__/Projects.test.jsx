@@ -63,6 +63,14 @@ describe("Projects views (RFC-09, RF-44)", () => {
     // Click project to open detail
     fireEvent.click(screen.getByTestId("open-project-1"));
     expect(onOpen).toHaveBeenCalledWith(1);
+    // A tap anywhere on the card opens it too; its own buttons do not.
+    onOpen.mockClear();
+    fireEvent.click(screen.getByTestId("project-nodes-count-1"));
+    expect(onOpen).toHaveBeenCalledWith(1);
+    onOpen.mockClear();
+    vi.spyOn(window, "confirm").mockReturnValueOnce(false);
+    fireEvent.click(screen.getByTestId("delete-project-1"));
+    expect(onOpen).not.toHaveBeenCalled();
 
     // 2. Create project
     fireEvent.click(screen.getByTestId("new-project-btn"));
@@ -263,8 +271,12 @@ describe("Projects views (RFC-09, RF-44)", () => {
 
     // 1. Detail display
     expect(await screen.findByText("Placet Core")).toBeInTheDocument();
-    expect(screen.getByText("planner")).toBeInTheDocument();
-    expect(screen.getByText("builder")).toBeInTheDocument();
+    expect(within(screen.getByTestId("project-node-101")).getByText("planner")).toBeInTheDocument();
+    // RF-44: the diagram draws every node and relation of the project.
+    const graph = screen.getByTestId("relation-graph");
+    expect(within(graph).getByText("planner")).toBeInTheDocument();
+    expect(within(graph).getByText("builder")).toBeInTheDocument();
+    expect(within(graph).getByTestId("graph-edge-201")).toHaveTextContent("review");
     expect(screen.getByTestId("relation-badge-shared-201")).toHaveTextContent("Other Project");
 
     // Node 101 has session: shows status and clicking opens chat
