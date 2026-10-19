@@ -257,7 +257,8 @@
     "close": "Close",
     "hint": "A checked session appears on Home, even when closed. Uncheck it to hide it.",
     "empty": "No sessions registered for this provider.",
-    "open": "Open"
+    "open": "Open",
+    "noFolder": "No folder"
   },
   "composer": {
     "remove": "Remove {{name}}",

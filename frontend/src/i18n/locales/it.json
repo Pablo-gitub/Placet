@@ -257,7 +257,8 @@
     "close": "Chiudi",
     "hint": "La spunta mostra la sessione nella Home, anche se chiusa. Toglila per nasconderla.",
     "empty": "Nessuna sessione registrata per questo provider.",
-    "open": "Apri"
+    "open": "Apri",
+    "noFolder": "Senza cartella"
   },
   "composer": {
     "remove": "Rimuovi {{name}}",
