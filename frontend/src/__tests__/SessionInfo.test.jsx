@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import RequestCard from "../RequestCard";
 import { actionLabel, groupEntries, mergeEntries } from "../chatEntries";
-import { byActivity, providerOf, sessionStatus } from "../sessionInfo";
+import { byActivity, providerOf, sessionLabels, sessionStatus } from "../sessionInfo";
 
 const now = new Date().toISOString();
 const sessions = [
@@ -90,3 +90,18 @@ describe("request origin", () => {
     expect(screen.getByTestId("origin-70")).toHaveTextContent("da claude · social · app desktop · Post Instagram");
   });
 });
+
+describe("sessionLabels disambiguation", () => {
+  it("disambiguates sessions that share the same title", () => {
+    const list = [
+      { id: "11111111-aaaa-bbbb-cccc-dddddddddddd", title: "Primo sviluppatore", cwd: "/p/placet" },
+      { id: "22222222-aaaa-bbbb-cccc-dddddddddddd", title: "Primo sviluppatore", cwd: "/p/placet" },
+      { id: "33333333-aaaa-bbbb-cccc-dddddddddddd", title: "Secondo sviluppatore", cwd: "/p/other" },
+    ];
+    const labels = sessionLabels(list);
+    expect(labels["11111111-aaaa-bbbb-cccc-dddddddddddd"]).toBe("Primo sviluppatore [11111111]");
+    expect(labels["22222222-aaaa-bbbb-cccc-dddddddddddd"]).toBe("Primo sviluppatore [22222222]");
+    expect(labels["33333333-aaaa-bbbb-cccc-dddddddddddd"]).toBe("Secondo sviluppatore");
+  });
+});
+

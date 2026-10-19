@@ -6,6 +6,7 @@ import {
   activityOf,
   byActivity,
   providerOf,
+  sessionLabels,
   sessionName,
   sessionPlace,
   sessionStatus,
@@ -67,29 +68,32 @@ export default function AddSessionsDialog({ sessions, onToggle, onOpen, onClose 
               {t("picker.empty")}
             </p>
           )}
-          {listed.map((s) => {
-            const status = sessionStatus(s);
-            return (
-              <div key={s.id} className="pick-row" data-testid={`pick-${s.id}`}>
-                <input
-                  type="checkbox"
-                  id={`pick-${s.id}`}
-                  data-testid={`pick-toggle-${s.id}`}
-                  checked={!!s.pinned}
-                  onChange={(e) => onToggle(s, e.target.checked)}
-                />
-                <label htmlFor={`pick-${s.id}`} className="pick-label">
-                  <strong>{sessionName(s)}</strong>
-                  <span className="session-meta-line">
-                    {[sessionPlace(s), status.label, timeAgo(activityOf(s))].filter(Boolean).join(" · ")}
-                  </span>
-                </label>
-                <button type="button" className="link-button" onClick={() => onOpen(s.id)}>
-                  {t("picker.open")}
-                </button>
-              </div>
-            );
-          })}
+          {(() => {
+            const labels = sessionLabels(listed);
+            return listed.map((s) => {
+              const status = sessionStatus(s);
+              return (
+                <div key={s.id} className="pick-row" data-testid={`pick-${s.id}`}>
+                  <input
+                    type="checkbox"
+                    id={`pick-${s.id}`}
+                    data-testid={`pick-toggle-${s.id}`}
+                    checked={!!s.pinned}
+                    onChange={(e) => onToggle(s, e.target.checked)}
+                  />
+                  <label htmlFor={`pick-${s.id}`} className="pick-label">
+                    <strong>{labels[s.id] || sessionName(s)}</strong>
+                    <span className="session-meta-line">
+                      {[sessionPlace(s), status.label, timeAgo(activityOf(s))].filter(Boolean).join(" · ")}
+                    </span>
+                  </label>
+                  <button type="button" className="link-button" onClick={() => onOpen(s.id)}>
+                    {t("picker.open")}
+                  </button>
+                </div>
+              );
+            });
+          })()}
         </div>
       </div>
     </div>

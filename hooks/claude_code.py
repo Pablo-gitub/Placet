@@ -39,6 +39,11 @@ import placet_common  # noqa: E402
 import spool  # noqa: E402
 
 PLACET_REQUEST = re.compile(r"\[Placet Request #(\d+)\b")
+# RF-29d: continued conversation prompt from Claude Code
+CONTINUED_CONVERSATION = re.compile(
+    r"This session is being continued from a previous conversation.*?\b([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})",
+    re.DOTALL,
+)
 # Claude Code names MCP tools mcp__<server>__<tool>; other clients may not.
 PLACET_TOOLS = re.compile(r"(^|__|\.|/)placet_(ask_human|send_to_agent)$")
 MAX_MESSAGE_CHARS = 20000
@@ -101,9 +106,13 @@ def build_event(event: dict, provider: str = "claude-code"):
         return {"event": "start", "start_source": event.get("source"), **common}
     if name == "UserPromptSubmit":
         payload = {"event": "prompt", **common}
-        match = PLACET_REQUEST.search(event.get("prompt") or "")
+        prompt_text = event.get("prompt") or ""
+        match = PLACET_REQUEST.search(prompt_text)
         if match:
             payload["request_id"] = int(match.group(1))
+        cont_match = CONTINUED_CONVERSATION.search(prompt_text)
+        if cont_match:
+            payload["continues"] = cont_match.group(1).lower()
         return payload
     if name == "PostToolUse" and PLACET_TOOLS.search(event.get("tool_name") or ""):
         request_id = _request_id_from_tool_response(event.get("tool_response"))

@@ -11,13 +11,14 @@ import {
   byActivity,
   providerClass,
   providerOf,
+  sessionLabels,
   sessionName,
   sessionPlace,
   sessionStatus,
   timeAgo,
 } from "./sessionInfo";
 
-function SessionRow({ session, questions, onOpen, active }) {
+function SessionRow({ session, label, questions, onOpen, active }) {
   const { t } = useTranslation();
   const status = sessionStatus(session);
   return (
@@ -30,7 +31,7 @@ function SessionRow({ session, questions, onOpen, active }) {
     >
       <div className="session-row">
         <span className="provider-chip">{providerOf(session).label}</span>
-        <strong className="session-name">{sessionName(session)}</strong>
+        <strong className="session-name">{label || sessionName(session)}</strong>
         {questions > 0 && (
           <span className="badge-count" title={t("home.pendingQuestions", { count: questions })} data-testid={`session-questions-${session.id}`}>
             {questions}
@@ -62,7 +63,7 @@ function loadCollapsed() {
  * The followed sessions of one provider, under a header that opens and
  * closes; providers come in order of their latest activity.
  */
-function ProviderGroup({ provider, sessions, questionsOf, collapsed, onToggle, onOpen, activeId }) {
+function ProviderGroup({ provider, sessions, labels, questionsOf, collapsed, onToggle, onOpen, activeId }) {
   const { t } = useTranslation();
   const busy = sessions.filter((s) => sessionStatus(s).key === "busy").length;
   const questions = sessions.reduce((n, s) => n + questionsOf(s.id), 0);
@@ -86,7 +87,14 @@ function ProviderGroup({ provider, sessions, questionsOf, collapsed, onToggle, o
       </button>
       {!collapsed &&
         sessions.map((s) => (
-          <SessionRow key={s.id} session={s} questions={questionsOf(s.id)} onOpen={onOpen} active={s.id === activeId} />
+          <SessionRow
+            key={s.id}
+            session={s}
+            label={labels?.[s.id]}
+            questions={questionsOf(s.id)}
+            onOpen={onOpen}
+            active={s.id === activeId}
+          />
         ))}
     </div>
   );
@@ -122,6 +130,7 @@ export default function Home({
     });
   const pending = requests.filter((r) => r.status === "PENDING" || needsReturnApproval(r));
   const pinned = sessions.filter((s) => s.pinned).sort(byActivity);
+  const labels = sessionLabels(pinned);
   const questionsOf = (id) => pending.filter((r) => r.sender_session_id === id).length;
   // pinned is sorted by activity: a provider's first session is its latest.
   const groups = [];
@@ -172,6 +181,7 @@ export default function Home({
             key={g.provider.key}
             provider={g.provider}
             sessions={g.sessions}
+            labels={labels}
             questionsOf={questionsOf}
             collapsed={collapsed.has(g.provider.key)}
             onToggle={toggleProvider}

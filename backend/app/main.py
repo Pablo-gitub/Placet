@@ -93,6 +93,8 @@ class SessionEventPayload(BaseModel):
     last_message: Optional[str] = None
     # start: why the session started (Claude Code: startup, resume, clear, compact).
     start_source: Optional[str] = Field(None, max_length=32)
+    # RF-29d: UUID of the session being continued
+    continues: Optional[str] = None
 
 
 class TitlesReport(BaseModel):
@@ -1124,6 +1126,18 @@ def create_app(
             if payload.start_source == "clear":
                 result["node_id"] = db.reattach_after_clear(session_id)
         elif payload.event == "prompt":
+            if session.prompt_count == 0 and payload.continues and payload.continues != session_id:
+                old = db.get_session(payload.continues)
+                if (
+                    old is not None
+                    and old.agent_id == who.id
+                    and old.cwd == (payload.cwd or session.cwd)
+                    and old.continued_to is None
+                ):
+                    if db.continue_session(old.id, session_id):
+                        result["continued_from"] = old.id
+                        notify_session(old.id)
+            db.increment_prompt_count(session_id)
             turn_request_id = None
             if payload.request_id is not None:
                 try:

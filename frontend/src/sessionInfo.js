@@ -59,6 +59,30 @@ export function sessionName(session) {
   return session.id.slice(0, 8);
 }
 
+/**
+ * RF-29d: Maps session ID to disambiguated label. Sessions sharing a title
+ * receive an ID suffix [id.slice(0, 8)] to tell them apart.
+ */
+export function sessionLabels(sessions = []) {
+  const counts = new Map();
+  for (const s of sessions) {
+    if (!s) continue;
+    const base = sessionName(s);
+    counts.set(base, (counts.get(base) || 0) + 1);
+  }
+  const result = {};
+  for (const s of sessions) {
+    if (!s) continue;
+    const base = sessionName(s);
+    if ((counts.get(base) || 0) > 1 && s.id) {
+      result[s.id] = `${base} [${s.id.slice(0, 8)}]`;
+    } else if (s.id) {
+      result[s.id] = base;
+    }
+  }
+  return result;
+}
+
 /** The CSS class that gives a session its provider's colours. */
 export function providerClass(session) {
   return `prov-${providerOf(session).key}`;

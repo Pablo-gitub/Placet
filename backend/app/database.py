@@ -306,7 +306,9 @@ class Database:
                 waiter_seen_at TEXT,
                 ended_at TEXT,
                 activity_at TEXT,
-                pinned_at TEXT
+                pinned_at TEXT,
+                continued_to TEXT,
+                prompt_count INTEGER NOT NULL DEFAULT 0
             );
             """)
             cursor.execute("""
@@ -357,9 +359,12 @@ class Database:
             # excluded_at: the bridge found a `.placet-off` for its folder (RF-45).
             # suspended_at: the app unloaded the conversation; it can be resumed.
             # model: the model in use as the hooks report it (Antigravity, RF-61).
-            for col in ("activity_at", "pinned_at", "excluded_at", "suspended_at", "model"):
+            # continued_to: RF-29d session continuation.
+            for col in ("activity_at", "pinned_at", "excluded_at", "suspended_at", "model", "continued_to"):
                 if col not in session_cols:
                     cursor.execute(f"ALTER TABLE sessions ADD COLUMN {col} TEXT;")
+            if "prompt_count" not in session_cols:
+                cursor.execute("ALTER TABLE sessions ADD COLUMN prompt_count INTEGER NOT NULL DEFAULT 0;")
             # RFC-02: the stable named node the session is attached to.
             if "node_id" not in session_cols:
                 cursor.execute("ALTER TABLE sessions ADD COLUMN node_id INTEGER;")
@@ -1400,6 +1405,8 @@ class Database:
             excluded=row["excluded_at"] is not None,
             node_id=row["node_id"],
             node_name=row["node_name"] if "node_name" in row.keys() else None,
+            continued_to=row["continued_to"] if "continued_to" in row.keys() else None,
+            prompt_count=row["prompt_count"] if "prompt_count" in row.keys() else 0,
         )
 
     def upsert_session(
@@ -1554,6 +1561,42 @@ class Database:
                 "UPDATE sessions SET waiter_seen_at = ?, last_seen_at = ? WHERE id = ?",
                 (now, now, session_id),
             )
+
+    def continue_session(self, old_session_id: str, new_session_id: str) -> bool:
+        """
+        RF-29d: Closes the previous session as continued, and migrates its
+        Home pin and node to the new session.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            old = cursor.execute("SELECT * FROM sessions WHERE id = ?", (old_session_id,)).fetchone()
+            new = cursor.execute("SELECT * FROM sessions WHERE id = ?", (new_session_id,)).fetchone()
+            if old is None or new is None:
+                return False
+            if old["continued_to"] is not None:
+                return False
+            # Close old session and record continuation
+            cursor.execute(
+                "UPDATE sessions SET ended_at = COALESCE(ended_at, ?), continued_to = ? WHERE id = ?",
+                (now, new_session_id, old_session_id),
+            )
+            # Migrate pin if old was pinned
+            if old["pinned_at"] is not None:
+                cursor.execute(
+                    "UPDATE sessions SET pinned_at = ? WHERE id = ?",
+                    (old["pinned_at"], new_session_id),
+                )
+                cursor.execute("UPDATE sessions SET pinned_at = NULL WHERE id = ?", (old_session_id,))
+            # Migrate node if old was attached to one and new has none
+            if old["node_id"] is not None and new["node_id"] is None:
+                cursor.execute("UPDATE sessions SET node_id = ? WHERE id = ?", (old["node_id"], new_session_id))
+                cursor.execute("UPDATE sessions SET node_id = NULL WHERE id = ?", (old_session_id,))
+            return True
+
+    def increment_prompt_count(self, session_id: str) -> None:
+        with self._get_connection() as conn:
+            conn.execute("UPDATE sessions SET prompt_count = prompt_count + 1 WHERE id = ?", (session_id,))
 
     # --- Nodes (RFC-02): stable named sessions -------------------------------
 

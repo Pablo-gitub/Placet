@@ -306,6 +306,9 @@ class SessionModel(BaseModel):
     # RFC-02: the stable named node this conversation belongs to.
     node_id: Optional[int] = None
     node_name: Optional[str] = None
+    # RF-29d: continued conversation pointer and prompt counter
+    continued_to: Optional[str] = None
+    prompt_count: int = 0
 
 
 class NodeModel(BaseModel):

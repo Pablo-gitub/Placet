@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { formatNumber, formattingLocale } from "./i18n/formatters";
 import React, { useEffect, useRef, useState } from "react";
-import { providerOf, sessionName, sessionProject, sessionStatus } from "./sessionInfo";
+import { providerOf, sessionLabels, sessionName, sessionProject, sessionStatus } from "./sessionInfo";
 import { resetClock } from "./usage";
 import { Paperclip, SendHorizontal, X } from "lucide-react";
 
@@ -89,8 +89,9 @@ export default function Composer({ session, sessions = [], onSend, draft, limitA
     setQuery(match ? { start: caret - match[1].length - 1, end: caret, text: match[1] } : null);
     setHighlight(0);
   };
+  const labels = sessionLabels(sessions);
   const candidates = sessions.filter((s) => s.id !== session?.id && !s.ended_at && !s.excluded)
-    .filter((s) => !query?.text || `${providerOf(s).label} ${s.agent_id} ${s.cwd || ""} ${sessionName(s)} ${s.id}`
+    .filter((s) => !query?.text || `${providerOf(s).label} ${s.agent_id} ${s.cwd || ""} ${labels[s.id] || sessionName(s)} ${s.id}`
       .toLocaleLowerCase(formattingLocale()).includes(query.text.trim().toLocaleLowerCase(formattingLocale())));
   const activeMentions = mentions.filter((m) => text.includes(m.token));
   const choose = (target) => {
@@ -184,7 +185,7 @@ export default function Composer({ session, sessions = [], onSend, draft, limitA
           {candidates.map((target, i) => (
             <button type="button" role="option" aria-selected={i === highlight} id={`mention-${i}`}
               key={target.id} onMouseDown={(e) => e.preventDefault()} onClick={() => choose(target)}>
-              <strong>{providerOf(target).label} · {sessionName(target)}</strong>
+              <strong>{providerOf(target).label} · {labels[target.id] || sessionName(target)}</strong>
               <span>{target.cwd || t("composer.noProject")} · {sessionStatus(target).label} · {target.id.slice(0, 8)}</span>
             </button>
           ))}
