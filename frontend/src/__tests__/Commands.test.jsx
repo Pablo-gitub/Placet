@@ -196,3 +196,20 @@ it("clears a reconciled gate and refreshes an active job that left recent histor
   expect(screen.queryByText(i18n.t("commands.blocked"))).toBeNull();
   expect(bodies).toHaveLength(0);
 });
+
+it("does not poll while the installed app is hidden and refreshes on return", async () => {
+  let visibility = "hidden";
+  const descriptor = Object.getOwnPropertyDescriptor(document, "visibilityState");
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibility });
+  try {
+    render(<Commands onBack={() => {}} />);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(fetch).not.toHaveBeenCalled();
+    visibility = "visible";
+    fireEvent(document, new Event("visibilitychange"));
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+  } finally {
+    if (descriptor) Object.defineProperty(document, "visibilityState", descriptor);
+    else delete document.visibilityState;
+  }
+});

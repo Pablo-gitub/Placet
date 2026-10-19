@@ -88,7 +88,7 @@ export default function Commands({ onBack }) {
     const activeControllers = controllers.current;
     alive.current = true;
     async function poll() {
-      if (!active || polling) return;
+      if (!active || polling || document.visibilityState === "hidden") return;
       polling = true; clearTimeout(timer);
       try {
         const data = await request("/api/admin/catalogue");
@@ -109,6 +109,7 @@ export default function Commands({ onBack }) {
             ...Object.values(viewRef.current).filter((row) => ["authorized", "running", "outcome_unknown"].includes(row.state)).map((row) => row.id),
           ]);
           for (const id of Array.from(observed).slice(0, 12)) {
+            if (!active || document.visibilityState === "hidden") break;
             if (rows[id]) continue;
             try {
               const row = publicView(await request(`/api/admin/proposals/${id}`));
@@ -124,10 +125,13 @@ export default function Commands({ onBack }) {
         if (active) { setConnection("recovering"); failures += 1; }
       } finally {
         polling = false;
-        if (active) timer = setTimeout(poll, Math.min(30000, 2000 * 2 ** Math.min(failures, 4)));
+        if (active && document.visibilityState !== "hidden") timer = setTimeout(poll, Math.min(30000, 2000 * 2 ** Math.min(failures, 4)));
       }
     }
-    function refresh() { if (document.visibilityState !== "hidden") poll(); }
+    function refresh() {
+      clearTimeout(timer);
+      if (document.visibilityState !== "hidden") poll();
+    }
     poll();
     window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", refresh);

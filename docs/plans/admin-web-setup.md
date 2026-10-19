@@ -214,3 +214,18 @@ not deployed. The Commands screen is implemented but not deployed. Root-only
 reconciliation and supervised activation remain pending, along with
 the complete isolated deploy/build path. An enrolled passkey alone grants no
 ability to run a command.
+
+
+## Protected upgrade after enrollment
+
+The original fresh bootstrap and its pre-service recovery are not upgrades for
+an active enrolled installation. Use the separately reviewed
+[restart activation procedure](../installation.md#activating-the-two-fixed-restart-commands).
+It preserves the existing RP ID and credential database, installs fixed broker
+and supervisor units, and refuses activation when the desktop retains rootful
+Docker or equivalent powers. The source, bundle and installed-package digests
+are reviewed separately. No agent runs the root apply command.
+
+The return link opens a browser, not the installed iPhone PWA. After Face ID,
+switch back manually; command state is recovered on visibility/focus without
+repeating authorization. Actual restart acceptance remains pending installation.

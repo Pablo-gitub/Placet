@@ -14,10 +14,10 @@
   "unavailable": "L’invito è scaduto, già utilizzato o non disponibile. Creane uno nuovo dal terminale amministrativo.",
   "unsupported": "La registrazione delle passkey non è disponibile in questo browser. Apri questa pagina HTTPS in Safari sul dispositivo.",
   "network": "Impossibile confermare l’esito. Controlla la connessione e fai verificare l’invito all’amministratore prima di riprovare.",
-  "footer": "Non viene chiesta né inviata la password sudo. Gli agenti Placet non possono autorizzare operazioni tramite questa pagina.",
+  "footer": "Non viene chiesta né inviata la password sudo. L’autorizzazione richiede una passkey verificata; l’isolamento dipende anche dal mantenere le credenziali amministrative fuori dal controllo degli agenti.",
   "confirmationHeading": "Conferma questa operazione",
   "authorize": "Autorizza con passkey",
-  "returnToPlacet": "Torna a Placet",
+  "returnToPlacet": "Apri Placet nel browser",
   "loadingCommand": "Caricamento dell’operazione protetta…",
   "awaiting_confirmation": "In attesa della tua conferma.",
   "authorized": "Autorizzata, in attesa di esecuzione.",
@@ -33,5 +33,6 @@
   "bridgeEvidence": "Riavvio richiesto; esito riportato dal servizio utente desktop. Non è una verifica indipendente della salute del servizio.",
   "restart-backendDescription": "Riavvia il backend di Placet. La PWA si disconnetterà brevemente e recupererà lo stato salvato.",
   "restart-bridgeDescription": "Riavvia il bridge nella sessione desktop configurata. La consegna dei messaggi si interromperà brevemente.",
-  "expired": "Proposta scaduta. Creane un’altra dalla PWA."
+  "expired": "Proposta scaduta. Creane un’altra dalla PWA.",
+  "returnToApp": "Torna all’app Placet. Riaprila manualmente: lo stato si aggiorna al ritorno."
 }
