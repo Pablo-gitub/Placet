@@ -1,6 +1,6 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
-import { it, expect } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { it, expect, vi } from "vitest";
 import RelationGraph from "../RelationGraph";
 
 // The real nodes and relations of the Placet project (October 19, 2026).
@@ -27,4 +27,14 @@ it("drops the prefix the node names share, so labels stay distinct", () => {
   for (const label of ["claude_FS", "gemini_dev", "gpt_reviewer"]) {
     expect(screen.getByText(label)).toBeInTheDocument();
   }
+});
+
+it("navigates to session with project context on node click", () => {
+  const onOpen = vi.fn();
+  const nodesWithSessions = [
+    { id: 1, name: "node-1", provider: "claude-code", session_id: "s1" },
+  ];
+  render(<RelationGraph nodes={nodesWithSessions} relations={[]} projectId={5} onOpenSession={onOpen} />);
+  fireEvent.click(screen.getByTestId("graph-node-1"));
+  expect(onOpen).toHaveBeenCalledWith("s1", 5);
 });

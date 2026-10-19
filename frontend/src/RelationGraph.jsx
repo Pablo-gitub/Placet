@@ -52,7 +52,7 @@ function edgePath(from, to, bend) {
 }
 
 /** RF-44: the project's relations drawn as a graph (read only). */
-export default function RelationGraph({ nodes = [], relations = [] }) {
+export default function RelationGraph({ nodes = [], relations = [], projectId, onOpenSession }) {
   const { t } = useTranslation();
   if (nodes.length === 0) {
     return <p className="composer-note" data-testid="relation-graph-empty">{t("projects.graphEmpty")}</p>;
@@ -68,6 +68,15 @@ export default function RelationGraph({ nodes = [], relations = [] }) {
     const bend = r.from_node === r.to_node ? 0 : 22 + index * 18;
     return { rel: r, ...edgePath(pos[r.from_node], pos[r.to_node], bend) };
   });
+
+  const handleNodeClick = (n) => {
+    if (!n.session_id) return;
+    if (onOpenSession) {
+      onOpenSession(n.session_id, projectId);
+    } else {
+      window.location.assign(projectId ? `#/sessione/${n.session_id}?project=${projectId}` : `#/sessione/${n.session_id}`);
+    }
+  };
 
   return (
     <figure className="relation-graph" data-testid="relation-graph">
@@ -91,7 +100,12 @@ export default function RelationGraph({ nodes = [], relations = [] }) {
           </g>
         ))}
         {nodes.map((n) => (
-          <g key={n.id} data-testid={`graph-node-${n.id}`}>
+          <g
+            key={n.id}
+            data-testid={`graph-node-${n.id}`}
+            onClick={() => handleNodeClick(n)}
+            style={n.session_id ? { cursor: "pointer" } : undefined}
+          >
             <title>{n.name}</title>
             <circle cx={pos[n.id].x} cy={pos[n.id].y} r={NODE_R} className={`rg-node prov-${n.provider}`} />
             {/* Outside the circle of nodes, away from the edges that leave it. */}

@@ -48,7 +48,7 @@ function savedMode() {
   }
 }
 
-export default function Composer({ session, sessions = [], onSend, draft, limitAt }) {
+export default function Composer({ session, sessions = [], onSend, draft, limitAt, onSelectProject }) {
   const { t } = useTranslation();
   // Queue (end of the turn) or Now (inside the running turn): the
   // last choice is the default on this device (RF-35).
@@ -84,15 +84,49 @@ export default function Composer({ session, sessions = [], onSend, draft, limitA
   const [refiles, setRefiles] = useState(draft?.files || []);
   const [query, setQuery] = useState(null);
   const [highlight, setHighlight] = useState(0);
+
+  const [nodeProjects, setNodeProjects] = useState([]);
+  useEffect(() => {
+    if (!session?.node_id) return;
+    let ignore = false;
+    fetch(`/api/projects?node_id=${session.node_id}`)
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data) => {
+        if (!ignore) setNodeProjects(data || []);
+      })
+      .catch(() => {
+        if (!ignore) setNodeProjects([]);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [session?.node_id]);
+
   const updateQuery = (value, caret) => {
-    const match = value.slice(0, caret).match(/(?:^|\s)@([^@\n]*)$/);
-    setQuery(match ? { start: caret - match[1].length - 1, end: caret, text: match[1] } : null);
-    setHighlight(0);
+    const atMatch = value.slice(0, caret).match(/(?:^|\s)@([^@\n]*)$/);
+    if (atMatch) {
+      setQuery({ type: "session", start: caret - atMatch[1].length - 1, end: caret, text: atMatch[1] });
+      setHighlight(0);
+      return;
+    }
+    const hashMatch = value.slice(0, caret).match(/(?:^|\s)#([^#\s\n]*)$/);
+    if (hashMatch) {
+      setQuery({ type: "project", start: caret - hashMatch[1].length - 1, end: caret, text: hashMatch[1] });
+      setHighlight(0);
+      return;
+    }
+    setQuery(null);
   };
   const labels = sessionLabels(sessions);
   const candidates = sessions.filter((s) => s.id !== session?.id && !s.ended_at && !s.excluded)
     .filter((s) => !query?.text || `${providerOf(s).label} ${s.agent_id} ${s.cwd || ""} ${labels[s.id] || sessionName(s)} ${s.id}`
       .toLocaleLowerCase(formattingLocale()).includes(query.text.trim().toLocaleLowerCase(formattingLocale())));
+
+  const effectiveProjects = session?.node_id ? nodeProjects : [];
+  const projectCandidates = effectiveProjects.filter((p) =>
+    !query?.text || p.name.toLocaleLowerCase(formattingLocale()).includes(query.text.trim().toLocaleLowerCase(formattingLocale()))
+  );
+
   const activeMentions = mentions.filter((m) => text.includes(m.token));
   const choose = (target) => {
     const token = `@${providerOf(target).label} · ${sessionProject(target) || t("composer.noProjectToken")} · ${sessionName(target)} [${target.id.slice(0, 8)}]`;
@@ -101,6 +135,15 @@ export default function Composer({ session, sessions = [], onSend, draft, limitA
     setText(next);
     setMentions((prev) => [...prev.filter((m) => m.session_id !== target.id), { session_id: target.id, token }]);
     setQuery(null);
+    requestAnimationFrame(() => { input.current?.focus(); input.current?.setSelectionRange(caret, caret); });
+  };
+
+  const chooseProject = (target) => {
+    const next = text.slice(0, query.start) + text.slice(query.end);
+    const caret = query.start;
+    setText(next);
+    setQuery(null);
+    onSelectProject?.(target.id);
     requestAnimationFrame(() => { input.current?.focus(); input.current?.setSelectionRange(caret, caret); });
   };
   const [sending, setSending] = useState(false);
@@ -180,15 +223,51 @@ export default function Composer({ session, sessions = [], onSend, draft, limitA
         <p className="composer-note" role="status">{t("composer.references", { count: activeMentions.length })}</p>
       )}
       {query && !closed && (
-        <div className="mention-picker" id="session-mentions" role="listbox" aria-label={t("composer.mentionLabel")}>
-          {candidates.length === 0 && <p className="composer-note">{t("composer.noMatches")}</p>}
-          {candidates.map((target, i) => (
-            <button type="button" role="option" aria-selected={i === highlight} id={`mention-${i}`}
-              key={target.id} onMouseDown={(e) => e.preventDefault()} onClick={() => choose(target)}>
-              <strong>{providerOf(target).label} · {labels[target.id] || sessionName(target)}</strong>
-              <span>{target.cwd || t("composer.noProject")} · {sessionStatus(target).label} · {target.id.slice(0, 8)}</span>
-            </button>
-          ))}
+        <div
+          className="mention-picker"
+          id={query.type === "project" ? "project-mentions" : "session-mentions"}
+          role="listbox"
+          aria-label={t(query.type === "project" ? "composer.projectMentionLabel" : "composer.mentionLabel")}
+        >
+          {query.type === "project" ? (
+            (!session?.node_id || effectiveProjects.length === 0) ? (
+              <p className="composer-note">{t("composer.noProjectsForSession")}</p>
+            ) : projectCandidates.length === 0 ? (
+              <p className="composer-note">{t("composer.noMatches")}</p>
+            ) : (
+              projectCandidates.map((target, i) => (
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={i === highlight}
+                  id={`project-mention-${i}`}
+                  key={target.id}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => chooseProject(target)}
+                >
+                  <strong>{target.name}</strong>
+                </button>
+              ))
+            )
+          ) : (
+            <>
+              {candidates.length === 0 && <p className="composer-note">{t("composer.noMatches")}</p>}
+              {candidates.map((target, i) => (
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={i === highlight}
+                  id={`mention-${i}`}
+                  key={target.id}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => choose(target)}
+                >
+                  <strong>{providerOf(target).label} · {labels[target.id] || sessionName(target)}</strong>
+                  <span>{target.cwd || t("composer.noProject")} · {sessionStatus(target).label} · {target.id.slice(0, 8)}</span>
+                </button>
+              ))}
+            </>
+          )}
         </div>
       )}
       {fileError && <p className="composer-note" role="alert">{t(fileError)}</p>}
@@ -207,9 +286,13 @@ export default function Composer({ session, sessions = [], onSend, draft, limitA
         <textarea autoFocus={!!draft}
           ref={input}
           aria-label={t("composer.message")}
-          aria-controls={query ? "session-mentions" : undefined}
+          aria-controls={query ? (query.type === "project" ? "project-mentions" : "session-mentions") : undefined}
           aria-expanded={!!query}
-          aria-activedescendant={query && candidates[highlight] ? `mention-${highlight}` : undefined}
+          aria-activedescendant={
+            query && (query.type === "project" ? projectCandidates[highlight] : candidates[highlight])
+              ? (query.type === "project" ? `project-mention-${highlight}` : `mention-${highlight}`)
+              : undefined
+          }
           data-testid="composer-input"
           placeholder={t(closed ? "composer.closedPlaceholder" : "composer.placeholder")}
           value={text}
@@ -219,14 +302,21 @@ export default function Composer({ session, sessions = [], onSend, draft, limitA
           onClick={(e) => updateQuery(text, e.target.selectionStart)}
           onKeyDown={(e) => {
             if (query) {
+              const currentList = query.type === "project" ? projectCandidates : candidates;
               if (e.key === "Escape") { e.preventDefault(); setQuery(null); return; }
               if (["ArrowDown", "ArrowUp"].includes(e.key)) {
                 e.preventDefault();
-                setHighlight((i) => Math.max(0, Math.min(candidates.length - 1, i + (e.key === "ArrowDown" ? 1 : -1))));
+                setHighlight((i) => Math.max(0, Math.min(currentList.length - 1, i + (e.key === "ArrowDown" ? 1 : -1))));
                 return;
               }
-              if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && candidates[highlight]) {
-                e.preventDefault(); choose(candidates[highlight]); return;
+              if (e.key === "Enter" && !e.ctrlKey && !e.metaKey && currentList[highlight]) {
+                e.preventDefault();
+                if (query.type === "project") {
+                  chooseProject(currentList[highlight]);
+                } else {
+                  choose(currentList[highlight]);
+                }
+                return;
               }
             }
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send();

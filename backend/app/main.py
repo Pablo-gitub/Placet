@@ -1669,9 +1669,9 @@ def create_app(
         return Response(status_code=204)
 
     @app.get("/api/projects", response_model=List[ProjectSummaryModel])
-    async def list_projects(who: Principal = Depends(principal)):
+    async def list_projects(node_id: Optional[int] = Query(None), who: Principal = Depends(principal)):
         require_human(who)
-        return db.list_projects()
+        return db.list_projects(node_id=node_id)
 
     @app.post("/api/projects", response_model=ProjectModel, status_code=201)
     async def create_project(body: ProjectCreate, who: Principal = Depends(principal)):

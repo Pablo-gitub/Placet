@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { needsReturnApproval } from "./decisions";
-import React, { useLayoutEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Attachments from "./Attachments";
 import Composer from "./Composer";
 import { limitReset, resetClock } from "./usage";
@@ -21,6 +21,7 @@ import {
   Sparkles,
   Terminal,
   Wrench,
+  X,
 } from "lucide-react";
 import Markdown from "./Markdown";
 import RequestCard from "./RequestCard";
@@ -198,11 +199,20 @@ function Outgoing({ req, session, limitAt, onDelivery, onEdit }) {
   const { t } = useTranslation();
   const uncertain = isUncertain(req);
   const failed = req.status === "DELIVERY_FAILED" || req.status === "EXPIRED";
+  const projName = req.project_context
+    ? (req.project_context.match(/\[Placet · (?:Project|Progetto)\s+([^\]\n]+)\]/)?.[1] || "")
+    : "";
   return (
     <div
       className={`msg msg-user outgoing${failed ? " failed" : ""}${uncertain ? " uncertain" : ""}`}
       data-testid={`outgoing-${req.id}`}
     >
+      {req.project_context && (
+        <details className="project-instructions-collapsed" data-testid="project-instructions-collapsed">
+          <summary>{t("chat.projectInstructionsTitle", { name: projName })}</summary>
+          <pre>{req.project_context}</pre>
+        </details>
+      )}
       <div className="bubble">{req.prompt}</div>
       <time>
         {uncertain
@@ -280,6 +290,7 @@ export default function SessionView({
   requests,
   sessions,
   usage,
+  initialProjectId = null,
   onBack,
   onDecide,
   onSend,
@@ -309,6 +320,34 @@ export default function SessionView({
   const edit = async (req) => {
     if (await onDelivery(req.id, "cancel")) setDraft({ ...splitPrompt(req.prompt, sessions), nonce: req.id });
   };
+
+  const [activeProjectId, setActiveProjectId] = useState(initialProjectId || null);
+  const [prevInitial, setPrevInitial] = useState(initialProjectId);
+  if (initialProjectId !== prevInitial) {
+    setPrevInitial(initialProjectId);
+    setActiveProjectId(initialProjectId || null);
+  }
+
+  const [projectName, setProjectName] = useState("");
+  const [prevActiveProject, setPrevActiveProject] = useState(activeProjectId);
+  if (activeProjectId !== prevActiveProject) {
+    setPrevActiveProject(activeProjectId);
+    if (!activeProjectId) setProjectName("");
+  }
+
+  useEffect(() => {
+    if (!activeProjectId) return;
+    let ignore = false;
+    fetch(`/api/projects/${activeProjectId}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!ignore && data?.name) setProjectName(data.name);
+      })
+      .catch(() => {});
+    return () => {
+      ignore = true;
+    };
+  }, [activeProjectId]);
 
   // Keep the view where the reader is: at the bottom while following, on the
   // same message after older ones are added above.
@@ -355,6 +394,20 @@ export default function SessionView({
           <ModelLine meta={{ model: session?.model, ...meta }} />
         </div>
         <NodeControl session={session} />
+        {activeProjectId && (
+          <span className="project-context-chip" data-testid="project-context-chip">
+            {t("chat.projectContext", { name: projectName || String(activeProjectId) })}
+            <button
+              type="button"
+              className="icon-button"
+              data-testid="remove-project-context"
+              aria-label={t("chat.removeProjectContext")}
+              onClick={() => setActiveProjectId(null)}
+            >
+              <X size={12} />
+            </button>
+          </span>
+        )}
         {state && (
           <span className={`session-state state-${state.key}`} data-testid="session-view-state">
             <Circle size={8} fill="currentColor" />
@@ -436,8 +489,12 @@ export default function SessionView({
           limitAt={limitAt}
           draft={draft}
           sessions={sessions}
+          onSelectProject={(pid) => setActiveProjectId(pid)}
           onSend={async (text, mentions, attachments, mode) => {
             following.current = true;
+            if (activeProjectId) {
+              return onSend(sessionId, text, mentions || [], attachments || [], mode || "queue", activeProjectId);
+            }
             if (mode === "now") return onSend(sessionId, text, mentions || [], attachments || [], "now");
             return attachments?.length ? onSend(sessionId, text, mentions, attachments)
               : mentions?.length ? onSend(sessionId, text, mentions) : onSend(sessionId, text);

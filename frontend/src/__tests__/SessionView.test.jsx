@@ -412,3 +412,71 @@ describe("model and context", () => {
     await waitFor(() => expect(screen.getByTestId("session-model")).toHaveTextContent("gemini-3.8-flash-medium"));
   });
 });
+
+describe("project context and instructions (RFC-15)", () => {
+  it("shows project context chip in header and allows removing it", async () => {
+    mockFetch([
+      [transcriptOf("s1"), latest],
+      ["/api/projects/1", { id: 1, name: "Placet Core" }],
+      ["/api/projects", [{ id: 1, name: "Placet Core" }]],
+    ]);
+
+    renderView({ initialProjectId: 1 });
+
+    expect(await screen.findByTestId("project-context-chip")).toBeInTheDocument();
+    expect(screen.getByTestId("project-context-chip")).toHaveTextContent("Progetto: Placet Core");
+
+    fireEvent.click(screen.getByTestId("remove-project-context"));
+    expect(screen.queryByTestId("project-context-chip")).not.toBeInTheDocument();
+  });
+
+  it("sends message with project_id when project context is active", async () => {
+    mockFetch([
+      [transcriptOf("s1"), latest],
+      ["/api/projects/1", { id: 1, name: "Placet Core" }],
+      ["/api/projects", [{ id: 1, name: "Placet Core" }]],
+    ]);
+    const onSend = vi.fn().mockResolvedValue(true);
+
+    renderView({ initialProjectId: 1, onSend });
+
+    await waitFor(() => expect(screen.getByTestId("project-context-chip")).toBeInTheDocument());
+
+    const input = screen.getByTestId("composer-input");
+    fireEvent.change(input, { target: { value: "Hello with project context" } });
+    fireEvent.click(screen.getByTestId("composer-send"));
+
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledWith(
+        "s1",
+        "Hello with project context",
+        [],
+        [],
+        "queue",
+        1
+      );
+    });
+  });
+
+  it("renders project_context collapsed and expandable above outgoing prompt", async () => {
+    const reqWithContext = {
+      id: 99,
+      question_type: "message",
+      recipient_session_id: "s1",
+      status: "APPROVED",
+      prompt: "Please review the architecture",
+      project_context: "[Placet · Project Placet Core]\nBe accurate.\n\n[Placet · Your role in Placet Core]\nArchitect role.",
+      delivery_mode: "queue",
+      execution: "unobserved",
+    };
+
+    mockFetch([[transcriptOf("s1"), latest]]);
+
+    renderView({ requests: [reqWithContext] });
+
+    const collapsed = await screen.findByTestId("project-instructions-collapsed");
+    expect(collapsed).toBeInTheDocument();
+    expect(screen.getByText("Istruzioni Placet · Progetto Placet Core")).toBeInTheDocument();
+    expect(screen.getByText(/Be accurate/)).toBeInTheDocument();
+  });
+});

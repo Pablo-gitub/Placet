@@ -282,7 +282,7 @@ describe("Projects views (RFC-09, RF-44)", () => {
     // Node 101 has session: shows status and clicking opens chat
     expect(within(screen.getByTestId("project-node-101")).getByText("In attesa")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("open-node-session-101"));
-    expect(onOpenSession).toHaveBeenCalledWith("cl");
+    expect(onOpenSession).toHaveBeenCalledWith("cl", 1);
 
     // Node 102 has no session: shows "nessuna sessione"
     expect(within(screen.getByTestId("project-node-102")).getByText("nessuna sessione")).toBeInTheDocument();
@@ -358,5 +358,86 @@ describe("Projects views (RFC-09, RF-44)", () => {
 
     expect(window.location.hash).toBe("#/progetti");
     expect(await screen.findByTestId("projects-view")).toBeInTheDocument();
+  });
+
+  it("edits and saves project instructions and node instructions", async () => {
+    const detailData = {
+      ...sampleProjects[0],
+      instructions: "Original project instructions",
+      nodes: [
+        { id: 101, name: "planner", session_id: "s1", instructions: "Original node instructions" },
+      ],
+      relations: [],
+      effective_rule: "",
+    };
+    const fetch = mockFetch([
+      ["/api/projects/1", (url, o) => {
+        if (o.method === "PATCH") return json({ ...detailData, ...JSON.parse(o.body) });
+        return detailData;
+      }],
+      ["/api/projects/1/nodes/101", (url, o) => {
+        if (o.method === "PATCH") return json({ ok: true, instructions: JSON.parse(o.body).instructions });
+        return { ok: true };
+      }],
+      ["/api/nodes", []],
+      ["/api/relations", []],
+      ["/api/relation-types", []],
+      ["/api/sessions", []],
+    ]);
+    vi.stubGlobal("fetch", fetch);
+
+    render(<ProjectDetailView projectId={1} onBack={vi.fn()} />);
+
+    // Check project instructions editor
+    const projTextarea = await screen.findByTestId("project-instructions-input");
+    expect(projTextarea).toHaveValue("Original project instructions");
+    expect(screen.getByText("breve: viene ripetuto a ogni messaggio")).toBeInTheDocument();
+
+    fireEvent.change(projTextarea, { target: { value: "Updated project instructions" } });
+    fireEvent.click(screen.getByTestId("save-project-instructions-btn"));
+
+    await waitFor(() => {
+      expect(bodies(fetch, "PATCH", "/api/projects/1")).toContainEqual(
+        expect.objectContaining({ instructions: "Updated project instructions" })
+      );
+    });
+
+    // Check node instructions editor
+    const nodeTextarea = screen.getByTestId("node-instructions-input-101");
+    expect(nodeTextarea).toHaveValue("Original node instructions");
+    fireEvent.change(nodeTextarea, { target: { value: "Updated node role instructions" } });
+    fireEvent.click(screen.getByTestId("save-node-instructions-btn-101"));
+
+    await waitFor(() => {
+      expect(bodies(fetch, "PATCH", "/api/projects/1/nodes/101")).toEqual([{
+        instructions: "Updated node role instructions",
+      }]);
+    });
+  });
+
+  it("opens node session with project context on tap in node list", async () => {
+    const detailData = {
+      ...sampleProjects[0],
+      nodes: [
+        { id: 101, name: "planner", session_id: "s1", instructions: null },
+      ],
+      relations: [],
+      effective_rule: "",
+    };
+    const fetch = mockFetch([
+      ["/api/projects/1", detailData],
+      ["/api/nodes", []],
+      ["/api/relations", []],
+      ["/api/relation-types", []],
+      ["/api/sessions", [{ id: "s1", state: "idle" }]],
+    ]);
+    vi.stubGlobal("fetch", fetch);
+
+    const onOpen = vi.fn();
+    render(<ProjectDetailView projectId={1} onOpenSession={onOpen} onBack={vi.fn()} />);
+
+    const nodeBtn = await screen.findByTestId("open-node-session-101");
+    fireEvent.click(nodeBtn);
+    expect(onOpen).toHaveBeenCalledWith("s1", 1);
   });
 });

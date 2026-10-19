@@ -2295,10 +2295,22 @@ class Database:
             row = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
             return self._row_to_project(row)
 
-    def list_projects(self) -> List[ProjectSummaryModel]:
+    def list_projects(self, node_id: Optional[int] = None) -> List[ProjectSummaryModel]:
         with self._get_connection() as conn:
-            rows = conn.execute(
+            if node_id is not None:
+                query = """
+                SELECT p.*,
+                  (SELECT COUNT(*) FROM project_nodes pn2 WHERE pn2.project_id = p.id) AS nodes_count,
+                  (SELECT COUNT(*) FROM project_relations pr WHERE pr.project_id = p.id) AS relations_count,
+                  (SELECT COUNT(*) FROM project_relations pr JOIN relations r ON r.id = pr.relation_id WHERE pr.project_id = p.id AND r.approval = 'automatic') AS automatic_relations_count
+                FROM projects p
+                JOIN project_nodes pn ON pn.project_id = p.id
+                WHERE pn.node_id = ?
+                ORDER BY p.name COLLATE NOCASE
                 """
+                rows = conn.execute(query, (node_id,)).fetchall()
+            else:
+                query = """
                 SELECT p.*,
                   (SELECT COUNT(*) FROM project_nodes pn WHERE pn.project_id = p.id) AS nodes_count,
                   (SELECT COUNT(*) FROM project_relations pr WHERE pr.project_id = p.id) AS relations_count,
@@ -2306,7 +2318,7 @@ class Database:
                 FROM projects p
                 ORDER BY p.name COLLATE NOCASE
                 """
-            ).fetchall()
+                rows = conn.execute(query).fetchall()
             return [
                 ProjectSummaryModel(
                     id=r["id"],

@@ -144,6 +144,7 @@
     "relationExists": "This relation already exists.",
     "relationSelf": "A node cannot have a relation with itself.",
     "projectNameTaken": "A project with this name already exists.",
+    "nodeNotInProject": "The session's node does not belong to this project.",
     "relationSave": "Unable to save the relation. Check your connection.",
     "forwardInvalid": "Choose an open session other than the sender and the one that replied.",
     "automation": "Unable to change the automation. Check your connection."
@@ -292,7 +293,9 @@
     "closedPlaceholder": "Session closed",
     "placeholder": "Write to the session… @ to mention another",
     "send": "Send",
-    "limited": "{{provider}} has reached its usage limit: your message waits in Placet and is sent after the reset at {{time}}."
+    "limited": "{{provider}} has reached its usage limit: your message waits in Placet and is sent after the reset at {{time}}.",
+    "noProjectsForSession": "No projects for this session",
+    "projectMentionLabel": "Projects for this session"
   },
   "chat": {
     "actions_one": "{{count}} action",
@@ -312,7 +315,11 @@
     "generatedImage": "Generated image",
     "effort": "effort {{effort}}",
     "context": "{{used}} context",
-    "contextOf": "{{used}} / {{total}} context ({{percent}})"
+    "contextOf": "{{used}} / {{total}} context ({{percent}})",
+    "projectContext": "Project: {{name}}",
+    "removeProjectContext": "Remove project context",
+    "projectInstructionsTitle": "Placet Instructions · Project {{name}}",
+    "projectInstructions": "Placet Instructions"
   },
   "actions": {
     "read": "Reads {{name}}",
@@ -533,6 +540,14 @@
     "typesEmpty": "No relation types defined.",
     "saveType": "Save type",
     "graphTitle": "Relations diagram",
-    "graphEmpty": "Add nodes and relations to see the diagram."
+    "graphEmpty": "Add nodes and relations to see the diagram.",
+    "instructionsTitle": "Project instructions",
+    "instructionsHint": "brief: repeated with every message",
+    "instructionsPlaceholder": "E.g. General guidelines and conventions for tasks in this project…",
+    "saveInstructions": "Save instructions",
+    "instructionsSaved": "Instructions saved",
+    "nodeInstructionsTitle": "Node instructions in this project",
+    "nodeInstructionsPlaceholder": "E.g. Specific role of this node in the project…",
+    "saveNodeInstructions": "Save node instructions"
   }
 }

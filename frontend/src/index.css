@@ -1738,3 +1738,45 @@ body.chat-open { overflow: hidden; }
 .relation-graph-legend { display: flex; gap: 1rem; justify-content: center; font-size: 0.75rem; color: var(--text-muted); margin-top: 0.4rem; }
 .rg-swatch { display: inline-block; width: 18px; height: 0; vertical-align: middle; border-top: 2px solid var(--success); margin-right: 0.3rem; }
 .rg-swatch.rg-manual { border-top: 2px dashed var(--text-muted); }
+
+/* RFC-15: project context chip in chat header and collapsed instructions above prompt */
+.project-context-chip {
+  display: inline-flex; align-items: center; gap: 0.3rem; flex-shrink: 0;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  background: var(--bg-secondary); color: var(--text-main);
+  border: 1px solid var(--border-color);
+  font-size: 0.75rem; font-weight: 500;
+}
+.project-context-chip button {
+  padding: 0; margin: 0; border: none; background: transparent;
+  color: var(--text-muted); cursor: pointer; display: flex; align-items: center;
+}
+.project-context-chip button:hover { color: var(--text-main); }
+
+.project-instructions-collapsed {
+  margin-bottom: 0.4rem;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  font-size: 0.75rem;
+  overflow: hidden;
+  max-width: 88%;
+}
+.project-instructions-collapsed summary {
+  padding: 0.35rem 0.6rem;
+  cursor: pointer;
+  user-select: none;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.project-instructions-collapsed pre {
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  border-top: 1px solid var(--border-color);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  color: var(--text-main);
+}
+

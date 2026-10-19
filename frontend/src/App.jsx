@@ -256,7 +256,7 @@ export default function App() {
   };
 
   /** The user writes to a session (RF-34); true when the message is accepted. */
-  const sendMessage = async (sessionId, text, mentions = [], attachments = [], mode = "queue") => {
+  const sendMessage = async (sessionId, text, mentions = [], attachments = [], mode = "queue", projectId = null) => {
     try {
       const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
         method: "POST",
@@ -266,6 +266,7 @@ export default function App() {
           ...(mentions.length ? { mentions } : {}),
           ...(attachments.length ? { attachments } : {}),
           ...(mode === "now" ? { mode } : {}),
+          ...(projectId ? { project_id: projectId } : {}),
         }),
       });
       if (!res.ok) {
@@ -321,7 +322,7 @@ export default function App() {
     }
   };
 
-  const openSession = (id) => navigate(`#/sessione/${id}`);
+  const openSession = (id, projectId = null) => navigate(projectId ? `#/sessione/${id}?project=${projectId}` : `#/sessione/${id}`);
   const pendingCount = requests.filter((r) => r.status === "PENDING" || needsReturnApproval(r)).length;
 
   const homeView = (
@@ -340,9 +341,10 @@ export default function App() {
   );
   const sessionView = route.view === "session" && (
     <SessionView
-      key={route.sessionId}
+      key={`${route.sessionId}:${route.projectId || ""}`}
       sessionId={route.sessionId}
       session={sessions.find((s) => s.id === route.sessionId)}
+      initialProjectId={route.projectId}
       requests={requests}
       sessions={sessions}
       usage={usage}

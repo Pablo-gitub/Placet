@@ -70,3 +70,48 @@ it("rejects unsupported files and allows removal", () => {
   fireEvent.click(screen.getByRole("button", { name: "Rimuovi ok.pdf" }));
   expect(screen.getByRole("button", { name: "Invia" })).toBeDisabled();
 });
+
+describe("project hash mentions (#)", () => {
+  it("opens # mention picker for session's node projects and removes token on selection", async () => {
+    const fetch = vi.fn((url) => {
+      if (url === "/api/projects?node_id=101") {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve([
+            { id: 1, name: "Placet Core" },
+            { id: 2, name: "Design System" },
+          ]),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+    });
+    vi.stubGlobal("fetch", fetch);
+
+    const nodeSession = { ...session, node_id: 101 };
+    const onSelectProject = vi.fn();
+    const send = vi.fn().mockResolvedValue(true);
+
+    render(<Composer session={nodeSession} sessions={sessions} onSend={send} onSelectProject={onSelectProject} />);
+
+    type("Lavoriamo su #");
+    expect(await screen.findByRole("listbox")).toBeInTheDocument();
+    expect(screen.getByText("Placet Core")).toBeInTheDocument();
+    expect(screen.getByText("Design System")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Lavoriamo su #Placet", selectionStart: 20 } });
+    expect(screen.queryByText("Design System")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Placet Core"));
+
+    expect(onSelectProject).toHaveBeenCalledWith(1);
+    expect(screen.getByRole("textbox").value).toBe("Lavoriamo su ");
+  });
+
+  it("shows note when session has no node or no projects on # mention", async () => {
+    const sessionWithoutNode = { ...session, node_id: null };
+    render(<Composer session={sessionWithoutNode} sessions={sessions} onSend={vi.fn()} />);
+
+    type("Test #");
+    expect(await screen.findByText("Nessun progetto per questa sessione")).toBeInTheDocument();
+  });
+});

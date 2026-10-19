@@ -59,6 +59,7 @@ export function apiErrorDescriptor(body, status) {
     "return.unavailable": "errors.returnUnavailable",
     "project.name_taken": "errors.projectNameTaken",
     "project.not_found": "errors.notFound",
+    "project.node_not_in_project": "errors.nodeNotInProject",
     "claude_renew.failed": "errors.claudeRenewFailed",
   };
   const key = Object.hasOwn(codes, body?.code) ? codes[body.code] : null;

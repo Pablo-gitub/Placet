@@ -144,6 +144,7 @@
     "relationExists": "Questa relazione esiste già.",
     "relationSelf": "Un nodo non può avere una relazione con se stesso.",
     "projectNameTaken": "Esiste già un progetto con questo nome.",
+    "nodeNotInProject": "Il nodo della sessione non appartiene a questo progetto.",
     "relationSave": "Impossibile salvare la relazione. Controlla la connessione.",
     "forwardInvalid": "Scegli una sessione aperta diversa dal mittente e da chi ha risposto.",
     "automation": "Impossibile modificare gli automatismi. Controlla la connessione."
@@ -292,7 +293,9 @@
     "closedPlaceholder": "Sessione chiusa",
     "placeholder": "Scrivi alla sessione… @ per citarne un’altra",
     "send": "Invia",
-    "limited": "{{provider}} ha raggiunto il limite d'uso: il messaggio aspetta in Placet e parte dopo il reset delle {{time}}."
+    "limited": "{{provider}} ha raggiunto il limite d'uso: il messaggio aspetta in Placet e parte dopo il reset delle {{time}}.",
+    "noProjectsForSession": "Nessun progetto per questa sessione",
+    "projectMentionLabel": "Progetti della sessione"
   },
   "chat": {
     "actions_one": "{{count}} azione",
@@ -312,7 +315,11 @@
     "generatedImage": "Immagine generata",
     "effort": "effort {{effort}}",
     "context": "contesto {{used}}",
-    "contextOf": "contesto {{used}} / {{total}} ({{percent}})"
+    "contextOf": "contesto {{used}} / {{total}} ({{percent}})",
+    "projectContext": "Progetto: {{name}}",
+    "removeProjectContext": "Rimuovi contesto progetto",
+    "projectInstructionsTitle": "Istruzioni Placet · Progetto {{name}}",
+    "projectInstructions": "Istruzioni Placet"
   },
   "actions": {
     "read": "Legge {{name}}",
@@ -533,6 +540,14 @@
     "typesEmpty": "Nessun tipo di relazione definito.",
     "saveType": "Salva tipo",
     "graphTitle": "Schema delle relazioni",
-    "graphEmpty": "Aggiungi nodi e relazioni per vedere lo schema."
+    "graphEmpty": "Aggiungi nodi e relazioni per vedere lo schema.",
+    "instructionsTitle": "Istruzioni del progetto",
+    "instructionsHint": "breve: viene ripetuto a ogni messaggio",
+    "instructionsPlaceholder": "Es. Istruzioni e convenzioni generali del progetto…",
+    "saveInstructions": "Salva istruzioni",
+    "instructionsSaved": "Istruzioni salvate",
+    "nodeInstructionsTitle": "Istruzioni del nodo in questo progetto",
+    "nodeInstructionsPlaceholder": "Es. Ruolo specifico di questo nodo nel progetto…",
+    "saveNodeInstructions": "Salva istruzioni nodo"
   }
 }

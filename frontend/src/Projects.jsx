@@ -714,6 +714,8 @@ export function ProjectDetailView({ projectId, sessions: propSessions, onOpenSes
   const [editingProject, setEditingProject] = useState(false);
   const [creatingRelation, setCreatingRelation] = useState(false);
   const [error, setError] = useState(null);
+  const [projInstructions, setProjInstructions] = useState("");
+  const [nodeInstructions, setNodeInstructions] = useState({});
 
   const sessions = propSessions || fetchedSessions;
 
@@ -721,7 +723,17 @@ export function ProjectDetailView({ projectId, sessions: propSessions, onOpenSes
     let cancelled = false;
     api("GET", `/api/projects/${projectId}`)
       .then((p) => {
-        if (!cancelled) setProject(p);
+        if (!cancelled) {
+          setProject(p);
+          setProjInstructions(p.instructions || "");
+          const map = {};
+          if (p.nodes) {
+            for (const n of p.nodes) {
+              map[n.id] = n.instructions || "";
+            }
+          }
+          setNodeInstructions(map);
+        }
       })
       .catch((err) => {
         if (!cancelled) setError(err.display || { key: "errors.notFound" });
@@ -822,6 +834,29 @@ export function ProjectDetailView({ projectId, sessions: propSessions, onOpenSes
     }
   };
 
+  const handleSaveProjectInstructions = async () => {
+    try {
+      await api("PATCH", `/api/projects/${projectId}`, {
+        instructions: projInstructions.trim() || null,
+      });
+      load();
+    } catch (err) {
+      setError(err.display || { key: "errors.operation", params: { status: err.status || 500 } });
+    }
+  };
+
+  const handleSaveNodeInstructions = async (nodeId) => {
+    try {
+      const val = (nodeInstructions[nodeId] || "").trim() || null;
+      await api("PATCH", `/api/projects/${projectId}/nodes/${nodeId}`, {
+        instructions: val,
+      });
+      load();
+    } catch (err) {
+      setError(err.display || { key: "errors.operation", params: { status: err.status || 500 } });
+    }
+  };
+
   const handleUpdateProject = async (data) => {
     await api("PATCH", `/api/projects/${projectId}`, data);
     setEditingProject(false);
@@ -882,6 +917,33 @@ export function ProjectDetailView({ projectId, sessions: propSessions, onOpenSes
             )}
           </div>
         </div>
+
+        <div className="project-instructions-box" data-testid="project-instructions-box">
+          <div className="project-instructions-header">
+            <h3 className="section-label">{t("projects.instructionsTitle")}</h3>
+            <small className="composer-note">{t("projects.instructionsHint")}</small>
+          </div>
+          <textarea
+            data-testid="project-instructions-input"
+            className="prompt-editor"
+            maxLength={4000}
+            placeholder={t("projects.instructionsPlaceholder")}
+            value={projInstructions}
+            onChange={(e) => setProjInstructions(e.target.value)}
+            rows={3}
+          />
+          <div className="project-instructions-actions">
+            <span className="char-counter">{projInstructions.length} / 4000</span>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              data-testid="save-project-instructions-btn"
+              onClick={handleSaveProjectInstructions}
+            >
+              {t("projects.saveInstructions")}
+            </button>
+          </div>
+        </div>
       </div>
 
       {error && <p role="alert" className="error-message projects-error">{t(error.key, error.params)}</p>}
@@ -902,35 +964,63 @@ export function ProjectDetailView({ projectId, sessions: propSessions, onOpenSes
                   className="project-node-item"
                   data-testid={`project-node-${n.id}`}
                 >
-                  {session ? (
+                  <div className="project-node-header">
+                    {session ? (
+                      <button
+                        type="button"
+                        className="link-button project-node-link"
+                        data-testid={`open-node-session-${n.id}`}
+                        onClick={() => onOpenSession ? onOpenSession(n.session_id, projectId) : (window.location.hash = `#/sessione/${n.session_id}?project=${projectId}`)}
+                      >
+                        <strong className="project-node-name">{n.name}</strong>
+                        <span className={`session-state state-${status.key}`}>
+                          <Circle size={7} fill="currentColor" />
+                          {status.label}
+                        </span>
+                      </button>
+                    ) : (
+                      <div className="project-node-content">
+                        <strong className="project-node-name">{n.name}</strong>
+                        <span className="project-node-no-session">{t("projects.noSession")}</span>
+                      </div>
+                    )}
                     <button
                       type="button"
-                      className="link-button project-node-link"
-                      data-testid={`open-node-session-${n.id}`}
-                      onClick={() => onOpenSession ? onOpenSession(n.session_id) : (window.location.hash = `#/sessione/${n.session_id}`)}
+                      className="icon-button"
+                      data-testid={`remove-node-${n.id}`}
+                      aria-label={t("projects.removeNode")}
+                      title={t("projects.removeNode")}
+                      onClick={() => handleRemoveNode(n)}
                     >
-                      <strong className="project-node-name">{n.name}</strong>
-                      <span className={`session-state state-${status.key}`}>
-                        <Circle size={7} fill="currentColor" />
-                        {status.label}
-                      </span>
+                      <Trash2 size={13} />
                     </button>
-                  ) : (
-                    <div className="project-node-content">
-                      <strong className="project-node-name">{n.name}</strong>
-                      <span className="project-node-no-session">{t("projects.noSession")}</span>
+                  </div>
+                  <div className="project-node-instructions">
+                    <label className="prompt-editor-label" htmlFor={`node-inst-${n.id}`}>
+                      {t("projects.nodeInstructionsTitle")}
+                    </label>
+                    <textarea
+                      id={`node-inst-${n.id}`}
+                      data-testid={`node-instructions-input-${n.id}`}
+                      className="prompt-editor"
+                      maxLength={4000}
+                      placeholder={t("projects.nodeInstructionsPlaceholder")}
+                      value={nodeInstructions[n.id] ?? ""}
+                      onChange={(e) => setNodeInstructions({ ...nodeInstructions, [n.id]: e.target.value })}
+                      rows={2}
+                    />
+                    <div className="project-instructions-actions">
+                      <span className="char-counter">{(nodeInstructions[n.id] ?? "").length} / 4000</span>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        data-testid={`save-node-instructions-btn-${n.id}`}
+                        onClick={() => handleSaveNodeInstructions(n.id)}
+                      >
+                        {t("projects.saveNodeInstructions")}
+                      </button>
                     </div>
-                  )}
-                  <button
-                    type="button"
-                    className="icon-button"
-                    data-testid={`remove-node-${n.id}`}
-                    aria-label={t("projects.removeNode")}
-                    title={t("projects.removeNode")}
-                    onClick={() => handleRemoveNode(n)}
-                  >
-                    <Trash2 size={13} />
-                  </button>
+                  </div>
                 </li>
               );
             })}
@@ -1061,7 +1151,7 @@ export function ProjectDetailView({ projectId, sessions: propSessions, onOpenSes
       {/* RF-44: beside the project in landscape, at the bottom in portrait. */}
       <aside className="card project-graph-panel" aria-label={t("projects.graphTitle")}>
         <h2 className="project-relations-title">{t("projects.graphTitle")}</h2>
-        <RelationGraph nodes={project.nodes} relations={project.relations} />
+        <RelationGraph nodes={project.nodes} relations={project.relations} projectId={projectId} onOpenSession={onOpenSession} />
       </aside>
       </div>
 
