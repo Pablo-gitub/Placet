@@ -460,7 +460,8 @@
     "limits": "Limiti anti-loop",
     "maxHops": "Passaggi automatici consecutivi",
     "maxPerHour": "Prompt automatici all'ora per relazione",
-    "save": "Salva"
+    "save": "Salva",
+    "usageGuarded": "In revisione per i consumi: {{providers}}"
   },
   "push": {
     "title": "Notifiche su questo dispositivo",
@@ -560,6 +561,18 @@
     "notifications": "Notifiche",
     "pushHint": "Notifiche push su questo dispositivo.",
     "records": "Registro",
-    "historyHint": "Richieste concluse e cronologia di ogni decisione."
+    "historyHint": "Richieste concluse e cronologia di ogni decisione.",
+    "automation": "Automazione e consumi",
+    "guardTitle": "Relazioni in manuale vicino al limite",
+    "guardHint": "Quando un provider supera una soglia, tutte le sue relazioni automatiche, in entrata e in uscita, passano dalla tua revisione finché i consumi non scendono.",
+    "guard5h": "Finestra 5 ore",
+    "guard7d": "Finestra 7 giorni",
+    "guardRange": "Le soglie vanno da 50 a 100%.",
+    "guardActive": "Ora in revisione per i consumi: {{providers}}.",
+    "guardClaudeWarning": "Per Claude serve il rinnovo automatico dell'accesso: senza, dopo circa 8 ore Placet non legge più i suoi consumi e il controllo non vale per Claude.",
+    "renewHint": "Rinnova l'accesso di Claude Code quando scade, senza usare il modello, così i suoi consumi restano aggiornati.",
+    "save": "Salva",
+    "saveError": "Salvataggio non riuscito.",
+    "loadError": "Impostazioni non disponibili."
   }
 }

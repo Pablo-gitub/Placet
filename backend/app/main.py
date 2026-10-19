@@ -131,6 +131,13 @@ class ClaudeRenewSetting(BaseModel):
     enabled: bool
 
 
+class UsageGuardSetting(BaseModel):
+    """Automatic relations fall back to review near a provider's usage limit."""
+    enabled: bool
+    five_hour: int = Field(ge=50, le=100)
+    seven_day: int = Field(ge=50, le=100)
+
+
 class QueueRelease(BaseModel):
     reason: Literal["finished", "queue_next"]
 
@@ -503,7 +510,7 @@ def create_app(
 
     def reverse_is_automatic(relation) -> bool:
         """RFC-13: a reply goes back on its own only if B -> A of the same type is automatic."""
-        if relation is None:
+        if relation is None or relation_guarded(relation):
             return False
         back = db.find_relation(relation.to_node, relation.from_node, relation.type_id)
         return back is not None and back.approval == "automatic"
@@ -583,6 +590,49 @@ def create_app(
         db.set_setting("claude_auto_renew", "true" if payload.enabled else "false")
         response.headers["Cache-Control"] = "no-store"
         return {"enabled": db.get_setting("claude_auto_renew") == "true"}
+
+    def usage_guard() -> Dict[str, object]:
+        def percent(key: str, default: int) -> int:
+            try:
+                return int(db.get_setting(key) or default)
+            except ValueError:
+                return default
+        return {"enabled": db.get_setting("usage_guard_enabled") == "true",
+                "five_hour": percent("usage_guard_5h", 90), "seven_day": percent("usage_guard_7d", 95)}
+
+    def usage_guarded() -> Set[str]:
+        """The providers whose automatic relations are reviewed now, if the guard is on."""
+        cfg = usage_guard()
+        if not cfg["enabled"]:
+            return set()
+        return db.near_limit_providers(cfg["five_hour"], cfg["seven_day"])
+
+    def relation_guarded(relation) -> Optional[str]:
+        """The provider at either end of a relation that is near its usage limit."""
+        guarded = usage_guarded()
+        if relation is None or not guarded:
+            return None
+        for node_id in (relation.from_node, relation.to_node):
+            node = db.get_node(node_id)
+            session = db.get_session(node.session_id) if node and node.session_id else None
+            if session is not None and session.provider in guarded:
+                return session.provider
+        return None
+
+    @app.get("/api/settings/usage-guard")
+    async def get_usage_guard(response: Response, who: Principal = Depends(principal)):
+        require_human(who)
+        response.headers["Cache-Control"] = "no-store"
+        return {**usage_guard(), "guarded": sorted(usage_guarded())}
+
+    @app.put("/api/settings/usage-guard")
+    async def set_usage_guard(payload: UsageGuardSetting, response: Response, who: Principal = Depends(principal)):
+        require_human(who)
+        db.set_setting("usage_guard_enabled", "true" if payload.enabled else "false")
+        db.set_setting("usage_guard_5h", str(payload.five_hour))
+        db.set_setting("usage_guard_7d", str(payload.seven_day))
+        response.headers["Cache-Control"] = "no-store"
+        return {**usage_guard(), "guarded": sorted(usage_guarded())}
 
     @app.get("/api/health")
     def health():
@@ -755,10 +805,13 @@ def create_app(
                 automation_limit = "hops"
             elif db.automatic_sends_last_hour(relation.id) >= limits["max_per_hour"]:
                 automation_limit = "rate"
+            details: Dict[str, object] = {}
+            if not automation_limit and (near := relation_guarded(relation)):
+                automation_limit, details = "usage", {"provider": near}
             if automation_limit:
                 needs_approval, by_relation = True, False
                 db.log_event(created.id, "system:limits", "automation_limited",
-                             {"reason": automation_limit, "hops": hops_before + 1, **limits})
+                             {"reason": automation_limit, "hops": hops_before + 1, **limits, **details})
         db.set_chain(created.id, parent_id, hops_before + 1 if by_relation else 0)
         created = db.get_request(created.id)
 
@@ -1561,7 +1614,7 @@ def create_app(
     async def get_automation(who: Principal = Depends(principal)):
         require_human(who)
         automatic = sum(1 for r in db.list_relations() if r.approval == "automatic")
-        return {**db.get_automation(), "automatic_relations": automatic}
+        return {**db.get_automation(), "automatic_relations": automatic, "usage_guarded": sorted(usage_guarded())}
 
     @app.put("/api/automation")
     async def set_automation(body: AutomationLimits, who: Principal = Depends(principal)):

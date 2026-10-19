@@ -17,6 +17,12 @@ describe("AutomationBar", () => {
     expect(screen.queryByTestId("automation-bar")).toBeNull();
   });
 
+  it("says which providers are reviewed because of usage", async () => {
+    vi.stubGlobal("fetch", mockFetch([["/api/automation", { ...active, usage_guarded: ["claude-code"] }]]));
+    render(<AutomationBar />);
+    expect(await screen.findByTestId("automation-usage")).toHaveTextContent("Claude");
+  });
+
   it("stops all, resumes and saves the limits", async () => {
     const fetch = mockFetch([
       ["/api/automation/stop", { ...active, paused: true, held: [4] }],

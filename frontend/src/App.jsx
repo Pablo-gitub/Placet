@@ -162,6 +162,8 @@ export default function App() {
       evtSource.addEventListener("usage_update", (event) => {
         try {
           setUsage(JSON.parse(event.data));
+          // The usage guard may have changed which relations are automatic.
+          setAutomationVersion((v) => v + 1);
         } catch (err) {
           console.error("Error parsing SSE event:", err);
         }

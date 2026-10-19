@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { OctagonX, Play, SlidersHorizontal } from "lucide-react";
 import { apiErrorDescriptor } from "./i18n/errors";
+import { providerOf } from "./sessionInfo";
 
 async function call(method, url, body) {
   const res = await fetch(url, {
@@ -65,6 +66,11 @@ export default function AutomationBar({ version = 0 }) {
           </button>
         )}
       </div>
+      {!state.paused && state.usage_guarded?.length > 0 && (
+        <p className="automation-usage" data-testid="automation-usage" role="status">
+          {t("automation.usageGuarded", { providers: state.usage_guarded.map((p) => providerOf({ provider: p }).label).join(", ") })}
+        </p>
+      )}
       {editing && (
         <div className="automation-limits" data-testid="automation-limits">
           <label>

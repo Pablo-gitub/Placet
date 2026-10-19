@@ -4,6 +4,7 @@ import { ChevronRight, ShieldCheck } from "lucide-react";
 import LanguageSelect from "./i18n/LanguageSelect";
 import BackgroundLanguage from "./i18n/BackgroundLanguage";
 import PushControl from "./PushControl";
+import UsageGuard from "./UsageGuard";
 
 function Row({ title, hint, children }) {
   return (
@@ -33,6 +34,11 @@ export default function Settings({ onOpenHistory }) {
       <section className="card settings-group">
         <h3 className="section-label">{t("settings.notifications")}</h3>
         <Row title={t("push.title")} hint={t("settings.pushHint")}><PushControl /></Row>
+      </section>
+
+      <section className="card settings-group">
+        <h3 className="section-label">{t("settings.automation")}</h3>
+        <UsageGuard />
       </section>
 
       <section className="card settings-group">

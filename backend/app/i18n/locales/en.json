@@ -49,6 +49,7 @@
   "envelope.limit_paused": "The user paused automatic relations: this prompt waits for their review. Do not resend it.",
   "envelope.limit_hops": "Too many consecutive automatic hops in this chain: this prompt waits for the user's review. Do not resend it.",
   "envelope.limit_rate": "This relation reached its hourly limit of automatic prompts: this one waits for the user's review. Do not resend it.",
+  "envelope.limit_usage": "One of the two sessions is close to its usage limit: automatic relations are reviewed by the user until usage goes down. This prompt waits for the user's review. Do not resend it.",
   "notify.test_title": "Placet: test notification",
   "notify.test_body": "Notifications reach this device. Tap to open Placet."
 }

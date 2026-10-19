@@ -84,6 +84,11 @@ SESSIONS_WITH_NODE = (
 REATTACH_SECONDS = 120.0
 
 
+
+# Providers whose usage the bridge polls: an old reading means it failed (RF-60).
+USAGE_POLLED = {"claude-code", "antigravity"}
+USAGE_STALE_AFTER = timedelta(minutes=20)
+
 class NameTaken(ValueError):
     """Another node or relation type already has this name (names ignore case)."""
 
@@ -1985,6 +1990,31 @@ class Database:
                    for b in usage.buckets):
                 limited.add(usage.provider)
         return limited
+
+    def near_limit_providers(self, five_hour: float, seven_day: float,
+                             now: Optional[datetime] = None) -> Set[str]:
+        """
+        Usage guard: providers whose 5h or 7d window is at or above the given
+        percentage, including model groups (Placet does not know which model a
+        conversation uses). Old readings of polled providers are unknown, not
+        near the limit: Claude's need a valid login (automatic renewal).
+        """
+        from backend.app.models import ProviderUsage
+        now = now or datetime.now(timezone.utc)
+        threshold = {"5h": five_hour, "7d": seven_day}
+        near = set()
+        for data in self.list_usage():
+            usage = ProviderUsage.model_validate_json(data)
+            observed = usage.observed_at
+            if observed is not None and observed.tzinfo is None:
+                observed = observed.replace(tzinfo=timezone.utc)
+            if (usage.provider in USAGE_POLLED and observed is not None
+                    and now - observed > USAGE_STALE_AFTER):
+                continue
+            if any(b.used_percent >= threshold[b.window] and (b.resets_at is None or b.resets_at > now)
+                   for b in usage.buckets):
+                near.add(usage.provider)
+        return near
 
     def reopen_session(self, session_id: str) -> None:
         """The session runs again (it started, or a turn began): neither ended nor suspended."""

@@ -95,52 +95,14 @@ describe("stale usage", () => {
   });
 });
 
-describe("Claude auto-renew menu in UsageBar", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("fetches auto-renew setting and toggles it", async () => {
+describe("Claude auto-renew lives in Settings", () => {
+  it("has no settings menu on the Claude row", () => {
     const claudeUsage = {
-      provider: "claude-code", observed_at: "2026-10-18T17:48:00Z",
-      buckets: [
-        { id: "five_hour", group: null, window: "5h", used_percent: 50, resets_at: "2026-10-18T19:20:00Z" },
-      ],
+      provider: "claude-code", observed_at: new Date().toISOString(),
+      buckets: [{ id: "five_hour", group: null, window: "5h", used_percent: 50, resets_at: new Date(Date.now() + 3600000).toISOString() }],
     };
-
-    global.fetch = vi.fn().mockImplementation((url, opts) => {
-      if (url === "/api/settings/claude-renew" && (!opts || opts.method === "GET")) {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ enabled: false }),
-        });
-      }
-      if (url === "/api/settings/claude-renew" && opts?.method === "PUT") {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ enabled: true }),
-        });
-      }
-      return Promise.reject(new Error(`unexpected fetch ${url}`));
-    });
-
-    const { fireEvent } = await import("@testing-library/react");
     render(<UsageBar usage={[claudeUsage]} />);
-
-    // Menu button on Claude row
-    const menuBtn = screen.getByTestId("btn-claude-menu");
-    expect(menuBtn).not.toBeNull();
-    fireEvent.click(menuBtn);
-
-    // Toggle checkbox appears
-    const toggle = await screen.findByTestId("toggle-claude-auto-renew");
-    expect(toggle).not.toBeChecked();
-
-    fireEvent.click(toggle);
-    expect(global.fetch).toHaveBeenCalledWith("/api/settings/claude-renew", expect.objectContaining({
-      method: "PUT",
-      body: JSON.stringify({ enabled: true }),
-    }));
+    expect(screen.queryByTestId("btn-claude-menu")).toBeNull();
   });
 });
 

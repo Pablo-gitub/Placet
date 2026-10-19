@@ -460,7 +460,8 @@
     "limits": "Loop limits",
     "maxHops": "Consecutive automatic hops",
     "maxPerHour": "Automatic prompts per hour per relation",
-    "save": "Save"
+    "save": "Save",
+    "usageGuarded": "Reviewed because of usage: {{providers}}"
   },
   "push": {
     "title": "Notifications on this device",
@@ -560,6 +561,18 @@
     "notifications": "Notifications",
     "pushHint": "Push notifications on this device.",
     "records": "Records",
-    "historyHint": "Settled requests and the timeline of every decision."
+    "historyHint": "Settled requests and the timeline of every decision.",
+    "automation": "Automation and usage",
+    "guardTitle": "Manual relations near the limit",
+    "guardHint": "When a provider goes over a threshold, all its automatic relations, incoming and outgoing, need your review until usage goes down.",
+    "guard5h": "5-hour window",
+    "guard7d": "7-day window",
+    "guardRange": "Thresholds go from 50 to 100%.",
+    "guardActive": "Now reviewed because of usage: {{providers}}.",
+    "guardClaudeWarning": "Claude needs automatic login renewal: without it, after about 8 hours Placet can no longer read its usage and the guard does not apply to Claude.",
+    "renewHint": "Renews Claude Code's login when it expires, without using the model, so its usage stays current.",
+    "save": "Save",
+    "saveError": "Could not save.",
+    "loadError": "Settings unavailable."
   }
 }

@@ -49,6 +49,7 @@
   "envelope.limit_paused": "L'utente ha messo in pausa le relazioni automatiche: questo prompt attende la sua revisione. Non reinviarlo.",
   "envelope.limit_hops": "Troppi passaggi automatici consecutivi in questa catena: questo prompt attende la revisione dell'utente. Non reinviarlo.",
   "envelope.limit_rate": "Questa relazione ha raggiunto il limite orario di prompt automatici: questo attende la revisione dell'utente. Non reinviarlo.",
+  "envelope.limit_usage": "Una delle due sessioni è vicina al limite di utilizzo: finché i consumi non scendono le relazioni automatiche passano dalla revisione dell'utente. Questo prompt attende la sua revisione. Non reinviarlo.",
   "notify.test_title": "Placet: notifica di prova",
   "notify.test_body": "Le notifiche arrivano su questo dispositivo. Tocca per aprire Placet."
 }
