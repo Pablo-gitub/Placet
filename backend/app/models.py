@@ -344,6 +344,35 @@ class RelationModel(BaseModel):
     type_description: str = ""
 
 
+class ProjectModel(BaseModel):
+    """RFC-09: a project grouping nodes and relations."""
+    id: int
+    name: str
+    description: str = ""
+    relation_rule: Optional[str] = None
+    max_auto_hops: Optional[int] = None
+    max_auto_per_hour: Optional[int] = None
+    created_at: datetime
+
+
+class ProjectSummaryModel(ProjectModel):
+    nodes_count: int = 0
+    relations_count: int = 0
+    automatic_relations_count: int = 0
+
+
+class ProjectRelationDetail(RelationModel):
+    shared_with: List[str] = Field(default_factory=list)
+
+
+class ProjectDetailModel(ProjectModel):
+    nodes: List[NodeModel] = Field(default_factory=list)
+    relations: List[ProjectRelationDetail] = Field(default_factory=list)
+    effective_rule: Optional[str] = None
+    effective_max_hops: Optional[int] = None
+    effective_max_per_hour: Optional[int] = None
+
+
 class RequestEvent(BaseModel):
     """One entry of the audit log (RF-13)."""
     id: int

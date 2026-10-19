@@ -29,7 +29,7 @@ from backend.app.auth import (
     require_human,
 )
 from backend.app.config import PlacetConfig, load_agents_config
-from backend.app.database import Database, NameTaken, NodeNameTaken
+from backend.app.database import Database, NameTaken, NodeNameTaken, ProjectNameTaken
 from backend.app.models import (
     ProviderUsage,
     UsageReport,
@@ -43,6 +43,9 @@ from backend.app.models import (
     OutcomeDecision,
     SessionMessage,
     NodeModel,
+    ProjectModel,
+    ProjectSummaryModel,
+    ProjectDetailModel,
     RelationModel,
     RelationTypeModel,
     SessionModel,
@@ -174,6 +177,22 @@ class RelationUpdate(BaseModel):
 class AutomationLimits(BaseModel):
     max_hops: Optional[int] = Field(None, ge=1, le=10)
     max_per_hour: Optional[int] = Field(None, ge=1, le=200)
+
+
+class ProjectCreate(BaseModel):
+    name: str = Field(..., pattern=NODE_NAME)
+    description: str = Field("", max_length=500)
+    relation_rule: Optional[str] = Field(None, max_length=4000)
+    max_auto_hops: Optional[int] = Field(None, ge=1, le=100)
+    max_auto_per_hour: Optional[int] = Field(None, ge=1, le=1000)
+
+
+class ProjectUpdate(BaseModel):
+    name: Optional[str] = Field(None, pattern=NODE_NAME)
+    description: Optional[str] = Field(None, max_length=500)
+    relation_rule: Optional[str] = Field(None, max_length=4000)
+    max_auto_hops: Optional[int] = Field(None, ge=1, le=100)
+    max_auto_per_hour: Optional[int] = Field(None, ge=1, le=1000)
 
 
 class PushKeys(BaseModel):
@@ -604,7 +623,8 @@ def create_app(
         sender_session = created_sender_session(who)
         relation = (relation_of(sender_session, req.recipient_session_id, req.relation_type_id)
                     if req.recipient_id != "human" else None)
-        rule = db.get_relation_rule().strip()
+        rule = (db.get_relation_effective_policy(relation.id)["rule"]
+                if relation is not None else db.get_relation_rule().strip())
         if relation is not None and relation.approval == "automatic" and rule and not req.rule_acknowledged:
             # Read every time, right before an automatic relation is used.
             return JSONResponse(status_code=428, content={
@@ -673,22 +693,25 @@ def create_app(
 
         # RFC-04/05: the relation between the two nodes decides the policy.
         by_relation = False
+        effective_policy = None
         if req.recipient_id != "human" and relation is None:
             relation = relation_of(created.sender_session_id, created.recipient_session_id,
                                    req.relation_type_id)
         if relation is not None:
             db.set_request_relation(created.id, relation.id)
             created = db.get_request(created.id)
+            effective_policy = db.get_relation_effective_policy(relation.id)
+            effective_rule = effective_policy["rule"]
             # Never automatic without the rule read (a relation found only now).
-            if relation.approval == "automatic" and (req.rule_acknowledged or not rule):
+            if relation.approval == "automatic" and (req.rule_acknowledged or not effective_rule):
                 needs_approval = False
                 by_relation = True
 
         # RFC-14: loop limits turn an automatic relation back into a review.
         parent_id, hops_before = db.chain_start(created.sender_session_id)
         automation_limit = None
-        if by_relation:
-            limits = db.get_automation()
+        if by_relation and effective_policy:
+            limits = effective_policy
             if limits["paused"]:
                 automation_limit = "paused"
             elif hops_before + 1 > limits["max_hops"]:
@@ -1549,12 +1572,15 @@ def create_app(
             for rel in db.outgoing_relations(session.node_id):
                 node = db.get_node(rel.to_node)
                 target = db.get_session(node.session_id) if node and node.session_id else None
+                policy = db.get_relation_effective_policy(rel.id)
                 out["relations"].append({
                     **relation_brief(rel),
                     "target_agent": target.agent_id if target else None,
                     "target_session": target.id if target else None,
                     "target_reachable": bool(target and target.reachable),
                     "reply_policy": "automatic" if reverse_is_automatic(rel) else "manual",
+                    "projects": policy["projects"],
+                    "rule": policy["rule"],
                 })
         return out
 
@@ -1591,6 +1617,94 @@ def create_app(
         if not db.delete_relation(relation_id):
             raise ProductError(404, "relation.not_found", "Relation not found")
         return Response(status_code=204)
+
+    @app.get("/api/projects", response_model=List[ProjectSummaryModel])
+    async def list_projects(who: Principal = Depends(principal)):
+        require_human(who)
+        return db.list_projects()
+
+    @app.post("/api/projects", response_model=ProjectModel, status_code=201)
+    async def create_project(body: ProjectCreate, who: Principal = Depends(principal)):
+        require_human(who)
+        try:
+            return db.create_project(
+                name=body.name,
+                description=body.description,
+                relation_rule=body.relation_rule,
+                max_auto_hops=body.max_auto_hops,
+                max_auto_per_hour=body.max_auto_per_hour,
+            )
+        except ProjectNameTaken:
+            raise ProductError(409, "project.name_taken", "A project with this name already exists.")
+
+    @app.get("/api/projects/{project_id}", response_model=ProjectDetailModel)
+    async def get_project(project_id: int, who: Principal = Depends(principal)):
+        require_human(who)
+        p = db.get_project(project_id)
+        if not p:
+            raise ProductError(404, "project.not_found", "Project not found")
+        return p
+
+    @app.patch("/api/projects/{project_id}", response_model=ProjectModel)
+    async def update_project(project_id: int, body: ProjectUpdate, who: Principal = Depends(principal)):
+        require_human(who)
+        try:
+            p = db.update_project(
+                project_id,
+                name=body.name,
+                description=body.description,
+                relation_rule=body.relation_rule,
+                max_auto_hops=body.max_auto_hops,
+                max_auto_per_hour=body.max_auto_per_hour,
+            )
+        except ProjectNameTaken:
+            raise ProductError(409, "project.name_taken", "A project with this name already exists.")
+        if not p:
+            raise ProductError(404, "project.not_found", "Project not found")
+        return p
+
+    @app.delete("/api/projects/{project_id}", status_code=204)
+    async def delete_project(project_id: int, who: Principal = Depends(principal)):
+        require_human(who)
+        if not db.delete_project(project_id):
+            raise ProductError(404, "project.not_found", "Project not found")
+        return Response(status_code=204)
+
+    @app.put("/api/projects/{project_id}/nodes/{node_id}")
+    async def add_project_node(project_id: int, node_id: int, who: Principal = Depends(principal)):
+        require_human(who)
+        if not db.get_project(project_id):
+            raise ProductError(404, "project.not_found", "Project not found")
+        if not db.get_node(node_id):
+            raise ProductError(404, "node.not_found", "Node not found")
+        db.add_node_to_project(project_id, node_id)
+        return {"ok": True}
+
+    @app.delete("/api/projects/{project_id}/nodes/{node_id}")
+    async def remove_project_node(project_id: int, node_id: int, who: Principal = Depends(principal)):
+        require_human(who)
+        if not db.get_project(project_id):
+            raise ProductError(404, "project.not_found", "Project not found")
+        ok, removed = db.remove_node_from_project(project_id, node_id)
+        return {"ok": True, "removed_relations": removed}
+
+    @app.put("/api/projects/{project_id}/relations/{relation_id}")
+    async def add_project_relation(project_id: int, relation_id: int, who: Principal = Depends(principal)):
+        require_human(who)
+        if not db.get_project(project_id):
+            raise ProductError(404, "project.not_found", "Project not found")
+        if not db.get_relation(relation_id):
+            raise ProductError(404, "relation.not_found", "Relation not found")
+        ok, shared_with = db.add_relation_to_project(project_id, relation_id)
+        return {"ok": True, "shared_with": shared_with}
+
+    @app.delete("/api/projects/{project_id}/relations/{relation_id}")
+    async def remove_project_relation(project_id: int, relation_id: int, who: Principal = Depends(principal)):
+        require_human(who)
+        if not db.get_project(project_id):
+            raise ProductError(404, "project.not_found", "Project not found")
+        db.remove_relation_from_project(project_id, relation_id)
+        return {"ok": True}
 
     async def bridge_call(kind: str, params: dict, local, errors: Dict[str, tuple]):
         """

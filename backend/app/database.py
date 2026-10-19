@@ -22,6 +22,10 @@ from backend.app.models import (
     RelationModel,
     RelationTypeModel,
     SessionModel,
+    ProjectModel,
+    ProjectSummaryModel,
+    ProjectDetailModel,
+    ProjectRelationDetail,
     WAITER_TTL_SECONDS,
     is_settled,
 )
@@ -85,6 +89,7 @@ class NameTaken(ValueError):
 
 
 NodeNameTaken = NameTaken
+ProjectNameTaken = NameTaken
 
 
 def _new_attempt() -> str:
@@ -399,6 +404,31 @@ class Database:
                 provider TEXT NOT NULL,
                 cwd TEXT,
                 created_at TEXT NOT NULL
+            );
+            """)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS projects (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                description TEXT NOT NULL DEFAULT '',
+                relation_rule TEXT,
+                max_auto_hops INTEGER,
+                max_auto_per_hour INTEGER,
+                created_at TEXT NOT NULL
+            );
+            """)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS project_nodes (
+                project_id INTEGER NOT NULL REFERENCES projects(id),
+                node_id INTEGER NOT NULL REFERENCES nodes(id),
+                PRIMARY KEY (project_id, node_id)
+            );
+            """)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS project_relations (
+                project_id INTEGER NOT NULL REFERENCES projects(id),
+                relation_id INTEGER NOT NULL REFERENCES relations(id),
+                PRIMARY KEY (project_id, relation_id)
             );
             """)
             if "suspended_at" not in session_cols:
@@ -1659,6 +1689,10 @@ class Database:
         """Removes the node and its relations; its sessions stay, detached. Returns them."""
         with self._get_connection() as conn:
             ids = [r["id"] for r in conn.execute("SELECT id FROM sessions WHERE node_id = ?", (node_id,))]
+            rel_ids = [r["id"] for r in conn.execute("SELECT id FROM relations WHERE from_node = ? OR to_node = ?", (node_id, node_id))]
+            if rel_ids:
+                conn.execute(f"DELETE FROM project_relations WHERE relation_id IN ({','.join('?' for _ in rel_ids)})", rel_ids)
+            conn.execute("DELETE FROM project_nodes WHERE node_id = ?", (node_id,))
             conn.execute("DELETE FROM relations WHERE from_node = ? OR to_node = ?", (node_id, node_id))
             conn.execute("UPDATE sessions SET node_id = NULL WHERE node_id = ?", (node_id,))
             cur = conn.execute("DELETE FROM nodes WHERE id = ?", (node_id,))
@@ -1819,6 +1853,7 @@ class Database:
 
     def delete_relation(self, relation_id: int) -> bool:
         with self._get_connection() as conn:
+            conn.execute("DELETE FROM project_relations WHERE relation_id = ?", (relation_id,))
             return conn.execute("DELETE FROM relations WHERE id = ?", (relation_id,)).rowcount > 0
 
     def find_relation(self, from_node: Optional[int], to_node: Optional[int],
@@ -2187,3 +2222,305 @@ class Database:
             and s.tmux_session is not None and s.tmux_session == tmux_session_of(s.agent_id)
         ]
         return tmux_injections, tmux_results, busy
+
+    # --- Projects (RFC-09, RF-44) --------------------------------------------
+
+    @staticmethod
+    def _row_to_project(row: sqlite3.Row) -> ProjectModel:
+        return ProjectModel(
+            id=row["id"],
+            name=row["name"],
+            description=row["description"] or "",
+            relation_rule=row["relation_rule"],
+            max_auto_hops=row["max_auto_hops"],
+            max_auto_per_hour=row["max_auto_per_hour"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+        )
+
+    def create_project(
+        self,
+        name: str,
+        description: str = "",
+        relation_rule: Optional[str] = None,
+        max_auto_hops: Optional[int] = None,
+        max_auto_per_hour: Optional[int] = None,
+    ) -> ProjectModel:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            try:
+                cur = conn.execute(
+                    "INSERT INTO projects (name, description, relation_rule, max_auto_hops, max_auto_per_hour, created_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?)",
+                    (name.strip(), (description or "").strip(),
+                     relation_rule.strip() if relation_rule else None,
+                     max_auto_hops, max_auto_per_hour, now),
+                )
+            except sqlite3.IntegrityError:
+                raise ProjectNameTaken(name) from None
+            project_id = cur.lastrowid
+            row = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+            return self._row_to_project(row)
+
+    def list_projects(self) -> List[ProjectSummaryModel]:
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT p.*,
+                  (SELECT COUNT(*) FROM project_nodes pn WHERE pn.project_id = p.id) AS nodes_count,
+                  (SELECT COUNT(*) FROM project_relations pr WHERE pr.project_id = p.id) AS relations_count,
+                  (SELECT COUNT(*) FROM project_relations pr JOIN relations r ON r.id = pr.relation_id WHERE pr.project_id = p.id AND r.approval = 'automatic') AS automatic_relations_count
+                FROM projects p
+                ORDER BY p.name COLLATE NOCASE
+                """
+            ).fetchall()
+            return [
+                ProjectSummaryModel(
+                    id=r["id"],
+                    name=r["name"],
+                    description=r["description"] or "",
+                    relation_rule=r["relation_rule"],
+                    max_auto_hops=r["max_auto_hops"],
+                    max_auto_per_hour=r["max_auto_per_hour"],
+                    created_at=datetime.fromisoformat(r["created_at"]),
+                    nodes_count=r["nodes_count"] or 0,
+                    relations_count=r["relations_count"] or 0,
+                    automatic_relations_count=r["automatic_relations_count"] or 0,
+                )
+                for r in rows
+            ]
+
+    def get_project(self, project_id: int) -> Optional[ProjectDetailModel]:
+        with self._get_connection() as conn:
+            p_row = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+            if not p_row:
+                return None
+
+            node_rows = conn.execute(
+                f"""
+                {self._NODES_SQL}
+                JOIN project_nodes pn ON pn.node_id = nodes.id
+                WHERE pn.project_id = ?
+                ORDER BY nodes.name COLLATE NOCASE
+                """,
+                (project_id,),
+            ).fetchall()
+            nodes = [self._row_to_node(nr) for nr in node_rows]
+
+            rel_rows = conn.execute(
+                f"""
+                {self._RELATIONS_SQL}
+                JOIN project_relations pr ON pr.relation_id = r.id
+                WHERE pr.project_id = ?
+                ORDER BY f.name, t.name, y.name
+                """,
+                (project_id,),
+            ).fetchall()
+
+            relations = []
+            for rr in rel_rows:
+                rel_model = self._row_to_relation(rr)
+                shared_rows = conn.execute(
+                    """
+                    SELECT p.name FROM projects p
+                    JOIN project_relations pr ON pr.project_id = p.id
+                    WHERE pr.relation_id = ? AND pr.project_id != ?
+                    ORDER BY p.name COLLATE NOCASE
+                    """,
+                    (rel_model.id, project_id),
+                ).fetchall()
+                shared_with = [sr["name"] for sr in shared_rows]
+                relations.append(ProjectRelationDetail(
+                    **rel_model.model_dump(),
+                    shared_with=shared_with,
+                ))
+
+            global_auto = self.get_automation()
+            global_rule = self.get_relation_rule()
+
+            return ProjectDetailModel(
+                id=p_row["id"],
+                name=p_row["name"],
+                description=p_row["description"] or "",
+                relation_rule=p_row["relation_rule"],
+                max_auto_hops=p_row["max_auto_hops"],
+                max_auto_per_hour=p_row["max_auto_per_hour"],
+                created_at=datetime.fromisoformat(p_row["created_at"]),
+                nodes=nodes,
+                relations=relations,
+                effective_rule=p_row["relation_rule"] if p_row["relation_rule"] is not None else global_rule,
+                effective_max_hops=p_row["max_auto_hops"] if p_row["max_auto_hops"] is not None else global_auto["max_hops"],
+                effective_max_per_hour=p_row["max_auto_per_hour"] if p_row["max_auto_per_hour"] is not None else global_auto["max_per_hour"],
+            )
+
+    def update_project(
+        self,
+        project_id: int,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        relation_rule: Optional[str] = None,
+        max_auto_hops: Optional[int] = None,
+        max_auto_per_hour: Optional[int] = None,
+    ) -> Optional[ProjectModel]:
+        with self._get_connection() as conn:
+            cur = conn.cursor()
+            existing = cur.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+            if not existing:
+                return None
+            try:
+                cur.execute(
+                    """
+                    UPDATE projects SET
+                        name = COALESCE(?, name),
+                        description = COALESCE(?, description),
+                        relation_rule = CASE WHEN ? = 1 THEN ? ELSE relation_rule END,
+                        max_auto_hops = CASE WHEN ? = 1 THEN ? ELSE max_auto_hops END,
+                        max_auto_per_hour = CASE WHEN ? = 1 THEN ? ELSE max_auto_per_hour END
+                    WHERE id = ?
+                    """,
+                    (
+                        name.strip() if name is not None else None,
+                        description.strip() if description is not None else None,
+                        1 if relation_rule is not None else 0, relation_rule.strip() if relation_rule else None,
+                        1 if max_auto_hops is not None else 0, max_auto_hops,
+                        1 if max_auto_per_hour is not None else 0, max_auto_per_hour,
+                        project_id,
+                    ),
+                )
+            except sqlite3.IntegrityError:
+                raise ProjectNameTaken(name) from None
+            row = cur.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+            return self._row_to_project(row)
+
+    def delete_project(self, project_id: int) -> bool:
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM project_nodes WHERE project_id = ?", (project_id,))
+            conn.execute("DELETE FROM project_relations WHERE project_id = ?", (project_id,))
+            cur = conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+            return cur.rowcount > 0
+
+    def add_node_to_project(self, project_id: int, node_id: int) -> bool:
+        with self._get_connection() as conn:
+            if conn.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone() is None:
+                return False
+            if conn.execute("SELECT 1 FROM nodes WHERE id = ?", (node_id,)).fetchone() is None:
+                return False
+            conn.execute(
+                "INSERT OR IGNORE INTO project_nodes (project_id, node_id) VALUES (?, ?)",
+                (project_id, node_id),
+            )
+            return True
+
+    def remove_node_from_project(self, project_id: int, node_id: int) -> Tuple[bool, List[int]]:
+        with self._get_connection() as conn:
+            if conn.execute("SELECT 1 FROM project_nodes WHERE project_id = ? AND node_id = ?",
+                            (project_id, node_id)).fetchone() is None:
+                return False, []
+            removed_rel_ids = [
+                r["id"] for r in conn.execute(
+                    """
+                    SELECT r.id FROM relations r
+                    JOIN project_relations pr ON pr.relation_id = r.id
+                    WHERE pr.project_id = ? AND (r.from_node = ? OR r.to_node = ?)
+                    """,
+                    (project_id, node_id, node_id),
+                ).fetchall()
+            ]
+            if removed_rel_ids:
+                conn.execute(
+                    f"DELETE FROM project_relations WHERE project_id = ? AND relation_id IN ({','.join('?' for _ in removed_rel_ids)})",
+                    [project_id, *removed_rel_ids],
+                )
+            conn.execute("DELETE FROM project_nodes WHERE project_id = ? AND node_id = ?",
+                         (project_id, node_id))
+            return True, removed_rel_ids
+
+    def add_relation_to_project(self, project_id: int, relation_id: int) -> Tuple[bool, List[str]]:
+        with self._get_connection() as conn:
+            if conn.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone() is None:
+                return False, []
+            rel = conn.execute("SELECT from_node, to_node FROM relations WHERE id = ?",
+                               (relation_id,)).fetchone()
+            if rel is None:
+                return False, []
+
+            conn.execute("INSERT OR IGNORE INTO project_nodes (project_id, node_id) VALUES (?, ?)",
+                         (project_id, rel["from_node"]))
+            conn.execute("INSERT OR IGNORE INTO project_nodes (project_id, node_id) VALUES (?, ?)",
+                         (project_id, rel["to_node"]))
+
+            shared_rows = conn.execute(
+                """
+                SELECT p.name FROM projects p
+                JOIN project_relations pr ON pr.project_id = p.id
+                WHERE pr.relation_id = ? AND pr.project_id != ?
+                ORDER BY p.name COLLATE NOCASE
+                """,
+                (relation_id, project_id),
+            ).fetchall()
+            shared_with = [r["name"] for r in shared_rows]
+
+            conn.execute(
+                "INSERT OR IGNORE INTO project_relations (project_id, relation_id) VALUES (?, ?)",
+                (project_id, relation_id),
+            )
+            return True, shared_with
+
+    def remove_relation_from_project(self, project_id: int, relation_id: int) -> bool:
+        with self._get_connection() as conn:
+            cur = conn.execute(
+                "DELETE FROM project_relations WHERE project_id = ? AND relation_id = ?",
+                (project_id, relation_id),
+            )
+            return cur.rowcount > 0
+
+    def get_relation_effective_policy(self, relation_id: int) -> Dict[str, Any]:
+        global_automation = self.get_automation()
+        global_rule = (self.get_relation_rule() or "").strip()
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT p.id, p.name, p.relation_rule, p.max_auto_hops, p.max_auto_per_hour
+                FROM projects p
+                JOIN project_relations pr ON pr.project_id = p.id
+                WHERE pr.relation_id = ?
+                ORDER BY p.name COLLATE NOCASE
+                """,
+                (relation_id,),
+            ).fetchall()
+
+        if not rows:
+            return {
+                "projects": [],
+                "rule": global_rule,
+                "max_hops": global_automation["max_hops"],
+                "max_per_hour": global_automation["max_per_hour"],
+                "paused": global_automation["paused"],
+            }
+
+        project_names = [r["name"] for r in rows]
+        effective_hops = min(
+            r["max_auto_hops"] if r["max_auto_hops"] is not None else global_automation["max_hops"]
+            for r in rows
+        )
+        effective_per_hour = min(
+            r["max_auto_per_hour"] if r["max_auto_per_hour"] is not None else global_automation["max_per_hour"]
+            for r in rows
+        )
+
+        rule_parts = []
+        if global_rule:
+            rule_parts.append(global_rule)
+        for r in rows:
+            p_rule = (r["relation_rule"] or "").strip()
+            if p_rule:
+                rule_parts.append(f"[{r['name']}]\n{p_rule}")
+
+        effective_rule = "\n\n".join(rule_parts)
+
+        return {
+            "projects": project_names,
+            "rule": effective_rule,
+            "max_hops": effective_hops,
+            "max_per_hour": effective_per_hour,
+            "paused": global_automation["paused"],
+        }
