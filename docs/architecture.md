@@ -80,7 +80,7 @@ Sources observed in experiments do not imply all corresponding product controls 
 ### 2.5 PWA (`frontend/`)
 
 - React/Vite, served by backend. Markdown via `react-markdown`/`remark-gfm`; raw HTML ignored and `javascript:` links blocked.
-- **Hash routes:** `#/` Home, `#/storico` history, `#/sessione/<id>` session. Notification `#request-N` links resolve to the originating conversation, Home or history. Route identifiers remain unchanged across languages.
+- **Hash routes:** `#/` Home, `#/progetti` and `#/progetti/<id>` projects, `#/impostazioni` settings (app and background language, Web Push, and the way to the history), `#/storico` history (opened from Settings), `#/sessione/<id>[?project=<id>]` session. The navigation has Home, Projects and Settings; the app bar keeps only the live indicator. Notification `#request-N` links resolve to the originating conversation, Home or history. Route identifiers remain unchanged across languages.
 - **Home** (`Home.jsx`): current questions, then pinned sessions ordered by `activity_at` (turn start/end, not waiter polls), provider/state/question count. **Add / view all** (`AddSessionsDialog.jsx`) handles one provider at a time; checkbox controls `PUT /api/sessions/{id}/pin`, including removal of closed sessions.
 - **Conversation** (`SessionView.jsx`, `useTranscript.js`): pages from `/api/sessions/{id}/transcript`, initial bottom position, older pages on upward scroll with position retention; `session_update` requests new entries through `after`. Consecutive actions collapse into groups. Open session questions appear at the bottom.
 - **History** (`History.jsx`): per-request timeline and three-aspect state.

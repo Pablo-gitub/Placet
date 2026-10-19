@@ -7,7 +7,8 @@
     "live": "LIVE",
     "reconnecting": "RICONNESSIONE…",
     "openSession": "Apri una sessione per leggere la conversazione e scriverle.",
-    "tagline": "Supervisione umana & Agent Bus"
+    "tagline": "Supervisione umana & Agent Bus",
+    "settings": "Impostazioni"
   },
   "language": {
     "label": "Lingua",
@@ -550,5 +551,15 @@
     "nodeInstructionsPlaceholder": "Es. Ruolo specifico di questo nodo nel progetto…",
     "saveNodeInstructions": "Salva istruzioni nodo",
     "graphWaiting": "In attesa di te"
+  },
+  "settings": {
+    "title": "Impostazioni",
+    "language": "Lingua",
+    "languageHint": "Lingua dell'app su questo dispositivo.",
+    "backgroundHint": "Lingua delle notifiche e dei messaggi che Placet manda agli agenti.",
+    "notifications": "Notifiche",
+    "pushHint": "Notifiche push su questo dispositivo.",
+    "records": "Registro",
+    "historyHint": "Richieste concluse e cronologia di ogni decisione."
   }
 }

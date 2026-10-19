@@ -1,13 +1,11 @@
 import { useTranslation } from "react-i18next";
-import LanguageSelect from "./i18n/LanguageSelect";
-import BackgroundLanguage from "./i18n/BackgroundLanguage";
-import PushControl from "./PushControl";
 import { apiErrorDescriptor } from "./i18n/errors";
 import { needsReturnApproval } from "./decisions";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { AlertCircle, CheckCircle, FolderKanban, Home as HomeIcon, MessagesSquare, Radio, ShieldCheck } from "lucide-react";
+import { AlertCircle, CheckCircle, FolderKanban, Home as HomeIcon, MessagesSquare, Radio, Settings as SettingsIcon } from "lucide-react";
 import Home from "./Home";
 import History from "./History";
+import Settings from "./Settings";
 import SessionView from "./SessionView";
 import { ProjectsView, ProjectDetailView } from "./Projects";
 import { requestIdFromHash, routeFromHash } from "./decisions";
@@ -357,8 +355,13 @@ export default function App() {
     />
   );
   const historyView = route.view === "history" && (
-    <History requests={requests} sessions={sessions} focusId={focusId} onOpenSession={openSession} />
+    <History requests={requests} sessions={sessions} focusId={focusId} onOpenSession={openSession}
+      onBack={() => navigate("#/impostazioni")} />
   );
+  const settingsView = route.view === "settings" && (
+    <Settings onOpenHistory={() => navigate("#/storico")} />
+  );
+  const inSettings = route.view === "settings" || route.view === "history";
   const projectsView = route.view === "projects" && (
     <ProjectsView onOpenProject={(id) => navigate(`#/progetti/${id}`)} />
   );
@@ -376,7 +379,7 @@ export default function App() {
     <nav className="nav-tabs" data-testid="nav-tabs">
       <button
         data-testid="tab-home"
-        className={`nav-tab ${route.view !== "history" && route.view !== "projects" && route.view !== "project_detail" ? "active" : ""}`}
+        className={`nav-tab ${!inSettings && route.view !== "projects" && route.view !== "project_detail" ? "active" : ""}`}
         onClick={() => navigate("#/")}
       >
         <HomeIcon size={16} />
@@ -396,12 +399,12 @@ export default function App() {
         {t("app.projects")}
       </button>
       <button
-        data-testid="tab-history"
-        className={`nav-tab ${route.view === "history" ? "active" : ""}`}
-        onClick={() => navigate("#/storico")}
+        data-testid="tab-settings"
+        className={`nav-tab ${inSettings ? "active" : ""}`}
+        onClick={() => navigate("#/impostazioni")}
       >
-        <ShieldCheck size={16} />
-        {t("app.history")}
+        <SettingsIcon size={16} />
+        {t("app.settings")}
       </button>
     </nav>
   );
@@ -419,13 +422,6 @@ export default function App() {
         </div>
         {wide && navTabs}
         <div className="header-controls">
-          {route.view !== "session" && (
-            <>
-              <LanguageSelect />
-              <BackgroundLanguage />
-              <PushControl />
-            </>
-          )}
           <div className="live-indicator" data-testid="live-indicator" title={t(connected ? "app.live" : "app.reconnecting")}>
             <Radio size={12} className={connected ? "text-emerald-400 animate-pulse" : "text-amber-400"} />
             <span className="live-label">{t(connected ? "app.live" : "app.reconnecting")}</span>
@@ -448,7 +444,7 @@ export default function App() {
             {homeView}
           </aside>
           <main className="pane" data-testid="pane">
-            {sessionView || historyView || projectsView || projectDetailView || (
+            {sessionView || historyView || settingsView || projectsView || projectDetailView || (
               <div className="pane-empty" data-testid="pane-empty">
                 <MessagesSquare size={28} />
                 <p>{t("app.openSession")}</p>
@@ -461,6 +457,7 @@ export default function App() {
           <main>
             {route.view === "home" && homeView}
             {historyView}
+            {settingsView}
             {sessionView}
             {projectsView}
             {projectDetailView}

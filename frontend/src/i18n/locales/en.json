@@ -7,7 +7,8 @@
     "live": "LIVE",
     "reconnecting": "RECONNECTING…",
     "openSession": "Open a session to read its conversation and send a message.",
-    "tagline": "Human Supervision & Agent Bus"
+    "tagline": "Human Supervision & Agent Bus",
+    "settings": "Settings"
   },
   "language": {
     "label": "Language",
@@ -550,5 +551,15 @@
     "nodeInstructionsPlaceholder": "E.g. Specific role of this node in the project…",
     "saveNodeInstructions": "Save node instructions",
     "graphWaiting": "Waiting for you"
+  },
+  "settings": {
+    "title": "Settings",
+    "language": "Language",
+    "languageHint": "App language on this device.",
+    "backgroundHint": "Language of notifications and of the messages Placet sends to agents.",
+    "notifications": "Notifications",
+    "pushHint": "Push notifications on this device.",
+    "records": "Records",
+    "historyHint": "Settled requests and the timeline of every decision."
   }
 }

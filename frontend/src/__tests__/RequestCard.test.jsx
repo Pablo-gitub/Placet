@@ -198,7 +198,8 @@ describe("history timeline", () => {
     );
     window.location.hash = "";
     render(<App />);
-    fireEvent.click(await screen.findByTestId("tab-history"));
+    fireEvent.click(await screen.findByTestId("tab-settings"));
+    fireEvent.click(await screen.findByTestId("settings-history"));
     fireEvent.click(await screen.findByTestId("timeline-toggle-40"));
 
     const list = await screen.findByTestId("timeline-40");
@@ -239,7 +240,8 @@ describe("delivery states in history", () => {
     );
     window.location.hash = "";
     render(<App />);
-    fireEvent.click(await screen.findByTestId("tab-history"));
+    fireEvent.click(await screen.findByTestId("tab-settings"));
+    fireEvent.click(await screen.findByTestId("settings-history"));
     expect(await screen.findByTestId("history-card-50")).toHaveTextContent("Bloccata");
     expect(screen.getByTestId("implicit-51")).toHaveTextContent("implicita");
   });

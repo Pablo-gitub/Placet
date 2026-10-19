@@ -142,7 +142,9 @@ it("changes language through the visible selector and can withhold a reply", asy
     }],
   ]);
   render(<App />);
+  fireEvent.click(await screen.findByTestId("tab-settings"));
   fireEvent.change(await screen.findByLabelText("Lingua"), { target: { value: "en" } });
+  fireEvent.click(screen.getByTestId("tab-home"));
   expect(await screen.findByRole("button", { name: "Do not forward" })).toBeInTheDocument();
   expect(localStorage.getItem(LANGUAGE_KEY)).toBe("en");
   fireEvent.click(screen.getByRole("button", { name: "Do not forward" }));

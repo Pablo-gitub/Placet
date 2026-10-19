@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { formatDateTime } from "./i18n/formatters";
 import React from "react";
-import { ArrowRight } from "lucide-react";
+import { ArrowLeft, ArrowRight } from "lucide-react";
 import { Origin } from "./RequestCard";
 import Timeline from "./Timeline";
 import Markdown from "./Markdown";
@@ -15,12 +15,17 @@ function answerOf(req) {
 }
 
 /** Settled requests with their audit timeline (RF-13). */
-export default function History({ requests, sessions, focusId, onOpenSession }) {
+export default function History({ requests, sessions, focusId, onOpenSession, onBack }) {
   const { t } = useTranslation();
   const settled = requests.filter((r) => r.status !== "PENDING");
   return (
     <div data-testid="history-section">
-      <h2 style={{ fontSize: "1rem", marginBottom: "1rem", fontWeight: 700 }}>{t("history.title")}</h2>
+      {onBack && (
+        <button type="button" className="link-button project-detail-back-btn history-back" data-testid="history-back" onClick={onBack}>
+          <ArrowLeft size={16} /> {t("settings.title")}
+        </button>
+      )}
+      <h2 className="history-title">{t("history.title")}</h2>
       {settled.length === 0 ? (
         <div className="empty-state" data-testid="empty-history">
           <p>{t("history.empty")}</p>

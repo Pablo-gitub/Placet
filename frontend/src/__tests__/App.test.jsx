@@ -2,6 +2,7 @@ import React from "react";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import App from "../App";
+import i18n from "../i18n";
 import { MockEventSource, mockFetch, transcriptOf } from "./testUtils";
 
 global.EventSource = MockEventSource;
@@ -189,11 +190,32 @@ describe("Placet PWA", () => {
     setup();
     render(<App />);
     await waitFor(() => expect(screen.getByTestId("home-section")).toBeInTheDocument());
-    fireEvent.click(screen.getByTestId("tab-history"));
+    fireEvent.click(screen.getByTestId("tab-settings"));
+    fireEvent.click(await screen.findByTestId("settings-history"));
     await waitFor(() => expect(screen.getByTestId("history-card-2")).toBeInTheDocument());
     expect(screen.getByText("Which choice?")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("tab-home"));
     await waitFor(() => expect(screen.getByTestId("home-section")).toBeInTheDocument());
+  });
+
+  it("keeps history, language and notifications in Settings, off the app bar", async () => {
+    setup();
+    render(<App />);
+    await waitFor(() => expect(screen.getByTestId("home-section")).toBeInTheDocument());
+    expect(screen.queryByTestId("tab-history")).toBeNull();
+    expect(screen.queryByRole("combobox", { name: i18n.t("language.label") })).toBeNull();
+    expect(screen.queryByTestId("push-control")).toBeNull();
+    fireEvent.click(screen.getByTestId("tab-settings"));
+    const settings = await screen.findByTestId("settings-section");
+    expect(within(settings).getByRole("combobox", { name: i18n.t("language.label") })).toBeInTheDocument();
+    expect(within(settings).getByTestId("push-control")).toBeInTheDocument();
+    expect(within(settings).getByRole("button", { name: i18n.t("backgroundLanguage.title") })).toBeInTheDocument();
+    fireEvent.click(within(settings).getByTestId("settings-history"));
+    await waitFor(() => expect(screen.getByTestId("history-card-2")).toBeInTheDocument());
+    // History belongs to Settings: that tab stays lit, and it leads back.
+    expect(screen.getByTestId("tab-settings")).toHaveClass("active");
+    fireEvent.click(screen.getByTestId("history-back"));
+    expect(await screen.findByTestId("settings-section")).toBeInTheDocument();
   });
 
   it("follows session updates from the server", async () => {
@@ -322,8 +344,9 @@ describe("adaptive layout", () => {
     await waitFor(() => expect(within(screen.getByTestId("pane")).getByTestId("session-view")).toBeInTheDocument());
     expect(within(sidebar).getByTestId("session-row-new")).toHaveClass("active");
     // The navigation stays available next to the conversation.
-    expect(screen.getByTestId("tab-history")).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId("tab-history"));
+    expect(screen.getByTestId("tab-settings")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("tab-settings"));
+    fireEvent.click(await within(screen.getByTestId("pane")).findByTestId("settings-history"));
     await waitFor(() => expect(within(screen.getByTestId("pane")).getByTestId("history-section")).toBeInTheDocument());
     expect(within(sidebar).getByTestId("home-section")).toBeInTheDocument();
   });

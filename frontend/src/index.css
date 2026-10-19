@@ -1825,3 +1825,19 @@ body.chat-open { overflow: hidden; }
   .rg-ball-waiting { animation: none; }
 }
 .rg-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; vertical-align: middle; margin-right: 0.3rem; background: var(--warning); }
+
+/* Settings */
+.settings { display: flex; flex-direction: column; gap: 1rem; }
+.settings-title, .history-title { font-size: 1rem; font-weight: 700; margin: 0 0 0.25rem; }
+.history-title { margin-bottom: 1rem; }
+.history-back { margin-bottom: 0.75rem; }
+.settings-group { display: flex; flex-direction: column; gap: 0.25rem; }
+.settings-group .section-label { margin: 0 0 0.25rem; }
+.settings-row, .settings-link { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.55rem 0; min-width: 0; }
+.settings-row + .settings-row { border-top: 1px solid var(--border-color); }
+.settings-row-text { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; flex: 1; text-align: left; }
+.settings-row-text strong { font-size: 0.9rem; }
+.settings-row-text small { font-size: 0.75rem; color: var(--text-muted); }
+.settings-row-control { flex-shrink: 0; }
+.settings-link { width: 100%; background: none; border: none; color: inherit; font: inherit; cursor: pointer; text-align: left; }
+.settings-link > svg:last-child { color: var(--text-muted); }
