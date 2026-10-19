@@ -121,8 +121,8 @@ function ProjectFormDialog({ project, onSave, onCancel }) {
 
           <h3 className="section-label">{t("projects.limits")}</h3>
           <p className="composer-note">{t("projects.limitsHint")}</p>
-          <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", marginBottom: "1rem" }}>
-            <label style={{ flex: "1 1 120px" }}>
+          <div className="project-form-limits">
+            <label className="project-form-limit-field">
               <span className="prompt-editor-label">{t("projects.maxHops")}</span>
               <input
                 type="number"
@@ -135,7 +135,7 @@ function ProjectFormDialog({ project, onSave, onCancel }) {
                 onChange={(e) => setHops(e.target.value)}
               />
             </label>
-            <label style={{ flex: "1 1 120px" }}>
+            <label className="project-form-limit-field">
               <span className="prompt-editor-label">{t("projects.maxPerHour")}</span>
               <input
                 type="number"
@@ -169,7 +169,7 @@ function ProjectFormDialog({ project, onSave, onCancel }) {
               {t("projects.cancel")}
             </button>
           </div>
-          {error && <p role="alert" className="error-message" style={{ color: "var(--danger)", marginTop: "0.5rem" }}>{t(error.key, error.params)}</p>}
+          {error && <p role="alert" className="error-message dialog-error-msg">{t(error.key, error.params)}</p>}
         </form>
       </div>
     </div>,
@@ -263,7 +263,7 @@ function RelationTypeDialog({ type, onSave, onCancel }) {
               {t("projects.cancel")}
             </button>
           </div>
-          {error && <p role="alert" className="error-message" style={{ color: "var(--danger)", marginTop: "0.5rem" }}>{t(error.key, error.params)}</p>}
+          {error && <p role="alert" className="error-message dialog-error-msg">{t(error.key, error.params)}</p>}
         </form>
       </div>
     </div>,
@@ -312,11 +312,11 @@ function RelationTypesSection() {
   };
 
   return (
-    <section className="relation-types-section" data-testid="relation-types-section" style={{ marginTop: "2rem" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem", flexWrap: "wrap", gap: "0.5rem" }}>
+    <section className="relation-types-section" data-testid="relation-types-section">
+      <div className="relation-types-header">
         <div>
-          <h2 style={{ fontSize: "1.1rem", fontWeight: 700, margin: 0 }}>{t("projects.relationTypesTitle")}</h2>
-          <p className="composer-note" style={{ margin: "0.2rem 0 0" }}>{t("projects.relationTypesSubtitle")}</p>
+          <h2 className="relation-types-title">{t("projects.relationTypesTitle")}</h2>
+          <p className="composer-note relation-types-subtitle">{t("projects.relationTypesSubtitle")}</p>
         </div>
         <button
           type="button"
@@ -328,17 +328,17 @@ function RelationTypesSection() {
         </button>
       </div>
 
-      {error && <p role="alert" className="error-message" style={{ color: "var(--danger)", marginBottom: "0.75rem" }}>{t(error.key, error.params)}</p>}
+      {error && <p role="alert" className="error-message relation-types-error">{t(error.key, error.params)}</p>}
 
       {types.length === 0 ? (
         <p className="composer-note">{t("projects.typesEmpty")}</p>
       ) : (
-        <div className="relation-types-list" style={{ display: "grid", gap: "0.75rem", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}>
+        <div className="relation-types-list">
           {types.map((ty) => (
-            <div key={ty.id} className="card" style={{ padding: "0.75rem 1rem", margin: 0 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div key={ty.id} className="card relation-type-card">
+              <div className="relation-type-card-header">
                 <strong>{ty.name}</strong>
-                <div style={{ display: "flex", gap: "0.4rem" }}>
+                <div className="relation-type-actions">
                   <button
                     type="button"
                     className="icon-button"
@@ -359,7 +359,7 @@ function RelationTypesSection() {
                   </button>
                 </div>
               </div>
-              {ty.description && <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", margin: "0.4rem 0 0" }}>{ty.description}</p>}
+              {ty.description && <p className="relation-type-desc">{ty.description}</p>}
             </div>
           ))}
         </div>
@@ -421,10 +421,10 @@ export function ProjectsView({ onOpenProject }) {
 
   return (
     <div className="projects-view" data-testid="projects-view">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem", flexWrap: "wrap", gap: "0.75rem" }}>
+      <div className="projects-header">
         <div>
-          <h1 style={{ fontSize: "1.3rem", fontWeight: 700, margin: 0 }}>{t("projects.title")}</h1>
-          <p className="brand-tagline" style={{ margin: "0.2rem 0 0" }}>{t("projects.subtitle")}</p>
+          <h1 className="projects-title">{t("projects.title")}</h1>
+          <p className="brand-tagline projects-subtitle">{t("projects.subtitle")}</p>
         </div>
         <button
           type="button"
@@ -436,34 +436,33 @@ export function ProjectsView({ onOpenProject }) {
         </button>
       </div>
 
-      {error && <p role="alert" className="error-message" style={{ color: "var(--danger)", marginBottom: "1rem" }}>{t(error.key, error.params)}</p>}
+      {error && <p role="alert" className="error-message projects-error">{t(error.key, error.params)}</p>}
 
       {projects.length === 0 ? (
         <div className="empty-state" data-testid="empty-projects">
           <p>{t("projects.empty")}</p>
         </div>
       ) : (
-        <div className="projects-grid" style={{ display: "grid", gap: "1rem", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))" }}>
+        <div className="projects-grid">
           {projects.map((p) => (
-            <div key={p.id} className="card project-card" data-testid={`project-card-${p.id}`} style={{ margin: 0 }}>
-              <div className="card-header" style={{ alignItems: "flex-start", marginBottom: "0.5rem" }}>
+            <div key={p.id} className="card project-card" data-testid={`project-card-${p.id}`}>
+              <div className="card-header project-card-header">
                 <div>
                   <button
                     type="button"
-                    className="link-button"
+                    className="link-button project-card-name-btn"
                     data-testid={`open-project-${p.id}`}
                     onClick={() => onOpenProject(p.id)}
-                    style={{ fontSize: "1.05rem", fontWeight: 700, padding: 0, textAlign: "left", color: "var(--primary)" }}
                   >
                     {p.name}
                   </button>
                   {p.description && (
-                    <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", margin: "0.25rem 0 0" }}>
+                    <p className="project-card-desc">
                       {p.description}
                     </p>
                   )}
                 </div>
-                <div style={{ display: "flex", gap: "0.3rem" }}>
+                <div className="project-card-actions">
                   <button
                     type="button"
                     className="icon-button"
@@ -485,7 +484,7 @@ export function ProjectsView({ onOpenProject }) {
                 </div>
               </div>
 
-              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", margin: "0.75rem 0 0.5rem", alignItems: "center" }}>
+              <div className="project-card-badges">
                 <span className="badge" data-testid={`project-nodes-count-${p.id}`}>
                   {t("projects.nodesCount", { count: p.nodes_count })}
                 </span>
@@ -493,13 +492,13 @@ export function ProjectsView({ onOpenProject }) {
                   {t("projects.relationsCount", { count: p.relations_count })}
                 </span>
                 {p.automatic_relations_count > 0 && (
-                  <span className="badge" style={{ backgroundColor: "rgba(16, 185, 129, 0.15)", color: "var(--success)" }}>
+                  <span className="badge badge-auto">
                     {t("projects.autoBadge", { count: p.automatic_relations_count })}
                   </span>
                 )}
               </div>
 
-              <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "auto", borderTop: "1px solid var(--border-color)", paddingTop: "0.5rem" }}>
+              <div className="project-card-footer">
                 {t("projects.created", { date: formatDateTime(p.created_at) })}
               </div>
             </div>
@@ -689,7 +688,7 @@ function CreateProjectRelationDialog({ projectId, nodes, types, onDone, onCancel
               {t("projects.cancel")}
             </button>
           </div>
-          {error && <p role="alert" className="error-message" style={{ color: "var(--danger)", marginTop: "0.5rem" }}>{t(error.key, error.params)}</p>}
+          {error && <p role="alert" className="error-message dialog-error-msg">{t(error.key, error.params)}</p>}
         </form>
       </div>
     </div>,
@@ -807,13 +806,12 @@ export function ProjectDetailView({ projectId, onBack }) {
 
   return (
     <div className="project-detail-view" data-testid="project-detail-view">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+      <div className="project-detail-nav">
         <button
           type="button"
-          className="link-button"
+          className="link-button project-detail-back-btn"
           data-testid="project-detail-back"
           onClick={onBack}
-          style={{ display: "flex", alignItems: "center", gap: "0.4rem", padding: 0 }}
         >
           <ArrowLeft size={16} /> {t("projects.back")}
         </button>
@@ -827,54 +825,45 @@ export function ProjectDetailView({ projectId, onBack }) {
         </button>
       </div>
 
-      <div className="card" style={{ marginBottom: "1.5rem" }}>
-        <h1 style={{ fontSize: "1.4rem", fontWeight: 700, margin: "0 0 0.5rem" }}>{project.name}</h1>
+      <div className="card project-detail-card">
+        <h1 className="project-detail-name">{project.name}</h1>
         {project.description && (
-          <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", margin: "0 0 1rem" }}>
+          <p className="project-detail-desc">
             {project.description}
           </p>
         )}
 
-        <div style={{ backgroundColor: "var(--bg-secondary)", borderRadius: "8px", padding: "0.75rem 1rem", border: "1px solid var(--border-color)" }}>
-          <h3 className="section-label" style={{ marginTop: 0 }}>{t("projects.effectivePolicy")}</h3>
-          <p style={{ fontSize: "0.85rem", margin: "0.25rem 0" }}>
+        <div className="project-effective-policy-box">
+          <h3 className="section-label project-effective-policy-title">{t("projects.effectivePolicy")}</h3>
+          <p className="project-effective-limits">
             <strong>{t("projects.effectiveLimits", { hops: project.effective_max_hops, perHour: project.effective_max_per_hour })}</strong>
-            {project.max_auto_hops == null && <small style={{ color: "var(--text-muted)", marginLeft: "0.4rem" }}>{t("projects.inheritedGlobal")}</small>}
+            {project.max_auto_hops == null && <small className="project-inherited-hint">{t("projects.inheritedGlobal")}</small>}
           </p>
-          <p style={{ fontSize: "0.85rem", margin: "0.4rem 0 0" }}>
+          <p className="project-effective-rule">
             <strong>{t("projects.effectiveRule")}</strong>{" "}
             {project.effective_rule ? (
-              <span style={{ whiteSpace: "pre-wrap", display: "inline-block", verticalAlign: "top" }}>{project.effective_rule}</span>
+              <span className="project-effective-rule-text">{project.effective_rule}</span>
             ) : (
-              <span style={{ color: "var(--text-muted)" }}>{t("relations.ruleEmpty")}</span>
+              <span className="project-effective-rule-empty">{t("relations.ruleEmpty")}</span>
             )}
           </p>
         </div>
       </div>
 
-      {error && <p role="alert" className="error-message" style={{ color: "var(--danger)", marginBottom: "1rem" }}>{t(error.key, error.params)}</p>}
+      {error && <p role="alert" className="error-message projects-error">{t(error.key, error.params)}</p>}
 
       {/* Nodes Section */}
-      <section className="card" style={{ marginBottom: "1.5rem" }}>
-        <h2 style={{ fontSize: "1.1rem", fontWeight: 700, margin: "0 0 0.75rem" }}>{t("projects.nodesSection")}</h2>
+      <section className="card project-section-card">
+        <h2 className="project-section-title">{t("projects.nodesSection")}</h2>
         {project.nodes.length === 0 ? (
           <p className="composer-note">{t("projects.nodesEmpty")}</p>
         ) : (
-          <ul style={{ listStyle: "none", padding: 0, margin: "0 0 1rem", display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+          <ul className="project-nodes-list">
             {project.nodes.map((n) => (
               <li
                 key={n.id}
+                className="project-node-item"
                 data-testid={`project-node-${n.id}`}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "0.5rem",
-                  padding: "0.4rem 0.75rem",
-                  backgroundColor: "var(--bg-secondary)",
-                  border: "1px solid var(--border-color)",
-                  borderRadius: "6px",
-                  fontSize: "0.85rem",
-                }}
               >
                 <span>{n.name}</span>
                 <button
@@ -892,13 +881,12 @@ export function ProjectDetailView({ projectId, onBack }) {
         )}
 
         {availableNodes.length > 0 && (
-          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap", marginTop: "0.5rem" }}>
+          <div className="project-add-row">
             <select
-              className="session-select"
+              className="session-select project-add-node-select"
               data-testid="add-node-select"
               value={selectedNodeToAdd}
               onChange={(e) => setSelectedNodeToAdd(e.target.value)}
-              style={{ maxWidth: "250px" }}
             >
               <option value="">{t("projects.chooseNode")}</option>
               {availableNodes.map((n) => (
@@ -922,8 +910,8 @@ export function ProjectDetailView({ projectId, onBack }) {
 
       {/* Relations Section */}
       <section className="card">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem", flexWrap: "wrap", gap: "0.5rem" }}>
-          <h2 style={{ fontSize: "1.1rem", fontWeight: 700, margin: 0 }}>{t("projects.relationsSection")}</h2>
+        <div className="project-relations-header">
+          <h2 className="project-relations-title">{t("projects.relationsSection")}</h2>
           <button
             type="button"
             className="btn btn-primary"
@@ -937,28 +925,26 @@ export function ProjectDetailView({ projectId, onBack }) {
         {project.relations.length === 0 ? (
           <p className="composer-note">{t("projects.relationsEmpty")}</p>
         ) : (
-          <ul className="relation-list" style={{ margin: "0 0 1rem" }}>
+          <ul className="relation-list project-relations-list">
             {project.relations.map((rel) => (
               <li
                 key={rel.id}
-                className="relation-row"
+                className="relation-row project-relation-item"
                 data-testid={`project-relation-${rel.id}`}
-                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}
               >
-                <div style={{ display: "flex", flexDirection: "column", gap: "0.2rem" }}>
+                <div className="project-relation-info">
                   <span className="relation-route">
                     {rel.from_name} <ArrowRight size={12} aria-hidden="true" /> {rel.to_name}{" "}
                     <small>({rel.type_name})</small>
                   </span>
-                  <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", alignItems: "center" }}>
-                    <span className="badge" style={{ fontSize: "0.7rem" }}>
+                  <div className="project-relation-badges">
+                    <span className="badge badge-small">
                       {rel.approval === "automatic" ? t("relations.automaticShort") : t("relations.manualShort")}
                     </span>
                     {rel.shared_with && rel.shared_with.length > 0 && (
                       <span
-                        className="badge"
+                        className="badge badge-shared"
                         data-testid={`relation-badge-shared-${rel.id}`}
-                        style={{ backgroundColor: "rgba(245, 158, 11, 0.15)", color: "var(--warning)", fontSize: "0.7rem" }}
                       >
                         {t("projects.sharedWith", { projects: rel.shared_with.join(", ") })}
                       </span>
@@ -981,13 +967,12 @@ export function ProjectDetailView({ projectId, onBack }) {
         )}
 
         {availableRelations.length > 0 && (
-          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap", borderTop: "1px solid var(--border-color)", paddingTop: "0.75rem" }}>
+          <div className="project-add-relation-row">
             <select
-              className="session-select"
+              className="session-select project-add-relation-select"
               data-testid="add-relation-select"
               value={selectedRelToAdd}
               onChange={(e) => setSelectedRelToAdd(e.target.value)}
-              style={{ maxWidth: "300px" }}
             >
               <option value="">{t("projects.chooseRelation")}</option>
               {availableRelations.map((r) => (

@@ -2335,7 +2335,15 @@ class Database:
                 ))
 
             global_auto = self.get_automation()
-            global_rule = self.get_relation_rule()
+            global_rule = (self.get_relation_rule() or "").strip()
+
+            rule_parts = []
+            if global_rule:
+                rule_parts.append(global_rule)
+            p_rule = (p_row["relation_rule"] or "").strip()
+            if p_rule:
+                rule_parts.append(f"[{p_row['name']}]\n{p_rule}")
+            effective_rule = "\n\n".join(rule_parts) if rule_parts else None
 
             return ProjectDetailModel(
                 id=p_row["id"],
@@ -2347,7 +2355,7 @@ class Database:
                 created_at=datetime.fromisoformat(p_row["created_at"]),
                 nodes=nodes,
                 relations=relations,
-                effective_rule=p_row["relation_rule"] if p_row["relation_rule"] is not None else global_rule,
+                effective_rule=effective_rule,
                 effective_max_hops=p_row["max_auto_hops"] if p_row["max_auto_hops"] is not None else global_auto["max_hops"],
                 effective_max_per_hour=p_row["max_auto_per_hour"] if p_row["max_auto_per_hour"] is not None else global_auto["max_per_hour"],
             )
@@ -2360,34 +2368,56 @@ class Database:
         relation_rule: Optional[str] = None,
         max_auto_hops: Optional[int] = None,
         max_auto_per_hour: Optional[int] = None,
+        fields_set: Optional[Set[str]] = None,
     ) -> Optional[ProjectModel]:
         with self._get_connection() as conn:
             cur = conn.cursor()
             existing = cur.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
             if not existing:
                 return None
-            try:
-                cur.execute(
-                    """
-                    UPDATE projects SET
-                        name = COALESCE(?, name),
-                        description = COALESCE(?, description),
-                        relation_rule = CASE WHEN ? = 1 THEN ? ELSE relation_rule END,
-                        max_auto_hops = CASE WHEN ? = 1 THEN ? ELSE max_auto_hops END,
-                        max_auto_per_hour = CASE WHEN ? = 1 THEN ? ELSE max_auto_per_hour END
-                    WHERE id = ?
-                    """,
-                    (
-                        name.strip() if name is not None else None,
-                        description.strip() if description is not None else None,
-                        1 if relation_rule is not None else 0, relation_rule.strip() if relation_rule else None,
-                        1 if max_auto_hops is not None else 0, max_auto_hops,
-                        1 if max_auto_per_hour is not None else 0, max_auto_per_hour,
-                        project_id,
-                    ),
-                )
-            except sqlite3.IntegrityError:
-                raise ProjectNameTaken(name) from None
+
+            if fields_set is None:
+                fields_set = set()
+                if name is not None:
+                    fields_set.add("name")
+                if description is not None:
+                    fields_set.add("description")
+                if relation_rule is not None:
+                    fields_set.add("relation_rule")
+                if max_auto_hops is not None:
+                    fields_set.add("max_auto_hops")
+                if max_auto_per_hour is not None:
+                    fields_set.add("max_auto_per_hour")
+
+            updates = []
+            params = []
+            if "name" in fields_set:
+                updates.append("name = ?")
+                params.append(name.strip() if name else existing["name"])
+            if "description" in fields_set:
+                updates.append("description = ?")
+                params.append(description.strip() if description else "")
+            if "relation_rule" in fields_set:
+                rule_val = relation_rule.strip() if (relation_rule and relation_rule.strip()) else None
+                updates.append("relation_rule = ?")
+                params.append(rule_val)
+            if "max_auto_hops" in fields_set:
+                updates.append("max_auto_hops = ?")
+                params.append(max_auto_hops)
+            if "max_auto_per_hour" in fields_set:
+                updates.append("max_auto_per_hour = ?")
+                params.append(max_auto_per_hour)
+
+            if updates:
+                params.append(project_id)
+                try:
+                    cur.execute(
+                        f"UPDATE projects SET {', '.join(updates)} WHERE id = ?",
+                        params,
+                    )
+                except sqlite3.IntegrityError:
+                    raise ProjectNameTaken(name or "") from None
+
             row = cur.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
             return self._row_to_project(row)
 

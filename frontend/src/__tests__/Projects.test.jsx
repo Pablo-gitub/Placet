@@ -100,6 +100,24 @@ describe("Projects views (RFC-09, RF-44)", () => {
       }]);
     });
 
+    // 3b. Edit project and clear overrides to inherit
+    fireEvent.click(screen.getByTestId("edit-project-1"));
+    const clearModal = screen.getByTestId("project-form-dialog");
+    fireEvent.change(within(clearModal).getByTestId("project-rule-input"), { target: { value: "" } });
+    fireEvent.change(within(clearModal).getByTestId("project-hops-input"), { target: { value: "" } });
+    fireEvent.change(within(clearModal).getByTestId("project-rate-input"), { target: { value: "" } });
+    fireEvent.click(within(clearModal).getByTestId("project-save-btn"));
+
+    await waitFor(() => {
+      expect(bodies(fetch, "PATCH", "/api/projects/1")).toContainEqual({
+        name: "Placet Core",
+        description: "Core project",
+        relation_rule: null,
+        max_auto_hops: null,
+        max_auto_per_hour: null,
+      });
+    });
+
     // 4. Delete project
     fireEvent.click(screen.getByTestId("delete-project-1"));
     expect(window.confirm).toHaveBeenCalled();

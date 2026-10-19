@@ -12,6 +12,7 @@
   --success-hover: #059669;
   --danger: #ef4444;
   --danger-hover: #dc2626;
+  --warning: #f59e0b;
   --accent: #38bdf8;
   --font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
@@ -1376,3 +1377,296 @@ body.chat-open { overflow: hidden; }
   font-size: 0.72rem;
   color: var(--danger, #ef4444);
 }
+
+/* RFC-09, RF-44: Projects and Relation Types views */
+.projects-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+.projects-title {
+  font-size: 1.3rem;
+  font-weight: 700;
+  margin: 0;
+}
+.projects-subtitle {
+  margin: 0.2rem 0 0;
+}
+.projects-error {
+  color: var(--danger);
+  margin-bottom: 1rem;
+}
+.projects-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+}
+.project-card {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+.project-card-header {
+  align-items: flex-start;
+  margin-bottom: 0.5rem;
+}
+.project-card-name-btn {
+  font-size: 1.05rem;
+  font-weight: 700;
+  padding: 0;
+  text-align: left;
+  color: var(--primary);
+}
+.project-card-desc {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin: 0.25rem 0 0;
+}
+.project-card-actions {
+  display: flex;
+  gap: 0.3rem;
+}
+.project-card-badges {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin: 0.75rem 0 0.5rem;
+  align-items: center;
+}
+.badge-auto {
+  background-color: rgba(16, 185, 129, 0.15);
+  color: var(--success);
+}
+.project-card-footer {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: auto;
+  border-top: 1px solid var(--border-color);
+  padding-top: 0.5rem;
+}
+
+/* Form Dialogs */
+.project-form-limits {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+.project-form-limit-field {
+  flex: 1 1 120px;
+}
+.dialog-error-msg {
+  color: var(--danger);
+  margin-top: 0.5rem;
+}
+
+/* Relation Types Section */
+.relation-types-section {
+  margin-top: 2rem;
+}
+.relation-types-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.relation-types-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin: 0;
+}
+.relation-types-subtitle {
+  margin: 0.2rem 0 0;
+}
+.relation-types-error {
+  color: var(--danger);
+  margin-bottom: 0.75rem;
+}
+.relation-types-list {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+}
+.relation-type-card {
+  padding: 0.75rem 1rem;
+  margin: 0;
+}
+.relation-type-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.relation-type-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+.relation-type-desc {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin: 0.4rem 0 0;
+}
+
+/* Project Detail View */
+.project-detail-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+.project-detail-back-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0;
+}
+.project-detail-card {
+  margin-bottom: 1.5rem;
+}
+.project-detail-name {
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin: 0 0 0.5rem;
+}
+.project-detail-desc {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin: 0 0 1rem;
+}
+.project-effective-policy-box {
+  background-color: var(--bg-secondary);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border-color);
+}
+.project-effective-policy-title {
+  margin-top: 0;
+}
+.project-effective-limits {
+  font-size: 0.85rem;
+  margin: 0.25rem 0;
+}
+.project-inherited-hint {
+  color: var(--text-muted);
+  margin-left: 0.4rem;
+}
+.project-effective-rule {
+  font-size: 0.85rem;
+  margin: 0.4rem 0 0;
+}
+.project-effective-rule-text {
+  white-space: pre-wrap;
+  display: inline-block;
+  vertical-align: top;
+}
+.project-effective-rule-empty {
+  color: var(--text-muted);
+}
+.project-section-card {
+  margin-bottom: 1.5rem;
+}
+.project-section-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin: 0 0 0.75rem;
+}
+.project-nodes-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.project-node-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+.project-add-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+.project-add-node-select {
+  max-width: 250px;
+}
+.project-relations-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.project-relations-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin: 0;
+}
+.project-relations-list {
+  margin: 0 0 1rem;
+}
+.project-relation-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.project-relation-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.project-relation-badges {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.badge-small {
+  font-size: 0.7rem;
+}
+.badge-shared {
+  background-color: rgba(245, 158, 11, 0.15);
+  color: var(--warning);
+  font-size: 0.7rem;
+}
+.project-add-relation-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--border-color);
+  padding-top: 0.75rem;
+}
+.project-add-relation-select {
+  max-width: 300px;
+}
+
+@media (max-width: 480px) {
+  .projects-grid {
+    grid-template-columns: 1fr;
+  }
+  .relation-types-list {
+    grid-template-columns: 1fr;
+  }
+  .project-add-node-select,
+  .project-add-relation-select {
+    max-width: 100%;
+    width: 100%;
+  }
+}
+

@@ -356,3 +356,91 @@ async def test_agent_me_relations_and_agent_forbidden_on_projects(env):
         assert (await client.delete(f"/api/projects/{p['id']}/nodes/{n1.id}")).status_code == 403
         assert (await client.put(f"/api/projects/{p['id']}/relations/{rel.id}")).status_code == 403
         assert (await client.delete(f"/api/projects/{p['id']}/relations/{rel.id}")).status_code == 403
+
+
+# --- 9. Clearing overrides to inherit and effective rule composition ----------
+
+@pytest.mark.asyncio
+async def test_project_patch_clear_to_inherit_and_effective_rule(env):
+    app, db = env
+    db.set_relation_rule("Global safeguard.")
+    async with human_client(app) as client:
+        # Create project with overrides
+        res = await client.post("/api/projects", json={
+            "name": "Custom Project",
+            "relation_rule": "Project specific rule.",
+            "max_auto_hops": 4,
+            "max_auto_per_hour": 12,
+        })
+        assert res.status_code == 201
+        p_id = res.json()["id"]
+
+        # Check detail has composed effective_rule: "Global safeguard.\n\n[Custom Project]\nProject specific rule."
+        detail = (await client.get(f"/api/projects/{p_id}")).json()
+        assert detail["effective_rule"] == "Global safeguard.\n\n[Custom Project]\nProject specific rule."
+        assert detail["max_auto_hops"] == 4
+        assert detail["max_auto_per_hour"] == 12
+
+        # 1. Patch only description: max_auto_hops, max_auto_per_hour, relation_rule must remain UNCHANGED
+        res_desc = await client.patch(f"/api/projects/{p_id}", json={
+            "description": "Just updating description",
+        })
+        assert res_desc.status_code == 200
+        p_desc = res_desc.json()
+        assert p_desc["description"] == "Just updating description"
+        assert p_desc["max_auto_hops"] == 4
+        assert p_desc["max_auto_per_hour"] == 12
+        assert p_desc["relation_rule"] == "Project specific rule."
+
+        # 2. Patch explicit null for max_auto_hops and max_auto_per_hour: must clear to None (inherit)
+        res_clear_limits = await client.patch(f"/api/projects/{p_id}", json={
+            "max_auto_hops": None,
+            "max_auto_per_hour": None,
+        })
+        assert res_clear_limits.status_code == 200
+        p_cleared = res_clear_limits.json()
+        assert p_cleared["max_auto_hops"] is None
+        assert p_cleared["max_auto_per_hour"] is None
+        # relation_rule was not in payload, so it must still be intact
+        assert p_cleared["relation_rule"] == "Project specific rule."
+
+        # Verify in DB and detail
+        detail2 = (await client.get(f"/api/projects/{p_id}")).json()
+        assert detail2["max_auto_hops"] is None
+        assert detail2["max_auto_per_hour"] is None
+        assert detail2["effective_max_hops"] == 3  # default global
+        assert detail2["effective_max_per_hour"] == 20  # default global
+
+        # 3. Patch relation_rule with empty string: must clear to None (inherit)
+        res_clear_rule_empty = await client.patch(f"/api/projects/{p_id}", json={
+            "relation_rule": "",
+        })
+        assert res_clear_rule_empty.status_code == 200
+        assert res_clear_rule_empty.json()["relation_rule"] is None
+
+        detail3 = (await client.get(f"/api/projects/{p_id}")).json()
+        assert detail3["relation_rule"] is None
+        assert detail3["effective_rule"] == "Global safeguard."
+
+        # 4. Set relation_rule again, then clear with explicit null
+        await client.patch(f"/api/projects/{p_id}", json={"relation_rule": "Another rule"})
+        res_clear_rule_null = await client.patch(f"/api/projects/{p_id}", json={
+            "relation_rule": None,
+        })
+        assert res_clear_rule_null.status_code == 200
+        assert res_clear_rule_null.json()["relation_rule"] is None
+
+        detail4 = (await client.get(f"/api/projects/{p_id}")).json()
+        assert detail4["relation_rule"] is None
+        assert detail4["effective_rule"] == "Global safeguard."
+
+        # 5. When global rule is empty and project rule is empty -> effective_rule is None
+        db.set_relation_rule("")
+        detail5 = (await client.get(f"/api/projects/{p_id}")).json()
+        assert detail5["effective_rule"] is None
+
+        # 6. When global rule is empty and project has a rule -> "[Custom Project]\nSolo project rule"
+        await client.patch(f"/api/projects/{p_id}", json={"relation_rule": "Solo project rule"})
+        detail6 = (await client.get(f"/api/projects/{p_id}")).json()
+        assert detail6["effective_rule"] == "[Custom Project]\nSolo project rule"
+

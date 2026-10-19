@@ -1656,6 +1656,7 @@ def create_app(
                 relation_rule=body.relation_rule,
                 max_auto_hops=body.max_auto_hops,
                 max_auto_per_hour=body.max_auto_per_hour,
+                fields_set=body.model_fields_set,
             )
         except ProjectNameTaken:
             raise ProductError(409, "project.name_taken", "A project with this name already exists.")
