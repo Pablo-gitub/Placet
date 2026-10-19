@@ -396,7 +396,15 @@ export default function SessionView({
           <ModelLine meta={{ model: session?.model, ...meta }} />
         </div>
         <NodeControl session={session} />
-        {activeProjectId && (
+        {state && (
+          <span className={`session-state state-${state.key}`} data-testid="session-view-state">
+            <Circle size={8} fill="currentColor" />
+            {state.label}
+          </span>
+        )}
+      </div>
+      {activeProjectId && (
+        <div className="project-context-bar">
           <span
             className="project-context-chip"
             data-testid="project-context-chip"
@@ -415,14 +423,8 @@ export default function SessionView({
               <X size={12} />
             </button>
           </span>
-        )}
-        {state && (
-          <span className={`session-state state-${state.key}`} data-testid="session-view-state">
-            <Circle size={8} fill="currentColor" />
-            {state.label}
-          </span>
-        )}
-      </div>
+        </div>
+      )}
 
       <div className="chat-scroll" ref={scrollRef} onScroll={onScroll} data-testid="chat-scroll">
         {status === "loading" && <p className="chat-status">{t("chat.loading")}</p>}

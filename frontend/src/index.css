@@ -1710,9 +1710,6 @@ body.chat-open { overflow: hidden; }
     max-width: 100%;
     width: 100%;
   }
-  .project-context-chip {
-    max-width: 6.5rem;
-  }
 }
 
 
@@ -1748,7 +1745,7 @@ body.chat-open { overflow: hidden; }
 /* RFC-15: project context chip in chat header and collapsed instructions above prompt */
 .project-context-chip {
   display: inline-flex; align-items: center; gap: 0.3rem; flex-shrink: 0;
-  max-width: 8.5rem; min-width: 0;
+  max-width: 100%; min-width: 0;
   padding: 0.2rem 0.5rem;
   border-radius: 999px;
   background: var(--bg-secondary); color: var(--text-main);
@@ -1792,3 +1789,22 @@ body.chat-open { overflow: hidden; }
   color: var(--text-main);
 }
 
+
+/* RFC-15: instructions editors in the project detail */
+.project-instructions-box { margin-top: 1rem; }
+.project-instructions-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.6rem; margin-bottom: 0.4rem; }
+.project-instructions-header .section-label { margin: 0; }
+.project-instructions-box .prompt-textarea,
+.project-node-instructions .prompt-textarea { min-height: 72px; margin-bottom: 0.4rem; font-size: 0.85rem; }
+.project-instructions-actions { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.project-instructions-actions .btn { padding: 0.35rem 0.75rem; font-size: 0.8rem; }
+.char-counter { font-size: 0.72rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.project-nodes-list > .project-node-item { flex: 1 1 100%; flex-direction: column; align-items: stretch; min-width: 0; padding: 0.6rem 0.7rem; }
+.project-node-header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; min-width: 0; }
+.project-node-header .project-node-name { overflow-wrap: anywhere; }
+.project-node-instructions { margin-top: 0.5rem; min-width: 0; }
+.project-node-instructions .prompt-editor-label { font-size: 0.68rem; margin-bottom: 0.3rem; }
+.project-instructions-actions .btn { flex: 0 0 auto; width: auto; }
+
+/* RFC-15: the project context sits on its own row under the chat header */
+.project-context-bar { display: flex; padding: 0.35rem 0.75rem; border-bottom: 1px solid var(--border-color); min-width: 0; }

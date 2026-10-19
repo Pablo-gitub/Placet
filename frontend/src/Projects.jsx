@@ -925,7 +925,7 @@ export function ProjectDetailView({ projectId, sessions: propSessions, onOpenSes
           </div>
           <textarea
             data-testid="project-instructions-input"
-            className="prompt-editor"
+            className="prompt-textarea"
             maxLength={4000}
             placeholder={t("projects.instructionsPlaceholder")}
             value={projInstructions}
@@ -936,7 +936,8 @@ export function ProjectDetailView({ projectId, sessions: propSessions, onOpenSes
             <span className="char-counter">{projInstructions.length} / 4000</span>
             <button
               type="button"
-              className="btn btn-secondary"
+              className={`btn ${projInstructions.trim() !== (project.instructions || "") ? "btn-primary" : "btn-secondary"}`}
+              disabled={projInstructions.trim() === (project.instructions || "")}
               data-testid="save-project-instructions-btn"
               onClick={handleSaveProjectInstructions}
             >
@@ -1002,7 +1003,7 @@ export function ProjectDetailView({ projectId, sessions: propSessions, onOpenSes
                     <textarea
                       id={`node-inst-${n.id}`}
                       data-testid={`node-instructions-input-${n.id}`}
-                      className="prompt-editor"
+                      className="prompt-textarea"
                       maxLength={4000}
                       placeholder={t("projects.nodeInstructionsPlaceholder")}
                       value={nodeInstructions[n.id] ?? ""}
@@ -1013,7 +1014,8 @@ export function ProjectDetailView({ projectId, sessions: propSessions, onOpenSes
                       <span className="char-counter">{(nodeInstructions[n.id] ?? "").length} / 4000</span>
                       <button
                         type="button"
-                        className="btn btn-secondary"
+                        className={`btn ${(nodeInstructions[n.id] ?? "").trim() !== (n.instructions || "") ? "btn-primary" : "btn-secondary"}`}
+                        disabled={(nodeInstructions[n.id] ?? "").trim() === (n.instructions || "")}
                         data-testid={`save-node-instructions-btn-${n.id}`}
                         onClick={() => handleSaveNodeInstructions(n.id)}
                       >
