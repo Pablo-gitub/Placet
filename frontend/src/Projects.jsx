@@ -702,7 +702,7 @@ function CreateProjectRelationDialog({ projectId, nodes, types, onDone, onCancel
 
 /** Project Detail View: `#progetti/{id}`. */
 /** Project Detail View: `#progetti/{id}`. */
-export function ProjectDetailView({ projectId, sessions: propSessions, onOpenSession, onBack }) {
+export function ProjectDetailView({ projectId, sessions: propSessions, requests = [], onOpenSession, onBack }) {
   const { t } = useTranslation();
   const [project, setProject] = useState(null);
   const [allNodes, setAllNodes] = useState([]);
@@ -1153,7 +1153,8 @@ export function ProjectDetailView({ projectId, sessions: propSessions, onOpenSes
       {/* RF-44: beside the project in landscape, at the bottom in portrait. */}
       <aside className="card project-graph-panel" aria-label={t("projects.graphTitle")}>
         <h2 className="project-relations-title">{t("projects.graphTitle")}</h2>
-        <RelationGraph nodes={project.nodes} relations={project.relations} projectId={projectId} onOpenSession={onOpenSession} />
+        <RelationGraph nodes={project.nodes} relations={project.relations} sessions={sessions} requests={requests}
+          projectId={projectId} onOpenSession={onOpenSession} />
       </aside>
       </div>
 

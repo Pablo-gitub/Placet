@@ -1,6 +1,6 @@
 import React from "react";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { it, expect, vi } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import RelationGraph from "../RelationGraph";
 
 // The real nodes and relations of the Placet project (October 19, 2026).
@@ -68,3 +68,70 @@ it("supports keyboard navigation and accessibility attributes on nodes with sess
   expect(idleNode).not.toHaveClass("rg-node-link");
 });
 
+
+describe("live activity (RF-44)", () => {
+  const live = [
+    { id: 1, name: "Placet_claude_FS", provider: "claude-code", session_id: "s1" },
+    { id: 2, name: "Placet_gemini_dev", provider: "antigravity", session_id: "s2" },
+    { id: 3, name: "Placet_gpt_reviewer", provider: "codex", session_id: "s3" },
+  ];
+  const req = (over) => ({ id: 9, relation_id: 1, status: "APPROVED", sender_id: "claude", recipient_id: "gemini", ...over });
+
+  it("pulses the nodes whose session is working", () => {
+    render(<RelationGraph nodes={live} relations={relations}
+      sessions={[{ id: "s1", state: "busy", reachable: true }, { id: "s2", state: "idle", reachable: true }]} />);
+    expect(screen.getByTestId("graph-node-1")).toHaveClass("rg-active");
+    expect(screen.getByTestId("graph-node-2")).not.toHaveClass("rg-active");
+  });
+
+  it("moves a ball from sender to recipient while a prompt is being delivered", () => {
+    render(<RelationGraph nodes={live} relations={relations} requests={[req({ status: "DELIVERING" })]} />);
+    const ball = screen.getByTestId("graph-ball-1");
+    expect(ball).toHaveClass("rg-ball-delivering");
+    expect(ball.querySelector("animateMotion").getAttribute("keyPoints")).toBe("0;1");
+  });
+
+  it("highlights the edge while the recipient executes", () => {
+    render(<RelationGraph nodes={live} relations={relations} requests={[req({ status: "EXECUTING" })]} />);
+    expect(screen.getByTestId("graph-edge-1")).toHaveClass("rg-executing");
+    expect(screen.queryByTestId("graph-ball-1")).toBeNull();
+  });
+
+  it("moves the ball back while an automatic reply returns", () => {
+    render(<RelationGraph nodes={live} relations={relations}
+      requests={[req({ status: "COMPLETED", response: { content: "ok" }, allow_auto_return: true, delivered_at: null })]} />);
+    const ball = screen.getByTestId("graph-ball-1");
+    expect(ball).toHaveClass("rg-ball-returning");
+    expect(ball.querySelector("animateMotion").getAttribute("keyPoints")).toBe("1;0");
+  });
+
+  it("stops a yellow ball halfway while the chain waits for the user", () => {
+    for (const r of [req({ status: "PENDING" }),
+      req({ status: "COMPLETED", response: { content: "ok" }, allow_auto_return: false, delivered_at: null })]) {
+      const { unmount } = render(<RelationGraph nodes={live} relations={relations} requests={[r]} />);
+      const ball = screen.getByTestId("graph-ball-1");
+      expect(ball).toHaveClass("rg-ball-waiting");
+      expect(ball.querySelector("animateMotion")).toBeNull();
+      expect(screen.getByTestId("graph-legend-waiting")).toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it("shows nothing for finished requests or other relations", () => {
+    render(<RelationGraph nodes={live} relations={relations}
+      requests={[req({ status: "COMPLETED", delivered_at: "2026-10-19T00:00:00Z" }), req({ id: 10, relation_id: 99, status: "DELIVERING" })]} />);
+    expect(screen.queryByTestId("graph-ball-1")).toBeNull();
+    expect(screen.getByTestId("graph-edge-1")).not.toHaveClass("rg-executing");
+  });
+
+  it("keeps the ball still when the user asks for reduced motion", () => {
+    const original = window.matchMedia;
+    window.matchMedia = (q) => ({ matches: q.includes("reduce"), addEventListener() {}, removeEventListener() {} });
+    try {
+      render(<RelationGraph nodes={live} relations={relations} requests={[req({ status: "DELIVERING" })]} />);
+      expect(screen.getByTestId("graph-ball-1").querySelector("animateMotion")).toBeNull();
+    } finally {
+      window.matchMedia = original;
+    }
+  });
+});

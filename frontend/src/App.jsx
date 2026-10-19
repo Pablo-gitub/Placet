@@ -366,6 +366,7 @@ export default function App() {
     <ProjectDetailView
       projectId={route.projectId}
       sessions={sessions}
+      requests={requests}
       onOpenSession={openSession}
       onBack={() => navigate("#/progetti")}
     />

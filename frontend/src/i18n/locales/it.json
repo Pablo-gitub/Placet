@@ -548,6 +548,7 @@
     "instructionsSaved": "Istruzioni salvate",
     "nodeInstructionsTitle": "Istruzioni del nodo in questo progetto",
     "nodeInstructionsPlaceholder": "Es. Ruolo specifico di questo nodo nel progetto…",
-    "saveNodeInstructions": "Salva istruzioni nodo"
+    "saveNodeInstructions": "Salva istruzioni nodo",
+    "graphWaiting": "In attesa di te"
   }
 }

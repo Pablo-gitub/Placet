@@ -1,5 +1,6 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
+import { edgeActivities } from "./graphActivity";
 
 const SIZE = 320;
 const CENTER = SIZE / 2;
@@ -51,8 +52,11 @@ function edgePath(from, to, bend) {
   return { d: `M ${start.x} ${start.y} Q ${control.x} ${control.y} ${end.x} ${end.y}`, label };
 }
 
-/** RF-44: the project's relations drawn as a graph (read only). */
-export default function RelationGraph({ nodes = [], relations = [], projectId, onOpenSession }) {
+const reducedMotion = () => typeof window !== "undefined"
+  && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+
+/** RF-44: the project's relations drawn as a graph, with live activity. */
+export default function RelationGraph({ nodes = [], relations = [], sessions = [], requests = [], projectId, onOpenSession }) {
   const { t } = useTranslation();
   if (nodes.length === 0) {
     return <p className="composer-note" data-testid="relation-graph-empty">{t("projects.graphEmpty")}</p>;
@@ -68,6 +72,10 @@ export default function RelationGraph({ nodes = [], relations = [], projectId, o
     const bend = r.from_node === r.to_node ? 0 : 22 + index * 18;
     return { rel: r, ...edgePath(pos[r.from_node], pos[r.to_node], bend) };
   });
+
+  const busy = new Set(sessions.filter((x) => x.state === "busy" && !x.ended_at).map((x) => x.id));
+  const activity = edgeActivities(requests);
+  const still = reducedMotion();
 
   const handleNodeClick = (n) => {
     if (!n.session_id) return;
@@ -89,22 +97,36 @@ export default function RelationGraph({ nodes = [], relations = [], projectId, o
             <path d="M 0 0 L 10 5 L 0 10 z" className="rg-arrow-manual" />
           </marker>
         </defs>
-        {edges.map(({ rel, d, label }) => (
-          <g key={rel.id} data-testid={`graph-edge-${rel.id}`}>
+        {edges.map(({ rel, d, label }) => {
+          const now = activity[rel.id];
+          const ball = now && now !== "executing";
+          return (
+          <g key={rel.id} data-testid={`graph-edge-${rel.id}`} className={now ? `rg-${now}` : undefined}>
             <path d={d} className={`rg-edge rg-${rel.approval}`} markerEnd={`url(#rg-arrow-${rel.approval})`}>
               <title>{`${rel.from_name} → ${rel.to_name} · ${rel.type_name} · ${t(rel.approval === "automatic" ? "relations.automaticShort" : "relations.manualShort")}`}</title>
             </path>
-            <text x={label.x} y={label.y} className="rg-edge-label" textAnchor="middle" dominantBaseline="middle">
+            <text x={label.x} y={ball && (now === "waiting" || still) ? label.y - 9 : label.y}
+              className="rg-edge-label" textAnchor="middle" dominantBaseline="middle">
               {short(rel.type_name)}
             </text>
+            {ball && (
+              <circle data-testid={`graph-ball-${rel.id}`} r={4.5} className={`rg-ball rg-ball-${now}`}
+                {...(now === "waiting" || still ? { cx: label.x, cy: label.y } : {})}>
+                {now !== "waiting" && !still && (
+                  <animateMotion dur="1.6s" repeatCount="indefinite" path={d} calcMode="linear"
+                    keyPoints={now === "returning" ? "1;0" : "0;1"} keyTimes="0;1" />
+                )}
+              </circle>
+            )}
           </g>
-        ))}
+          );
+        })}
         {nodes.map((n) => (
           <g
             key={n.id}
             data-testid={`graph-node-${n.id}`}
             onClick={() => handleNodeClick(n)}
-            className={n.session_id ? "rg-node-link" : undefined}
+            className={[n.session_id && "rg-node-link", busy.has(n.session_id) && "rg-active"].filter(Boolean).join(" ") || undefined}
             role={n.session_id ? "link" : undefined}
             tabIndex={n.session_id ? 0 : undefined}
             aria-label={n.session_id ? n.name : undefined}
@@ -120,6 +142,7 @@ export default function RelationGraph({ nodes = [], relations = [], projectId, o
             }
           >
             <title>{n.name}</title>
+            {busy.has(n.session_id) && <circle cx={pos[n.id].x} cy={pos[n.id].y} r={NODE_R} className={`rg-pulse prov-${n.provider}`} />}
             <circle cx={pos[n.id].x} cy={pos[n.id].y} r={NODE_R} className={`rg-node prov-${n.provider}`} />
             {/* Outside the circle of nodes, away from the edges that leave it. */}
             <text x={pos[n.id].x} y={pos[n.id].y < CENTER - 1 ? pos[n.id].y - NODE_R - 6 : pos[n.id].y + NODE_R + 13}
@@ -132,6 +155,9 @@ export default function RelationGraph({ nodes = [], relations = [], projectId, o
       <figcaption className="relation-graph-legend">
         <span><i className="rg-swatch rg-automatic" /> {t("relations.automaticShort")}</span>
         <span><i className="rg-swatch rg-manual" /> {t("relations.manualShort")}</span>
+        {Object.values(activity).includes("waiting") && (
+          <span data-testid="graph-legend-waiting"><i className="rg-dot rg-ball-waiting" /> {t("projects.graphWaiting")}</span>
+        )}
       </figcaption>
     </figure>
   );

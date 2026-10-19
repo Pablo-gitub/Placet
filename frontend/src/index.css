@@ -1808,3 +1808,20 @@ body.chat-open { overflow: hidden; }
 
 /* RFC-15: the project context sits on its own row under the chat header */
 .project-context-bar { display: flex; padding: 0.35rem 0.75rem; border-bottom: 1px solid var(--border-color); min-width: 0; }
+
+/* RF-44: live activity in the relations diagram */
+.rg-pulse { fill: var(--prov, var(--primary)); fill-opacity: 0.35; transform-box: fill-box; transform-origin: center; animation: rg-pulse 1.6s ease-out infinite; pointer-events: none; }
+@keyframes rg-pulse { from { transform: scale(1); opacity: 0.9; } to { transform: scale(1.75); opacity: 0; } }
+.rg-active .rg-node { stroke: var(--text-main); stroke-width: 2; }
+.rg-executing .rg-edge, .rg-delivering .rg-edge, .rg-returning .rg-edge { stroke-width: 2.6; }
+.rg-executing .rg-edge { stroke: var(--accent); }
+.rg-ball { stroke: var(--bg-card, var(--bg-secondary)); stroke-width: 1.5; pointer-events: none; }
+.rg-ball-delivering { fill: var(--accent); }
+.rg-ball-returning { fill: var(--primary); }
+.rg-ball-waiting { fill: var(--warning); animation: rg-wait 1.2s ease-in-out infinite alternate; }
+@keyframes rg-wait { from { opacity: 1; } to { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) {
+  .rg-pulse { animation: none; opacity: 0.6; transform: scale(1.3); }
+  .rg-ball-waiting { animation: none; }
+}
+.rg-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; vertical-align: middle; margin-right: 0.3rem; background: var(--warning); }

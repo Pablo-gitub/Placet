@@ -548,6 +548,7 @@
     "instructionsSaved": "Instructions saved",
     "nodeInstructionsTitle": "Node instructions in this project",
     "nodeInstructionsPlaceholder": "E.g. Specific role of this node in the project…",
-    "saveNodeInstructions": "Save node instructions"
+    "saveNodeInstructions": "Save node instructions",
+    "graphWaiting": "Waiting for you"
   }
 }
