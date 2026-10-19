@@ -599,7 +599,15 @@ class Database:
     def get_request(self, request_id: int) -> Optional[RequestModel]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM requests WHERE id = ?", (request_id,))
+            cursor.execute(
+                """
+                SELECT r.*, p.name AS project_name
+                FROM requests r
+                LEFT JOIN projects p ON r.project_id = p.id
+                WHERE r.id = ?
+                """,
+                (request_id,),
+            )
             row = cursor.fetchone()
             if not row:
                 return None
@@ -619,7 +627,6 @@ class Database:
                 created_at=datetime.fromisoformat(resp_row["created_at"]),
                 implicit=bool(resp_row["implicit"]),
             )
-
         keys = row.keys()
         return RequestModel(
             id=row["id"],
@@ -667,6 +674,7 @@ class Database:
             parent_request_id=row["parent_request_id"],
             chain_hops=row["chain_hops"] or 0,
             project_id=row["project_id"] if "project_id" in keys else None,
+            project_name=row["project_name"] if "project_name" in keys else None,
             project_context=row["project_context"] if "project_context" in keys else None,
         )
 
@@ -691,11 +699,12 @@ class Database:
             cursor = conn.cursor()
             cursor.execute(
                 f"""
-                SELECT r.*,
+                SELECT r.*, p.name AS project_name,
                        s.id AS s_id, s.request_id AS s_request_id,
                        s.responder_id AS s_responder_id, s.content AS s_content,
                        s.created_at AS s_created_at, s.implicit AS s_implicit
                 FROM requests r
+                LEFT JOIN projects p ON r.project_id = p.id
                 LEFT JOIN responses s ON s.request_id = r.id
                 {where}
                 ORDER BY r.id {order}

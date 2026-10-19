@@ -458,14 +458,16 @@ describe("project context and instructions (RFC-15)", () => {
     });
   });
 
-  it("renders project_context collapsed and expandable above outgoing prompt", async () => {
+  it("renders project_context collapsed and expandable above outgoing prompt using project_name", async () => {
     const reqWithContext = {
       id: 99,
       question_type: "message",
       recipient_session_id: "s1",
       status: "APPROVED",
       prompt: "Please review the architecture",
-      project_context: "[Placet · Project Placet Core]\nBe accurate.\n\n[Placet · Your role in Placet Core]\nArchitect role.",
+      project_name: "Placet Core",
+      // Notice: project has no project-level instructions, only node role instructions!
+      project_context: "[Placet · Your role in Placet Core]\nArchitect role.",
       delivery_mode: "queue",
       execution: "unobserved",
     };
@@ -477,6 +479,28 @@ describe("project context and instructions (RFC-15)", () => {
     const collapsed = await screen.findByTestId("project-instructions-collapsed");
     expect(collapsed).toBeInTheDocument();
     expect(screen.getByText("Istruzioni Placet · Progetto Placet Core")).toBeInTheDocument();
-    expect(screen.getByText(/Be accurate/)).toBeInTheDocument();
+    expect(screen.getByText(/Architect role/)).toBeInTheDocument();
+  });
+
+  it("falls back to generic instructions title when project_name is missing", async () => {
+    const reqWithoutName = {
+      id: 100,
+      question_type: "message",
+      recipient_session_id: "s1",
+      status: "APPROVED",
+      prompt: "Check this please",
+      project_context: "Some raw project context",
+      delivery_mode: "queue",
+      execution: "unobserved",
+    };
+
+    mockFetch([[transcriptOf("s1"), latest]]);
+
+    renderView({ requests: [reqWithoutName] });
+
+    const collapsed = await screen.findByTestId("project-instructions-collapsed");
+    expect(collapsed).toBeInTheDocument();
+    expect(screen.getByText("Istruzioni Placet")).toBeInTheDocument();
   });
 });
+

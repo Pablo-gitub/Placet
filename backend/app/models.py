@@ -195,6 +195,7 @@ class RequestModel(BaseModel):
     relation_id: Optional[int] = None
     # RFC-15: project context and ID for project-associated requests
     project_id: Optional[int] = None
+    project_name: Optional[str] = None
     project_context: Optional[str] = None
     id: int
     sender_id: str

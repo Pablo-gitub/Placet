@@ -104,7 +104,20 @@ export default function RelationGraph({ nodes = [], relations = [], projectId, o
             key={n.id}
             data-testid={`graph-node-${n.id}`}
             onClick={() => handleNodeClick(n)}
-            style={n.session_id ? { cursor: "pointer" } : undefined}
+            className={n.session_id ? "rg-node-link" : undefined}
+            role={n.session_id ? "link" : undefined}
+            tabIndex={n.session_id ? 0 : undefined}
+            aria-label={n.session_id ? n.name : undefined}
+            onKeyDown={
+              n.session_id
+                ? (e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      handleNodeClick(n);
+                    }
+                  }
+                : undefined
+            }
           >
             <title>{n.name}</title>
             <circle cx={pos[n.id].x} cy={pos[n.id].y} r={NODE_R} className={`rg-node prov-${n.provider}`} />

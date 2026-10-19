@@ -187,10 +187,12 @@ async def test_user_message_with_and_without_project_context(env):
         assert res_no_proj.status_code == 201
         req_no_proj = res_no_proj.json()
         assert req_no_proj["project_id"] is None
+        assert req_no_proj.get("project_name") is None
         assert req_no_proj["project_context"] is None
 
         # Verify envelope has no project context
         db_req_no_proj = db.get_request(req_no_proj["id"])
+        assert db_req_no_proj.project_name is None
         inj_no_proj = injection(db_req_no_proj, language="en")
         assert "Project context from Placet" not in inj_no_proj
         assert "---" not in inj_no_proj
@@ -205,6 +207,7 @@ async def test_user_message_with_and_without_project_context(env):
         assert res_with_proj.status_code == 201
         req_with_proj = res_with_proj.json()
         assert req_with_proj["project_id"] == p_id
+        assert req_with_proj["project_name"] == "Placet Core"
         assert req_with_proj["project_context"] is not None
         assert "[Placet · Project Placet Core]" in req_with_proj["project_context"]
         assert "Be accurate and test first." in req_with_proj["project_context"]
@@ -213,6 +216,10 @@ async def test_user_message_with_and_without_project_context(env):
 
         # Verify injection envelope format
         db_req_with_proj = db.get_request(req_with_proj["id"])
+        assert db_req_with_proj.project_name == "Placet Core"
+        listed = [r for r in db.list_requests() if r.id == db_req_with_proj.id]
+        assert len(listed) == 1
+        assert listed[0].project_name == "Placet Core"
         inj = injection(db_req_with_proj, language="en")
         lines = [line.strip() for line in inj.split("\n") if line.strip()]
 

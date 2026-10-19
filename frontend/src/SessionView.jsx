@@ -199,9 +199,7 @@ function Outgoing({ req, session, limitAt, onDelivery, onEdit }) {
   const { t } = useTranslation();
   const uncertain = isUncertain(req);
   const failed = req.status === "DELIVERY_FAILED" || req.status === "EXPIRED";
-  const projName = req.project_context
-    ? (req.project_context.match(/\[Placet · (?:Project|Progetto)\s+([^\]\n]+)\]/)?.[1] || "")
-    : "";
+  const projName = req.project_name || "";
   return (
     <div
       className={`msg msg-user outgoing${failed ? " failed" : ""}${uncertain ? " uncertain" : ""}`}
@@ -209,7 +207,11 @@ function Outgoing({ req, session, limitAt, onDelivery, onEdit }) {
     >
       {req.project_context && (
         <details className="project-instructions-collapsed" data-testid="project-instructions-collapsed">
-          <summary>{t("chat.projectInstructionsTitle", { name: projName })}</summary>
+          <summary>
+            {projName
+              ? t("chat.projectInstructionsTitle", { name: projName })
+              : t("chat.projectInstructions")}
+          </summary>
           <pre>{req.project_context}</pre>
         </details>
       )}
@@ -395,8 +397,14 @@ export default function SessionView({
         </div>
         <NodeControl session={session} />
         {activeProjectId && (
-          <span className="project-context-chip" data-testid="project-context-chip">
-            {t("chat.projectContext", { name: projectName || String(activeProjectId) })}
+          <span
+            className="project-context-chip"
+            data-testid="project-context-chip"
+            title={t("chat.projectContext", { name: projectName || String(activeProjectId) })}
+          >
+            <span className="project-context-name">
+              {t("chat.projectContext", { name: projectName || String(activeProjectId) })}
+            </span>
             <button
               type="button"
               className="icon-button"

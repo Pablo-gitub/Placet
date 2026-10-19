@@ -1710,6 +1710,9 @@ body.chat-open { overflow: hidden; }
     max-width: 100%;
     width: 100%;
   }
+  .project-context-chip {
+    max-width: 6.5rem;
+  }
 }
 
 
@@ -1728,6 +1731,9 @@ body.chat-open { overflow: hidden; }
 .relation-graph { margin: 0; }
 .relation-graph svg { width: 100%; height: auto; max-height: 70vh; display: block; }
 .rg-node { fill: var(--prov, var(--primary)); fill-opacity: 0.85; stroke: var(--border-color); stroke-width: 1.5; }
+.rg-node-link { cursor: pointer; }
+.rg-node-link:focus { outline: none; }
+.rg-node-link:focus-visible .rg-node { stroke: var(--primary); stroke-width: 2.5; }
 .rg-node-label { fill: var(--text-main); font-size: 11px; font-weight: 600; }
 .rg-edge { fill: none; stroke-width: 1.8; }
 .rg-edge.rg-automatic { stroke: var(--success); }
@@ -1742,11 +1748,17 @@ body.chat-open { overflow: hidden; }
 /* RFC-15: project context chip in chat header and collapsed instructions above prompt */
 .project-context-chip {
   display: inline-flex; align-items: center; gap: 0.3rem; flex-shrink: 0;
+  max-width: 8.5rem; min-width: 0;
   padding: 0.2rem 0.5rem;
   border-radius: 999px;
   background: var(--bg-secondary); color: var(--text-main);
   border: 1px solid var(--border-color);
   font-size: 0.75rem; font-weight: 500;
+}
+.project-context-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .project-context-chip button {
   padding: 0; margin: 0; border: none; background: transparent;

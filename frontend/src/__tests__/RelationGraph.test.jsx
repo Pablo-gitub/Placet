@@ -38,3 +38,33 @@ it("navigates to session with project context on node click", () => {
   fireEvent.click(screen.getByTestId("graph-node-1"));
   expect(onOpen).toHaveBeenCalledWith("s1", 5);
 });
+
+it("supports keyboard navigation and accessibility attributes on nodes with session", () => {
+  const onOpen = vi.fn();
+  const testNodes = [
+    { id: 1, name: "node-active", provider: "claude-code", session_id: "s1" },
+    { id: 2, name: "node-idle", provider: "codex" },
+  ];
+  render(<RelationGraph nodes={testNodes} relations={[]} projectId={5} onOpenSession={onOpen} />);
+
+  const activeNode = screen.getByTestId("graph-node-1");
+  expect(activeNode).toHaveAttribute("role", "link");
+  expect(activeNode).toHaveAttribute("tabindex", "0");
+  expect(activeNode).toHaveAttribute("aria-label", "node-active");
+  expect(activeNode).toHaveClass("rg-node-link");
+  expect(activeNode.getAttribute("style") || "").not.toContain("cursor");
+
+  // Enter key opens session
+  fireEvent.keyDown(activeNode, { key: "Enter" });
+  expect(onOpen).toHaveBeenCalledWith("s1", 5);
+
+  // Space key opens session
+  fireEvent.keyDown(activeNode, { key: " " });
+  expect(onOpen).toHaveBeenCalledWith("s1", 5);
+
+  const idleNode = screen.getByTestId("graph-node-2");
+  expect(idleNode).not.toHaveAttribute("role");
+  expect(idleNode).not.toHaveAttribute("tabindex");
+  expect(idleNode).not.toHaveClass("rg-node-link");
+});
+
