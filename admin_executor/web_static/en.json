@@ -14,7 +14,7 @@
   "unavailable": "The invitation is expired, already used or unavailable. Create a new one from the administrator terminal.",
   "unsupported": "Passkey registration is unavailable in this browser. Open this HTTPS page in Safari on your device.",
   "network": "Unable to confirm the result. Check the connection and ask the administrator to check the invitation before trying again.",
-  "footer": "No sudo password is requested or sent. Placet agents cannot authorize actions through this page.",
+  "footer": "No sudo password is requested or sent. Authorization requires a verified passkey; isolation also depends on keeping administrator credentials outside agent control.",
   "confirmationHeading": "Confirm this operation",
   "authorize": "Authorize with a passkey",
   "returnToPlacet": "Open Placet in the browser",

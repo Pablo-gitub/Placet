@@ -359,6 +359,23 @@ It preserves the administrative origin, enrollment database and Tailscale setup.
 It installs no dependencies and changes no account, group, sudoers or policy.
 Do not run it until its pull request and digests have been reviewed.
 
+Before running the installer, inspect the actual desktop/agent account's groups
+(replace `paolo` with that account if different):
+
+```bash
+id -nG paolo
+```
+
+Both `docker` and `libvirt` independently block the current preflight. For
+Docker, choose rootless Docker or remove desktop access to the rootful daemon
+and use `sudo docker` only from a trusted administrative session. For libvirt,
+remove membership or design a dedicated restrictive policy for separate review.
+The current installer treats libvirt as unassessed and always rejects that
+membership; retaining it requires reviewed policy and matching preflight support,
+not a bypass flag. Group changes and their impact on existing workloads remain
+a human decision. The installer also checks retained groups in live processes,
+which `id -nG` alone does not show.
+
 First resolve desktop root-equivalent access. Membership in `docker`, `lxd`,
 `lxc` or `disk`, privileged daemon socket access, retained groups in running
 processes, unattended sudo or unassessed virtualization administration blocks
@@ -373,6 +390,16 @@ Human choices include rootless Docker, root-managed containers without desktop
 access to the daemon, or a genuinely separate unprivileged agent account. Merely
 removing a group in account settings is insufficient: existing processes retain
 it until a complete logout/restart. The installer never makes this choice for you.
+
+**Password sudo does not fully isolate a shared UID.** Agents can modify shell
+startup files, aliases, wrappers or PATH, or fake a password prompt, to capture
+a password later typed by the operator. Perform administrative authentication
+from a session outside agent control: a trusted TTY/console with a trusted shell
+environment, a separate operator account, or with agents on a distinct
+unprivileged account. A second terminal that reads the same agent-writable shell
+configuration does not solve this. Passkeys and a passing preflight assume these
+administrator credentials remain outside agent reach; see the
+[trust boundaries](plans/reserved-commands.md#trust-boundaries).
 
 Read the installer, then run its read-only preview from the checkout:
 

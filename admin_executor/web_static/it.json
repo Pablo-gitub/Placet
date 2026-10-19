@@ -14,7 +14,7 @@
   "unavailable": "L’invito è scaduto, già utilizzato o non disponibile. Creane uno nuovo dal terminale amministrativo.",
   "unsupported": "La registrazione delle passkey non è disponibile in questo browser. Apri questa pagina HTTPS in Safari sul dispositivo.",
   "network": "Impossibile confermare l’esito. Controlla la connessione e fai verificare l’invito all’amministratore prima di riprovare.",
-  "footer": "Non viene chiesta né inviata la password sudo. Gli agenti Placet non possono autorizzare operazioni tramite questa pagina.",
+  "footer": "Non viene chiesta né inviata la password sudo. L’autorizzazione richiede una passkey verificata; l’isolamento dipende anche dal mantenere le credenziali amministrative fuori dal controllo degli agenti.",
   "confirmationHeading": "Conferma questa operazione",
   "authorize": "Autorizza con passkey",
   "returnToPlacet": "Apri Placet nel browser",

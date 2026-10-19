@@ -216,6 +216,16 @@ page.
   Virtualization permissions such as `libvirt` require policy-specific review;
   `kvm` alone is not automatically equivalent to root. Unreviewed administrative
   access is not evidence of isolation.
+- Password-protected sudo is a residual risk when agents share the operator's
+  UID. They can alter shell startup files, aliases, wrappers or PATH, or present
+  a fake password prompt, to intercept a password later entered by the human.
+  A passing preflight and password-required sudo do not eliminate this route.
+  The guarantee that agents cannot authorize privileged actions depends on the
+  operator using an administrative session outside agent control (for example a
+  trusted TTY/console with an unmodified login/shell environment, or a separate
+  account), or on running agents under a genuinely separate unprivileged UID.
+  Merely opening another terminal under the same modifiable shell configuration
+  is not isolation. Absolute authorization claims below assume this boundary.
 - The activation installer must fail closed if the desktop/agent UID retains
   root-equivalent access, or if that access has not been assessed. Check NSS
   membership and supplementary groups retained by running desktop/agent
