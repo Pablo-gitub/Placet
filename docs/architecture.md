@@ -268,8 +268,18 @@ bridge → find/read/filter provider file → POST /api/bridge/jobs/{id}/result 
 - **`sessions`:** provider `id`, `agent_id`, `provider`, `entrypoint`, `cwd`, `title`, `tmux_session`, `state`, `turn_request_id`, `started_at`, `last_seen_at`, `waiter_seen_at`, `ended_at`, `activity_at` (turn activity), `pinned_at`, `model`, `node_id`, and suspension/exclusion metadata. Closed/suspended/reachable are derived using lifecycle observations, not simply an idle label.
 - **`nodes`:** `id`, `name` (unique, case-insensitive), `provider`, `cwd`, `created_at` (RFC-02). A node's current session is its attached session seen most recently. The user names a session from the chat header, attaches it to an existing node of the same provider or detaches it. A Claude Code `SessionStart` with source `clear` takes the node of the conversation that ended within two minutes for the same agent, provider, folder and tmux session, unless the node already has an open conversation.
 - **`relation_types`:** `id`, `name` (unique, case-insensitive), `description` (RFC-03). **`relations`:** `id`, `from_node`, `to_node`, `type_id`, `approval` (`manual` | `automatic`), unique by (from, to, type) (RFC-04). `requests.relation_id` records the relation a request travelled on and `requests.approval` whether it went `automatic` or `manual` (shown to the recipient, RFC-06), and `parent_request_id`/`chain_hops` the automatic chain it belongs to (RFC-14); the approval event's actor is `system:relation#<id>` when it was automatic. Deleting a node deletes its relations; a type in use cannot be deleted.
+- **`projects`:** `id`, `name` (unique, case-insensitive), `description`, `relation_rule`, `max_auto_hops`, `max_auto_per_hour`, `created_at` (RFC-09, RF-44). Groups nodes and relations into workspaces with dedicated policies.
+- **`project_nodes`:** composite primary key `(project_id, node_id)` (RFC-09). Nodes can belong to multiple projects.
+- **`project_relations`:** composite primary key `(project_id, relation_id)` (RFC-09). Relations can belong to multiple projects. Adding a relation to a project automatically ensures its `from_node` and `to_node` are in `project_nodes`. Removing a node from a project removes its associated project relations. Deletions are cleaned up explicitly without relying on `PRAGMA foreign_keys`.
 - **`agent_states`:** per-agent tmux state.
 - **`app_settings`:** persistent key/value settings; `background_language` is human-controlled, independent of local UI preference; `relation_rule` is the general rule for automatic relations (RFC-08b); `automation_paused`, `max_auto_hops` and `max_auto_per_hour` hold Stop all and the loop limits (RFC-14).
+
+### Effective relation policy
+
+For any relation, its effective policy combines global defaults and containing projects:
+- **Effective rule:** The global relation rule always applies first if non-empty; project rules for each project containing the relation are appended sequentially, formatted as `[ProjectName]\n<rule>`.
+- **Effective loop limits:** `max_hops` and `max_per_hour` are computed as the minimum across all projects containing the relation; a project specifying `NULL` inherits the global default. If a relation belongs to no projects, global limits apply. Delivery pause (`automation_paused`) is always global.
+- **Agent exposure:** `/api/agents/me/relations` includes the list of containing `projects` and the composite `rule` for each outgoing relation.
 
 This is a conceptual inventory; `backend/app/database.py` is the schema/migration source of truth.
 
@@ -277,12 +287,9 @@ This is a conceptual inventory; `backend/app/database.py` is the schema/migratio
 
 ```text
 sessions.transcript_path                                first-hook metadata for bridge
-projects              (id, name)
-project_nodes         (project_id, node_id)              node may belong to several projects
-project_relations     (project_id, relation_id)
 ```
 
-`context` removal remains planned (RF-05b); do not remove it from existing MCP calls yet. Relation delivery policy will be visible to agents (RFC-06), with project-configurable relation/chain loop limits (RFC-14).
+`context` removal remains planned (RF-05b); do not remove it from existing MCP calls yet. Relation delivery policy is visible to agents (RFC-06), with project-configurable relation/chain loop limits (RFC-14).
 
 ## 7. Agent configuration: `AGENTS.md`
 
