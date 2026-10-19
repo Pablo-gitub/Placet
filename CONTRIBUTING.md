@@ -30,7 +30,15 @@ npm --prefix frontend run build        # assets also used by API integration tes
 .venv/bin/python -m pytest -q           # backend, bridge, hooks
 ```
 
-GitHub Actions runs the documentation check, both test suites, lint and build on pushes and pull requests. It does not deploy.
+The administrative package (`admin_executor/`) is tested in its own environment, without the application's dependencies or the shared `conftest.py`:
+
+```bash
+python3 -m venv /tmp/admin-venv
+/tmp/admin-venv/bin/pip install -r admin_executor/requirements.txt pytest pytest-asyncio httpx
+PLACET_TEST_SYSTEMD=1 /tmp/admin-venv/bin/python -m pytest -q --noconftest $(ls tests/test_admin_*.py | grep -v test_admin_commands.py)
+```
+
+GitHub Actions (`.github/workflows/checks.yml`) runs four jobs on every pull request and on `main`: documentation links, PWA (tests, lint, build), backend (with the built PWA) and the administrative package in its separate environment. Actions are pinned to commit SHAs; Dependabot proposes weekly updates as pull requests. CI never deploys: a release is installed only through a reserved command confirmed with a passkey (see [reserved commands](docs/plans/reserved-commands.md)).
 
 Please add tests with behavior changes. For provider integrations, also describe what you verified with the real app and on which version: automated tests cannot prove that an undocumented provider interface still behaves the same.
 
@@ -49,3 +57,5 @@ The map is [docs/README.md](docs/README.md). Keep the requirement identifiers (`
 ## Commits
 
 Small, focused commits with a conventional prefix (`feat`, `fix`, `docs`, `chore`, `refactor`, `test`) and a scope, for example `fix(bridge): …`.
+
+Work on a branch and open a pull request against `main`; it is merged when the checks pass. Keep each pull request to one topic.

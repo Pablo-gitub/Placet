@@ -2,30 +2,47 @@ name: Checks
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:
   contents: read
 
+# A newer push to the same branch or PR supersedes the running checks.
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+# Actions are pinned to full commit SHAs (the tag is in the comment):
+# a moved tag cannot change what runs. Dependabot proposes updates.
 jobs:
-  verify:
+  docs:
+    name: Documentation links
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.11'
-          cache: pip
-      - uses: actions/setup-node@v7.1.0
+      - name: Check documentation links and anchors
+        run: python scripts/check_docs.py
+
+  frontend:
+    name: PWA tests, lint and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: Install Python dependencies
-        run: python -m pip install -r requirements.txt -r admin_executor/requirements.txt
-      - name: Check documentation links and anchors
-        run: python scripts/check_docs.py
       - name: Install frontend dependencies
         run: npm --prefix frontend ci
       - name: Test frontend (including locale parity and both languages)
@@ -34,6 +51,61 @@ jobs:
         run: npm --prefix frontend run lint
       - name: Build PWA
         run: npm --prefix frontend run build
-      # API integration tests also verify serving the built PWA.
-      - name: Test backend, bridge and hooks (including backend catalogs)
-        run: python -m pytest -q
+      - name: Keep the built PWA for the backend tests
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pwa-dist
+          path: frontend/dist
+          retention-days: 1
+          if-no-files-found: error
+
+  backend:
+    name: Backend, bridge, hooks and MCP
+    needs: frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Built PWA (API integration tests also verify serving it)
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: pwa-dist
+          path: frontend/dist
+      - name: Install application dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Test backend, bridge, hooks and MCP server
+        # The administrative package has its own job and environment; the
+        # backend side of reserved commands (test_admin_commands.py) runs here.
+        run: |
+          ignore=$(ls tests/test_admin_*.py | grep -v test_admin_commands.py | sed 's/^/--ignore=/')
+          python -m pytest -q $ignore
+
+  admin:
+    name: Reserved commands (separate environment)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: admin_executor/requirements.txt
+      - name: Install only the administrative dependencies
+        # Never the application requirements: this proves the protected code
+        # needs nothing from the application environment.
+        run: python -m pip install -r admin_executor/requirements.txt pytest pytest-asyncio httpx
+      - name: Test the administrative package, with the systemd unit checks
+        env:
+          PLACET_TEST_SYSTEMD: '1'
+        # No shared conftest: it imports the application.
+        run: python -m pytest -q --noconftest $(ls tests/test_admin_*.py | grep -v test_admin_commands.py)
