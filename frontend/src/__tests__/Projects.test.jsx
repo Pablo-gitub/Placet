@@ -194,9 +194,10 @@ describe("Projects views (RFC-09, RF-44)", () => {
       created_at: "2026-10-19T10:00:00Z",
       effective_rule: "Global safeguard\n\n[Placet Core]\nCore rule",
       effective_max_hops: 3,
-      effective_max_per_hour: 10,
+      effective_max_per_hour: 20,
       nodes: [
         { id: 101, name: "planner", session_id: "cl" },
+        { id: 102, name: "builder", session_id: null },
       ],
       relations: [
         {
@@ -239,6 +240,10 @@ describe("Projects views (RFC-09, RF-44)", () => {
         }
         return allRelations;
       }],
+      ["/api/relations/201", (url, o) => {
+        if (o.method === "PATCH") return json({ ...allRelations[0], ...JSON.parse(o.body) });
+        return allRelations[0];
+      }],
       ["/api/relation-types", sampleTypes],
       ["/api/projects/1/nodes/103", () => json({ ok: true, removed_relations: [] })],
       ["/api/projects/1/nodes/101", () => json({ ok: true, removed_relations: [201] })],
@@ -250,12 +255,31 @@ describe("Projects views (RFC-09, RF-44)", () => {
     window.confirm = vi.fn(() => true);
 
     const onBack = vi.fn();
-    render(<ProjectDetailView projectId={1} onBack={onBack} />);
+    const onOpenSession = vi.fn();
+    const sessions = [
+      { id: "cl", state: "idle", reachable: true, provider: "claude-code" },
+    ];
+    render(<ProjectDetailView projectId={1} sessions={sessions} onOpenSession={onOpenSession} onBack={onBack} />);
 
     // 1. Detail display
     expect(await screen.findByText("Placet Core")).toBeInTheDocument();
     expect(screen.getByText("planner")).toBeInTheDocument();
+    expect(screen.getByText("builder")).toBeInTheDocument();
     expect(screen.getByTestId("relation-badge-shared-201")).toHaveTextContent("Other Project");
+
+    // Node 101 has session: shows status and clicking opens chat
+    expect(within(screen.getByTestId("project-node-101")).getByText("In attesa")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("open-node-session-101"));
+    expect(onOpenSession).toHaveBeenCalledWith("cl");
+
+    // Node 102 has no session: shows "nessuna sessione"
+    expect(within(screen.getByTestId("project-node-102")).getByText("nessuna sessione")).toBeInTheDocument();
+
+    // Change relation policy on the fly via PATCH
+    fireEvent.change(screen.getByTestId("relation-approval-201"), { target: { value: "manual" } });
+    await waitFor(() => {
+      expect(bodies(fetch, "PATCH", "/api/relations/201")).toEqual([{ approval: "manual" }]);
+    });
 
     // 2. Add existing node
     fireEvent.change(screen.getByTestId("add-node-select"), { target: { value: "103" } });

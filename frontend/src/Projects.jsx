@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import {
   ArrowLeft,
   ArrowRight,
+  Circle,
   Edit2,
   Plus,
   Trash2,
@@ -11,6 +12,7 @@ import {
 } from "lucide-react";
 import { apiErrorDescriptor } from "./i18n/errors";
 import { formatDateTime } from "./i18n/formatters";
+import { sessionStatus } from "./sessionInfo";
 
 async function api(method, url, body) {
   const res = await fetch(url, {
@@ -697,17 +699,21 @@ function CreateProjectRelationDialog({ projectId, nodes, types, onDone, onCancel
 }
 
 /** Project Detail View: `#progetti/{id}`. */
-export function ProjectDetailView({ projectId, onBack }) {
+/** Project Detail View: `#progetti/{id}`. */
+export function ProjectDetailView({ projectId, sessions: propSessions, onOpenSession, onBack }) {
   const { t } = useTranslation();
   const [project, setProject] = useState(null);
   const [allNodes, setAllNodes] = useState([]);
   const [allRelations, setAllRelations] = useState([]);
   const [allTypes, setAllTypes] = useState([]);
+  const [fetchedSessions, setFetchedSessions] = useState([]);
   const [selectedNodeToAdd, setSelectedNodeToAdd] = useState("");
   const [selectedRelToAdd, setSelectedRelToAdd] = useState("");
   const [editingProject, setEditingProject] = useState(false);
   const [creatingRelation, setCreatingRelation] = useState(false);
   const [error, setError] = useState(null);
+
+  const sessions = propSessions || fetchedSessions;
 
   const load = useCallback(() => {
     let cancelled = false;
@@ -731,10 +737,17 @@ export function ProjectDetailView({ projectId, onBack }) {
         }
       })
       .catch(() => {});
+    if (!propSessions) {
+      api("GET", "/api/sessions")
+        .then((sList) => {
+          if (!cancelled) setFetchedSessions(sList);
+        })
+        .catch(() => {});
+    }
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [projectId, propSessions]);
 
   useEffect(() => {
     return load();
@@ -798,6 +811,15 @@ export function ProjectDetailView({ projectId, onBack }) {
     }
   };
 
+  const handleUpdateRelationApproval = async (relId, approval) => {
+    try {
+      await api("PATCH", `/api/relations/${relId}`, { approval });
+      load();
+    } catch (err) {
+      setError(err.display || { key: "errors.operation", params: { status: err.status || 500 } });
+    }
+  };
+
   const handleUpdateProject = async (data) => {
     await api("PATCH", `/api/projects/${projectId}`, data);
     setEditingProject(false);
@@ -836,17 +858,25 @@ export function ProjectDetailView({ projectId, onBack }) {
         <div className="project-effective-policy-box">
           <h3 className="section-label project-effective-policy-title">{t("projects.effectivePolicy")}</h3>
           <p className="project-effective-limits">
-            <strong>{t("projects.effectiveLimits", { hops: project.effective_max_hops, perHour: project.effective_max_per_hour })}</strong>
-            {project.max_auto_hops == null && <small className="project-inherited-hint">{t("projects.inheritedGlobal")}</small>}
+            <strong>{t("projects.effectiveLimitsTitle")}</strong>{" "}
+            <span>
+              {t("projects.effectiveHops", { hops: project.effective_max_hops })}
+              {project.max_auto_hops == null && <small className="project-inherited-hint"> {t("projects.inheritedGlobal")}</small>}
+            </span>
+            {", "}
+            <span>
+              {t("projects.effectiveRate", { perHour: project.effective_max_per_hour })}
+              {project.max_auto_per_hour == null && <small className="project-inherited-hint"> {t("projects.inheritedGlobal")}</small>}
+            </span>
           </p>
-          <p className="project-effective-rule">
-            <strong>{t("projects.effectiveRule")}</strong>{" "}
+          <div className="project-effective-rule">
+            <strong>{t("projects.effectiveRule")}</strong>
             {project.effective_rule ? (
-              <span className="project-effective-rule-text">{project.effective_rule}</span>
+              <div className="project-effective-rule-text">{project.effective_rule}</div>
             ) : (
-              <span className="project-effective-rule-empty">{t("relations.ruleEmpty")}</span>
+              <span className="project-effective-rule-empty"> {t("relations.ruleEmpty")}</span>
             )}
-          </p>
+          </div>
         </div>
       </div>
 
@@ -859,24 +889,47 @@ export function ProjectDetailView({ projectId, onBack }) {
           <p className="composer-note">{t("projects.nodesEmpty")}</p>
         ) : (
           <ul className="project-nodes-list">
-            {project.nodes.map((n) => (
-              <li
-                key={n.id}
-                className="project-node-item"
-                data-testid={`project-node-${n.id}`}
-              >
-                <span>{n.name}</span>
-                <button
-                  type="button"
-                  className="icon-button"
-                  data-testid={`remove-node-${n.id}`}
-                  aria-label={t("projects.removeNode")}
-                  onClick={() => handleRemoveNode(n)}
+            {project.nodes.map((n) => {
+              const session = n.session_id ? sessions.find((s) => s.id === n.session_id) : null;
+              const status = session ? sessionStatus(session) : null;
+              return (
+                <li
+                  key={n.id}
+                  className="project-node-item"
+                  data-testid={`project-node-${n.id}`}
                 >
-                  <Trash2 size={13} />
-                </button>
-              </li>
-            ))}
+                  {session ? (
+                    <button
+                      type="button"
+                      className="link-button project-node-link"
+                      data-testid={`open-node-session-${n.id}`}
+                      onClick={() => onOpenSession ? onOpenSession(n.session_id) : (window.location.hash = `#/sessione/${n.session_id}`)}
+                    >
+                      <strong className="project-node-name">{n.name}</strong>
+                      <span className={`session-state state-${status.key}`}>
+                        <Circle size={7} fill="currentColor" />
+                        {status.label}
+                      </span>
+                    </button>
+                  ) : (
+                    <div className="project-node-content">
+                      <strong className="project-node-name">{n.name}</strong>
+                      <span className="project-node-no-session">{t("projects.noSession")}</span>
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    className="icon-button"
+                    data-testid={`remove-node-${n.id}`}
+                    aria-label={t("projects.removeNode")}
+                    title={t("projects.removeNode")}
+                    onClick={() => handleRemoveNode(n)}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         )}
 
@@ -932,35 +985,42 @@ export function ProjectDetailView({ projectId, onBack }) {
                 className="relation-row project-relation-item"
                 data-testid={`project-relation-${rel.id}`}
               >
-                <div className="project-relation-info">
-                  <span className="relation-route">
+                <div className="relation-route">
+                  <span className="relation-route-text">
                     {rel.from_name} <ArrowRight size={12} aria-hidden="true" /> {rel.to_name}{" "}
                     <small>({rel.type_name})</small>
                   </span>
-                  <div className="project-relation-badges">
-                    <span className="badge badge-small">
-                      {rel.approval === "automatic" ? t("relations.automaticShort") : t("relations.manualShort")}
+                  {rel.shared_with && rel.shared_with.length > 0 && (
+                    <span
+                      className="badge badge-shared"
+                      data-testid={`relation-badge-shared-${rel.id}`}
+                    >
+                      {t("projects.sharedWith", { projects: rel.shared_with.join(", ") })}
                     </span>
-                    {rel.shared_with && rel.shared_with.length > 0 && (
-                      <span
-                        className="badge badge-shared"
-                        data-testid={`relation-badge-shared-${rel.id}`}
-                      >
-                        {t("projects.sharedWith", { projects: rel.shared_with.join(", ") })}
-                      </span>
-                    )}
-                  </div>
+                  )}
                 </div>
-                <button
-                  type="button"
-                  className="icon-button"
-                  data-testid={`remove-relation-${rel.id}`}
-                  aria-label={t("projects.removeRelation")}
-                  title={t("projects.removeRelation")}
-                  onClick={() => handleRemoveRelation(rel)}
-                >
-                  <Trash2 size={14} />
-                </button>
+                <div className="project-relation-actions">
+                  <select
+                    className="session-select relation-approval-select"
+                    aria-label={t("relations.policy")}
+                    value={rel.approval}
+                    data-testid={`relation-approval-${rel.id}`}
+                    onChange={(e) => handleUpdateRelationApproval(rel.id, e.target.value)}
+                  >
+                    <option value="manual">{t("relations.manualShort")}</option>
+                    <option value="automatic">{t("relations.automaticShort")}</option>
+                  </select>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    data-testid={`remove-relation-${rel.id}`}
+                    aria-label={t("projects.removeRelation")}
+                    title={t("projects.removeRelation")}
+                    onClick={() => handleRemoveRelation(rel)}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               </li>
             ))}
           </ul>

@@ -1560,8 +1560,9 @@ body.chat-open { overflow: hidden; }
 }
 .project-effective-rule-text {
   white-space: pre-wrap;
-  display: inline-block;
-  vertical-align: top;
+  text-align: left;
+  margin-top: 0.25rem;
+  word-break: break-word;
 }
 .project-effective-rule-empty {
   color: var(--text-muted);
@@ -1586,11 +1587,38 @@ body.chat-open { overflow: hidden; }
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.4rem 0.75rem;
+  padding: 0.35rem 0.65rem;
   background-color: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 6px;
   font-size: 0.85rem;
+}
+.project-node-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  background: none;
+  border: none;
+  font: inherit;
+}
+.project-node-link:hover .project-node-name {
+  color: var(--primary);
+}
+.project-node-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.project-node-name {
+  font-weight: 600;
+}
+.project-node-no-session {
+  font-size: 0.75rem;
+  color: var(--text-muted);
 }
 .project-add-row {
   display: flex;
@@ -1624,6 +1652,20 @@ body.chat-open { overflow: hidden; }
   align-items: center;
   flex-wrap: wrap;
   gap: 0.5rem;
+  min-height: 2.2rem;
+}
+.project-relation-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.relation-approval-select {
+  width: auto;
+  margin: 0;
+  padding: 0.2rem 0.4rem;
+  font-size: 0.75rem;
 }
 .project-relation-info {
   display: flex;

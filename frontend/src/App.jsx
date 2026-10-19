@@ -361,7 +361,12 @@ export default function App() {
     <ProjectsView onOpenProject={(id) => navigate(`#/progetti/${id}`)} />
   );
   const projectDetailView = route.view === "project_detail" && (
-    <ProjectDetailView projectId={route.projectId} onBack={() => navigate("#/progetti")} />
+    <ProjectDetailView
+      projectId={route.projectId}
+      sessions={sessions}
+      onOpenSession={openSession}
+      onBack={() => navigate("#/progetti")}
+    />
   );
 
   const navTabs = (
