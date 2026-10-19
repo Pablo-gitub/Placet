@@ -14,6 +14,9 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.concurrency import run_in_threadpool
+
+from .control import BrokerUnavailable
 
 
 STATIC = Path(__file__).with_name("web_static")
@@ -107,7 +110,16 @@ class Registration(Invitation):
     credential: dict
 
 
-def create_app(*, origin: str, mailbox: EnrollmentMailbox, trusted_unix_proxy: bool = False):
+class EmptyConfirmation(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+
+class Assertion(EmptyConfirmation):
+    challenge_id: str = Field(pattern=r'^[a-f0-9]{32}$')
+    credential: dict
+
+
+def create_app(*, origin: str, mailbox: EnrollmentMailbox, trusted_unix_proxy: bool = False, broker=None):
     from urllib.parse import urlsplit
     parsed = urlsplit(origin)
     if (parsed.scheme != "https" or not parsed.hostname or parsed.path or parsed.query
@@ -115,6 +127,11 @@ def create_app(*, origin: str, mailbox: EnrollmentMailbox, trusted_unix_proxy: b
             or origin != "https://" + parsed.hostname):
         raise ValueError("An exact dedicated HTTPS origin is required")
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+
+    async def protected_call(method, **params):
+        if broker is None:
+            raise BrokerUnavailable()
+        return await run_in_threadpool(broker.call, method, **params)
 
     @app.middleware("http")
     async def boundary(request: Request, call_next):
@@ -152,7 +169,12 @@ def create_app(*, origin: str, mailbox: EnrollmentMailbox, trusted_unix_proxy: b
 
     @app.exception_handler(ValueError)
     async def unavailable(_request, _error):
-        return JSONResponse({"code": "invitation_unavailable"}, status_code=409)
+        code = 'invitation_unavailable' if _request.url.path.startswith('/api/enrollment/') else 'confirmation_unavailable'
+        return JSONResponse({'code': code}, status_code=409)
+
+    @app.exception_handler(BrokerUnavailable)
+    async def broker_unavailable(_request, _error):
+        return JSONResponse({'code': 'administrative_unavailable'}, status_code=503)
 
     @app.get("/")
     async def index():
@@ -166,8 +188,25 @@ def create_app(*, origin: str, mailbox: EnrollmentMailbox, trusted_unix_proxy: b
 
     @app.get("/api/status")
     async def status():
-        return {"service": "placet-admin", "execution_enabled": False,
+        try:
+            enabled = (await protected_call('catalogue'))['execution_enabled']
+        except (BrokerUnavailable, ValueError):
+            enabled = False
+        return {"service": "placet-admin", "execution_enabled": enabled,
                 "enrollment": "terminal_authorized", "origin": origin}
+
+    @app.get('/api/proposals/{identifier}')
+    async def proposal_view(identifier: str):
+        return await protected_call('view', identifier=identifier)
+
+    @app.post('/api/proposals/{identifier}/challenge')
+    async def proposal_challenge(identifier: str, body: EmptyConfirmation):
+        return await protected_call('challenge', identifier=identifier)
+
+    @app.post('/api/proposals/{identifier}/authorize')
+    async def proposal_authorize(identifier: str, body: Assertion):
+        return await protected_call('authorize', identifier=identifier,
+                                    challenge_id=body.challenge_id, assertion=body.credential)
 
     @app.post("/api/enrollment/options")
     async def enrollment_options(body: Invitation):

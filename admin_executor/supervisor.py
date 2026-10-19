@@ -19,7 +19,7 @@ CONFIG = Path('/etc/placet-admin')
 STATE = Path('/var/lib/placet-admin')
 
 
-def configuration(catalogue, identity):
+def enabled_actions(catalogue):
     if (not isinstance(catalogue, dict) or set(catalogue) != {'revision', 'actions'}
             or type(catalogue['revision']) is not int or catalogue['revision'] != 1
             or not isinstance(catalogue['actions'], list)):
@@ -35,10 +35,15 @@ def configuration(catalogue, identity):
             if entry['id'] not in ACTIONS:
                 raise ValueError('No executable deploy handler')
             enabled.add(entry['id'])
+    return frozenset(enabled)
+
+
+def configuration(catalogue, identity):
+    enabled = enabled_actions(catalogue)
     if (not isinstance(identity, dict) or set(identity) != {'uid', 'gid'}
             or any(type(identity[k]) is not int or identity[k] <= 0 for k in ('uid', 'gid'))):
         raise ValueError('Explicit unprivileged desktop identity required')
-    return frozenset(enabled), identity['uid'], identity['gid']
+    return enabled, identity['uid'], identity['gid']
 
 
 def protected_file(path):
@@ -59,6 +64,13 @@ def protected_file(path):
         return data
 
 
+def validate_directory(path, *, private, owner=0):
+    info = path.lstat()
+    forbidden = 0o077 if private else 0o022
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != owner or info.st_mode & forbidden:
+        raise ValueError('Unsafe administrative state directory')
+
+
 def main():
     if os.geteuid() != 0:
         raise ValueError('The protected supervisor requires root')
@@ -71,12 +83,9 @@ def main():
     protected_file(module)
     database = STATE / 'authorization.sqlite'
     # The DB may grow beyond config limits. Only inspect metadata here.
-    for parent in (STATE, *STATE.parents):
-        info = parent.lstat()
-        if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o077:
-            # System ancestors may be world-readable, never writable by others.
-            if parent == STATE or info.st_uid != 0 or info.st_mode & 0o022 or not stat.S_ISDIR(info.st_mode):
-                raise ValueError('Unsafe administrative state directory')
+    validate_directory(STATE, private=True)
+    for parent in STATE.parents:
+        validate_directory(parent, private=False)
     info = database.lstat()
     if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o077:
         raise ValueError('Private authorization database required')

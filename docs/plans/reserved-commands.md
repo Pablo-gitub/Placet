@@ -88,9 +88,10 @@ overwrite a partial previous installation. Upgrading administrative code remains
 a separate, explicitly reviewed operation. This foundation bootstrap is not yet
 the operational command-service installation and need not be applied now.
 
-There are no HTTP routes, service execution methods, service installs, or
-changes to the current deploy. Production ownership and filesystem protection
-are not provided by these libraries. Next: isolated build supervision, source
+The foundation bootstrap alone exposes no HTTP routes or service execution
+methods and makes no changes to the current deploy. Current component status
+is recorded below. Production ownership and filesystem protection are not
+provided by the libraries alone. Pending: isolated build supervision, source
 identity verification, backups and service activation/recovery, followed by the
 administrative bootstrap. Only after those checks should authorization and
 the PWA be wired. Running `npm run build` in the working tree validates the
@@ -137,7 +138,8 @@ resource bounds and rejection of untrusted build scripts as root.
   no network enrollment endpoint exists. Changing origin requires an explicit
   credential migration. Neither a cryptographic signature nor an authorized row
   dispatches a privileged action by itself. The offline restart supervisor is
-  described under Operational status; network integration remains absent.
+  described under Operational status. Its confirmation broker is implemented
+  but not installed or enabled.
 
 Passkey tests use actual ES256 signatures and registration data; they do not
 demonstrate Face ID compatibility on a physical iPhone. Install the separate
@@ -364,19 +366,40 @@ before any effect. Public status excludes WebAuthn assertions and credentials.
 The fixed backend handler restarts `placet-backend.service`. The bridge handler
 drops supplemental groups, GID and UID before running its protected helper,
 which addresses only `placet-bridge.service` on that user's manager. Missing
-user managers are not started. Success means a new active systemd invocation,
-not an application-level health guarantee. Timeouts after a restart request
+user managers are not started. Backend success requires a new active invocation
+that remains stable for five seconds, with unchanged `NRestarts`, followed by
+HTTP 200 from the fixed `127.0.0.1:8000/api/health` endpoint. This is a point-in-time
+check, not a future availability guarantee. Bridge results are explicitly
+labelled `user_service_report`: the desktop UID can influence the helper and
+manager, so this evidence must never authorize another action. Timeouts after a restart request
 remain uncertain. The root entry point accepts no arguments and reads only
 protected catalogue/desktop identity files; the latter is not provisioned yet.
 
-The authorization broker, binding multiple challenges to one proposal, HTTP
-confirmation, PWA integration and active-installation upgrade remain pending.
-The existing single-use WebAuthn challenge behavior is unchanged: replay is
-rejected, and polling an existing job does not dispatch it again. No supervisor
-unit is installed by the current bootstrap, and all catalogue entries remain
-disabled. Tests use injected handlers and never restart real services.
+The confirmation broker and protected page are implemented, not installed.
+`confirmation_proposals` stores immutable intents, `challenge_proposals` binds
+nonces to those intents, and `proposal_jobs` permits only one job per intent.
+Signature verification, counter update, challenge consumption and job binding
+commit atomically. An exact retry of a consumed bound assertion returns its
+existing job; an unbound challenge replay is still rejected. No retry dispatches
+another effect. Previously authorized summaries remain the summaries displayed
+for those jobs even if the protected description changes later.
 
-This document defines the plan; it installs no services, passkeys, sudo
-privileges or new operational routes. The protected bootstrap will need an
-explicit administrative step after reviewing the concrete files. The existing
-administrative access (e.g. SSH) remains the recovery path.
+The web process calls the root broker over a bounded Unix protocol with mutual
+UID checks, never opens its credential database, and exposes no dispatch route.
+Distinct web/backend socket roles restrict the backend to catalogue, proposals
+and status. The page compares its reviewed operation with the challenge before
+requesting a passkey, then recovers state through GET-only polling. Errors never
+cause an automatic signature or authorization retry. English/Italian interaction
+tests and Chromium at 375 px use simulated browser credentials; cryptographic
+broker tests use real ES256 assertions. These are not live phone execution tests.
+
+Backend/PWA integration, root reconciliation, supervised units and the reviewed
+active-installation upgrade remain pending. No broker or supervisor unit is
+installed by the current bootstrap, and all catalogue entries remain disabled.
+Tests use injected restart handlers and never restart real services.
+
+No restart action is operational yet. The already installed enrollment service
+and enrolled passkey are unchanged by these repository commits. Activating the
+new components requires a separate reviewed administrative upgrade; ordinary
+Placet deploys must not replace them. Existing administrative access (e.g. SSH)
+remains the recovery path.

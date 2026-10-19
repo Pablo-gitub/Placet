@@ -127,9 +127,10 @@ def test_fixed_backend_restart_checks_new_invocation():
     def run(argv, **kwargs):
         calls.append((argv, kwargs))
         if 'show' in argv:
-            return 'ActiveState=active\nSubState=running\nInvocationID=' + ('old' if len(calls) == 1 else 'new') + '\n'
+            return 'ActiveState=active\nSubState=running\nNRestarts=0\nInvocationID=' + ('old' if len(calls) == 1 else 'new') + '\n'
         return ''
-    assert RestartHandlers(desktop_uid=1000, desktop_gid=1000, run=run)('restart-backend') == 'succeeded'
+    assert RestartHandlers(desktop_uid=1000, desktop_gid=1000, run=run,
+                           pause=lambda _: None, health=lambda: True)('restart-backend') == 'succeeded'
     assert calls[1][0] == ['/usr/bin/systemctl', 'restart', 'placet-backend.service']
     assert all(c[1]['timeout'] <= 30 for c in calls)
     assert all(c[1]['env'] == {'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'} for c in calls)
@@ -223,3 +224,46 @@ def test_uncertain_outcome_blocks_later_jobs_until_operator_reconciliation(store
     assert worker.run_once() is None
     assert calls == ['restart-backend']
     assert store.status('two') is None
+
+
+@pytest.mark.parametrize('unstable,healthy', [(True, True), (False, False)])
+def test_backend_must_remain_stable_and_healthy_before_success(unstable, healthy):
+    calls = []
+    def run(argv, **kwargs):
+        calls.append(argv)
+        if 'restart' in argv:
+            return ''
+        number = sum('show' in c for c in calls)
+        active = not (unstable and number == 3)
+        return ('ActiveState=active\nSubState=running\n' if active else 'ActiveState=failed\nSubState=failed\n') + 'InvocationID=' + ('old' if number == 1 else 'new') + '\nNRestarts=0\n'
+    handler = RestartHandlers(desktop_uid=1000, desktop_gid=1000, run=run,
+                              pause=lambda _: None, health=lambda: healthy)
+    assert handler('restart-backend') == 'failed'
+
+
+def test_state_directory_is_private_but_ancestors_may_be_readable(tmp_path):
+    import os
+    from admin_executor.supervisor import validate_directory
+    tmp_path.chmod(0o755)
+    validate_directory(tmp_path, private=False, owner=os.geteuid())
+    with pytest.raises(ValueError):
+        validate_directory(tmp_path, private=True, owner=os.geteuid())
+    tmp_path.chmod(0o700)
+    validate_directory(tmp_path, private=True, owner=os.geteuid())
+    tmp_path.chmod(0o777)
+    with pytest.raises(ValueError):
+        validate_directory(tmp_path, private=False, owner=os.geteuid())
+
+
+def test_backend_automatic_restart_during_stabilization_is_failure():
+    reads = 0
+    def run(argv, **kwargs):
+        nonlocal reads
+        if 'restart' in argv:
+            return ''
+        reads += 1
+        return ('ActiveState=active\nSubState=running\nInvocationID=' + ('old' if reads == 1 else 'new')
+                + '\nNRestarts=' + ('1' if reads == 3 else '0') + '\n')
+    handler = RestartHandlers(desktop_uid=1000, desktop_gid=1000, run=run,
+                              pause=lambda _: None, health=lambda: True)
+    assert handler('restart-backend') == 'failed'

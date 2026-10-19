@@ -60,6 +60,13 @@ class AuthorizationStore:
                 CREATE TABLE IF NOT EXISTS enrollments (
                     id TEXT PRIMARY KEY, nonce BLOB NOT NULL,
                     expires REAL NOT NULL, consumed INTEGER NOT NULL DEFAULT 0);
+                CREATE TABLE IF NOT EXISTS confirmation_proposals (
+                    id TEXT PRIMARY KEY, request_key TEXT UNIQUE NOT NULL,
+                    canonical TEXT NOT NULL, created_at REAL NOT NULL);
+                CREATE TABLE IF NOT EXISTS challenge_proposals (
+                    challenge_id TEXT PRIMARY KEY, proposal_id TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS proposal_jobs (
+                    proposal_id TEXT PRIMARY KEY, job_id TEXT UNIQUE NOT NULL);
             """)
             db.execute("INSERT OR IGNORE INTO identity VALUES (1, ?, ?)", (rp_id, origin))
             identity = db.execute("SELECT rp_id, origin FROM identity WHERE singleton = 1").fetchone()
@@ -116,7 +123,7 @@ class AuthorizationStore:
         with sqlite3.connect(self.path) as db:
             db.execute("UPDATE credentials SET revoked = 1 WHERE credential_id = ?", (credential_id,))
 
-    def challenge(self, operation: str):
+    def challenge(self, operation: str, *, proposal_id=None):
         from webauthn import generate_authentication_options, options_to_json
         from webauthn.helpers.structs import PublicKeyCredentialDescriptor, UserVerificationRequirement
 
@@ -131,19 +138,29 @@ class AuthorizationStore:
         if expected != operation:
             raise ValueError("Noncanonical administrative operation")
         with sqlite3.connect(self.path) as db:
+            db.execute('BEGIN IMMEDIATE')
+            if proposal_id is not None:
+                bound = db.execute('SELECT canonical FROM confirmation_proposals WHERE id=?', (proposal_id,)).fetchone()
+                if not bound or bound[0] != canonical_proposal(proposal['action'], proposal['parameters']):
+                    raise ValueError('Proposal binding changed')
+                existing = db.execute('SELECT job_id FROM proposal_jobs WHERE proposal_id=?', (proposal_id,)).fetchone()
+                if existing:
+                    return {'job_id': existing[0], 'state': 'authorized'}
             credentials = db.execute("SELECT credential_id FROM credentials WHERE revoked = 0").fetchall()
             if not credentials:
                 raise ValueError("No administratively enrolled passkey")
             challenge_id, nonce = uuid.uuid4().hex, secrets.token_bytes(32)
             db.execute("INSERT INTO challenges VALUES (?, ?, ?, ?, 0)",
                        (challenge_id, nonce, operation, time.time() + 60))
+            if proposal_id is not None:
+                db.execute('INSERT INTO challenge_proposals VALUES (?,?)', (challenge_id, proposal_id))
         options = generate_authentication_options(rp_id=self.rp_id, challenge=nonce, timeout=60000,
                    allow_credentials=[PublicKeyCredentialDescriptor(id=row[0]) for row in credentials],
                    user_verification=UserVerificationRequirement.REQUIRED)
         return {"id": challenge_id, "operation": json.loads(operation),
                 "publicKey": json.loads(options_to_json(options))}
 
-    def authorize(self, challenge_id, assertion: dict, *, current_operation: str):
+    def authorize(self, challenge_id, assertion: dict, *, current_operation: str, proposal_id=None):
         from webauthn import base64url_to_bytes, verify_authentication_response
 
         if not isinstance(assertion, dict) or len(json.dumps(assertion)) > 32768:
@@ -157,7 +174,16 @@ class AuthorizationStore:
                                    (challenge_id,)).fetchone()
             if not challenge or challenge[1] != current_operation:
                 raise ValueError("Operation changed or challenge unknown")
+            bound = db.execute('SELECT proposal_id FROM challenge_proposals WHERE challenge_id=?', (challenge_id,)).fetchone()
+            if (bound[0] if bound else None) != proposal_id:
+                raise ValueError('Challenge belongs to another proposal')
             if challenge[3]:
+                if proposal_id is not None:
+                    previous = db.execute('''SELECT a.id,a.assertion FROM authorized_jobs a
+                        JOIN proposal_jobs p ON p.job_id=a.id
+                        WHERE p.proposal_id=? AND a.challenge_id=?''', (proposal_id, challenge_id)).fetchone()
+                    if previous and previous[1] == json.dumps(assertion, sort_keys=True):
+                        return {'job_id': previous[0], 'state': 'authorized'}
                 raise ValueError("Authorization challenge already consumed")
             if time.time() >= challenge[2]:
                 raise ValueError("Authorization challenge expired")
@@ -180,8 +206,14 @@ class AuthorizationStore:
             db.execute("UPDATE credentials SET sign_count = ? WHERE credential_id = ?",
                        (verified.new_sign_count, credential_id))
             db.execute("UPDATE challenges SET consumed = 1 WHERE id = ?", (challenge_id,))
+            if proposal_id is not None:
+                previous = db.execute('SELECT job_id FROM proposal_jobs WHERE proposal_id=?', (proposal_id,)).fetchone()
+                if previous:
+                    return {'job_id': previous[0], 'state': 'authorized'}
             db.execute("INSERT INTO authorized_jobs VALUES (?, ?, ?, ?, ?, ?, 'authorized')",
                        (job_id, challenge_id, current_operation,
                         hashlib.sha256(current_operation.encode()).hexdigest(), credential_id,
                         json.dumps(assertion, sort_keys=True)))
+            if proposal_id is not None:
+                db.execute('INSERT INTO proposal_jobs VALUES (?,?)', (proposal_id, job_id))
         return {"job_id": job_id, "state": "authorized"}

@@ -118,6 +118,34 @@ revocation/listing CLI and full recovery workflow remain to be completed.
 
 ## Verification and remaining work
 
+### Confirmation broker (implemented, not installed)
+
+The standalone page accepts a public `?proposal=<32-hex-id>` reference. It reads
+the protected operation, requests a challenge only on a human click, compares
+that challenge with the operation reviewed before the click, and then requests
+WebAuthn authentication. Changed operations require a reload and review.
+Authorized/running states are polled without repeating the authorization POST;
+uncertain outcomes explicitly require terminal reconciliation. Bridge evidence
+is labelled as a report from the user service, not an independent guarantee.
+
+The web process uses `/run/placet-admin-control/web.sock`, verifying that its
+peer is root. `admin_executor.control` is a separate root entry point, accepts
+no arguments and refuses execution from the checkout. The backend socket is
+`/run/placet-admin-control/backend.sock`. Each root-owned socket permits only
+its configured UID via `SO_PEERCRED`; socket groups alone grant no authority.
+The web role has catalogue/view/challenge/authorize methods. The backend role
+has catalogue/propose/view methods. Neither role has an execute method.
+Requests/replies are limited to 100 KB and incomplete clients time out.
+
+The root broker requires protected `peers.json` (distinct `web` and `backend`
+UIDs), `return-url` (a fixed separate HTTPS origin/path), the existing origin and
+catalogue, and a private authorization database. These settings and the runtime
+directory are deliberately not provisioned by the existing installer. A future
+reviewed upgrade must install the units, protect the database permissions,
+set socket groups, provide reconciliation and configure restart rate limits
+before enabling an action. Do not rerun the pre-service failed-bootstrap recovery
+against the active installation. Existing credentials must be preserved.
+
 Tests cover HTTP origin/host boundaries, invitations, single-use response staging,
 actual WebAuthn signatures/registration, privilege checks, runtime copying and
 systemd syntax. Chromium at 360/390px was checked in English and Italian,
@@ -125,6 +153,8 @@ including language switching and a simulated credential response. This is not
 a physical iPhone/Face ID test. The actual system Python runtime relocation was
 tested; the privileged DynamicUser installation still needs a live check.
 
-The commands screen, action confirmation/dispatch HTTP endpoints, complete
-isolated source/build supervisor, service cutover and safe recovery are still
-not operational. An enrolled passkey alone grants no ability to run a command.
+The confirmation endpoints and restart execution core have offline coverage;
+they are not installed or operational. The Commands screen, backend integration,
+root-only reconciliation and supervised activation remain pending, along with
+the complete isolated deploy/build path. An enrolled passkey alone grants no
+ability to run a command.
