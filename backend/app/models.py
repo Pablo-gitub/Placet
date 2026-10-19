@@ -121,6 +121,9 @@ class RequestCreate(BaseModel):
     # RFC-08: address a node by name and a relation type by name.
     target_node: Optional[str] = Field(None, max_length=40)
     relation_type: Optional[str] = Field(None, max_length=40)
+    # RFC-15: project context and ID for project-associated requests
+    project_id: Optional[int] = None
+    project_context: Optional[str] = None
     # RFC-06: the sender read the general rule for automatic relations.
     rule_acknowledged: bool = False
     # Lifetime of the request, independent of how long the caller waits for it.
@@ -190,6 +193,9 @@ class RequestModel(BaseModel):
     return_forward_id: Optional[int] = None
     # RFC-04: the relation the request travelled on, if any.
     relation_id: Optional[int] = None
+    # RFC-15: project context and ID for project-associated requests
+    project_id: Optional[int] = None
+    project_context: Optional[str] = None
     id: int
     sender_id: str
     recipient_id: str
@@ -272,6 +278,8 @@ class SessionMessage(BaseModel):
     text: str = Field(default="", max_length=20000)
     attachments: List[SessionUpload] = Field(default_factory=list, max_length=4)
     mentions: List[SessionMention] = Field(default_factory=list, max_length=20)
+    # RFC-15: optional project context when sending message from PWA
+    project_id: Optional[int] = None
 
     @model_validator(mode="after")
     def has_content(self):
@@ -323,6 +331,8 @@ class NodeModel(BaseModel):
     created_at: datetime
     # The attached session seen most recently, if any.
     session_id: Optional[str] = None
+    # RFC-15: node instructions within a project (when viewed in project context)
+    instructions: Optional[str] = None
 
 
 class RelationTypeModel(BaseModel):
@@ -355,6 +365,8 @@ class ProjectModel(BaseModel):
     relation_rule: Optional[str] = None
     max_auto_hops: Optional[int] = None
     max_auto_per_hour: Optional[int] = None
+    # RFC-15: project instructions for context injection
+    instructions: Optional[str] = None
     created_at: datetime
 
 

@@ -281,7 +281,9 @@ class Database:
                 executing_since TEXT,
                 sender_session_id TEXT,
                 recipient_session_id TEXT,
-                prompt_source TEXT
+                prompt_source TEXT,
+                project_id INTEGER,
+                project_context TEXT
             );
             """)
             cursor.execute("""
@@ -414,6 +416,7 @@ class Database:
                 relation_rule TEXT,
                 max_auto_hops INTEGER,
                 max_auto_per_hour INTEGER,
+                instructions TEXT,
                 created_at TEXT NOT NULL
             );
             """)
@@ -421,6 +424,7 @@ class Database:
             CREATE TABLE IF NOT EXISTS project_nodes (
                 project_id INTEGER NOT NULL REFERENCES projects(id),
                 node_id INTEGER NOT NULL REFERENCES nodes(id),
+                instructions TEXT,
                 PRIMARY KEY (project_id, node_id)
             );
             """)
@@ -496,6 +500,20 @@ class Database:
             if "relation_id" not in cols:
                 # RFC-04: the relation a request travelled on (audit, reply policy).
                 cursor.execute("ALTER TABLE requests ADD COLUMN relation_id INTEGER;")
+            if "project_id" not in cols:
+                # RFC-15: project context reference on user messages
+                cursor.execute("ALTER TABLE requests ADD COLUMN project_id INTEGER;")
+            if "project_context" not in cols:
+                # RFC-15: composed project and node instructions block
+                cursor.execute("ALTER TABLE requests ADD COLUMN project_context TEXT;")
+            cursor.execute("PRAGMA table_info(projects);")
+            project_cols = [r["name"] for r in cursor.fetchall()]
+            if "instructions" not in project_cols:
+                cursor.execute("ALTER TABLE projects ADD COLUMN instructions TEXT;")
+            cursor.execute("PRAGMA table_info(project_nodes);")
+            pn_cols = [r["name"] for r in cursor.fetchall()]
+            if "instructions" not in pn_cols:
+                cursor.execute("ALTER TABLE project_nodes ADD COLUMN instructions TEXT;")
             cursor.execute("PRAGMA table_info(responses);")
             if "implicit" not in [r["name"] for r in cursor.fetchall()]:
                 cursor.execute("ALTER TABLE responses ADD COLUMN implicit INTEGER NOT NULL DEFAULT 0;")
@@ -549,8 +567,8 @@ class Database:
                 INSERT INTO requests (
                     sender_id, recipient_id, question_type, prompt, context,
                     options, status, created_at, expires_at, updated_at, priority,
-                    recipient_session_id, prompt_source
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    recipient_session_id, prompt_source, project_id, project_context
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     req.sender_id,
@@ -566,6 +584,8 @@ class Database:
                     (req.priority or Priority.NORMAL).value,
                     req.recipient_session_id,
                     req.prompt_source,
+                    req.project_id,
+                    req.project_context,
                 ),
             )
             req_id = cursor.lastrowid
@@ -600,6 +620,7 @@ class Database:
                 implicit=bool(resp_row["implicit"]),
             )
 
+        keys = row.keys()
         return RequestModel(
             id=row["id"],
             sender_id=row["sender_id"],
@@ -645,6 +666,8 @@ class Database:
             approval=row["approval"],
             parent_request_id=row["parent_request_id"],
             chain_hops=row["chain_hops"] or 0,
+            project_id=row["project_id"] if "project_id" in keys else None,
+            project_context=row["project_context"] if "project_context" in keys else None,
         )
 
     def list_requests(
@@ -1636,9 +1659,11 @@ class Database:
 
     @staticmethod
     def _row_to_node(row: sqlite3.Row) -> NodeModel:
+        instructions = row["instructions"] if "instructions" in row.keys() else None
         return NodeModel(id=row["id"], name=row["name"], provider=row["provider"], cwd=row["cwd"],
                          created_at=datetime.fromisoformat(row["created_at"]),
-                         session_id=row["session_id"])
+                         session_id=row["session_id"],
+                         instructions=instructions)
 
     # The node's current session: the attached one seen most recently.
     _NODES_SQL = (
@@ -1916,6 +1941,10 @@ class Database:
     def set_request_relation(self, request_id: int, relation_id: int) -> None:
         with self._get_connection() as conn:
             conn.execute("UPDATE requests SET relation_id = ? WHERE id = ?", (relation_id, request_id))
+
+    def set_request_project_context(self, request_id: int, project_context: Optional[str]) -> None:
+        with self._get_connection() as conn:
+            conn.execute("UPDATE requests SET project_context = ? WHERE id = ?", (project_context, request_id))
 
     def set_usage(self, provider: str, data: str) -> None:
         now = datetime.now(timezone.utc).isoformat()
@@ -2227,6 +2256,7 @@ class Database:
 
     @staticmethod
     def _row_to_project(row: sqlite3.Row) -> ProjectModel:
+        instructions = row["instructions"] if "instructions" in row.keys() else None
         return ProjectModel(
             id=row["id"],
             name=row["name"],
@@ -2234,6 +2264,7 @@ class Database:
             relation_rule=row["relation_rule"],
             max_auto_hops=row["max_auto_hops"],
             max_auto_per_hour=row["max_auto_per_hour"],
+            instructions=instructions,
             created_at=datetime.fromisoformat(row["created_at"]),
         )
 
@@ -2244,16 +2275,19 @@ class Database:
         relation_rule: Optional[str] = None,
         max_auto_hops: Optional[int] = None,
         max_auto_per_hour: Optional[int] = None,
+        instructions: Optional[str] = None,
     ) -> ProjectModel:
         now = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
             try:
                 cur = conn.execute(
-                    "INSERT INTO projects (name, description, relation_rule, max_auto_hops, max_auto_per_hour, created_at)"
-                    " VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO projects (name, description, relation_rule, max_auto_hops, max_auto_per_hour, instructions, created_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (name.strip(), (description or "").strip(),
                      relation_rule.strip() if relation_rule else None,
-                     max_auto_hops, max_auto_per_hour, now),
+                     max_auto_hops, max_auto_per_hour,
+                     instructions.strip() if instructions and instructions.strip() else None,
+                     now),
                 )
             except sqlite3.IntegrityError:
                 raise ProjectNameTaken(name) from None
@@ -2281,6 +2315,7 @@ class Database:
                     relation_rule=r["relation_rule"],
                     max_auto_hops=r["max_auto_hops"],
                     max_auto_per_hour=r["max_auto_per_hour"],
+                    instructions=r["instructions"] if "instructions" in r.keys() else None,
                     created_at=datetime.fromisoformat(r["created_at"]),
                     nodes_count=r["nodes_count"] or 0,
                     relations_count=r["relations_count"] or 0,
@@ -2296,8 +2331,11 @@ class Database:
                 return None
 
             node_rows = conn.execute(
-                f"""
-                {self._NODES_SQL}
+                """
+                SELECT nodes.*, pn.instructions,
+                  (SELECT s.id FROM sessions s WHERE s.node_id = nodes.id
+                   ORDER BY s.ended_at IS NOT NULL, s.last_seen_at DESC LIMIT 1) AS session_id
+                FROM nodes
                 JOIN project_nodes pn ON pn.node_id = nodes.id
                 WHERE pn.project_id = ?
                 ORDER BY nodes.name COLLATE NOCASE
@@ -2345,6 +2383,7 @@ class Database:
                 rule_parts.append(f"[{p_row['name']}]\n{p_rule}")
             effective_rule = "\n\n".join(rule_parts) if rule_parts else None
 
+            instructions = p_row["instructions"] if "instructions" in p_row.keys() else None
             return ProjectDetailModel(
                 id=p_row["id"],
                 name=p_row["name"],
@@ -2352,6 +2391,7 @@ class Database:
                 relation_rule=p_row["relation_rule"],
                 max_auto_hops=p_row["max_auto_hops"],
                 max_auto_per_hour=p_row["max_auto_per_hour"],
+                instructions=instructions,
                 created_at=datetime.fromisoformat(p_row["created_at"]),
                 nodes=nodes,
                 relations=relations,
@@ -2368,6 +2408,7 @@ class Database:
         relation_rule: Optional[str] = None,
         max_auto_hops: Optional[int] = None,
         max_auto_per_hour: Optional[int] = None,
+        instructions: Optional[str] = None,
         fields_set: Optional[Set[str]] = None,
     ) -> Optional[ProjectModel]:
         with self._get_connection() as conn:
@@ -2388,6 +2429,8 @@ class Database:
                     fields_set.add("max_auto_hops")
                 if max_auto_per_hour is not None:
                     fields_set.add("max_auto_per_hour")
+                if instructions is not None:
+                    fields_set.add("instructions")
 
             updates = []
             params = []
@@ -2407,6 +2450,11 @@ class Database:
             if "max_auto_per_hour" in fields_set:
                 updates.append("max_auto_per_hour = ?")
                 params.append(max_auto_per_hour)
+            if "instructions" in fields_set:
+                inst_val = instructions.strip() if (instructions and instructions.strip()) else None
+                updates.append("instructions = ?")
+                params.append(inst_val)
+
 
             if updates:
                 params.append(project_id)
@@ -2554,3 +2602,102 @@ class Database:
             "max_per_hour": effective_per_hour,
             "paused": global_automation["paused"],
         }
+
+    # --- Project & Node Instructions (RFC-15) --------------------------------
+
+    def update_project_node_instructions(self, project_id: int, node_id: int, instructions: Optional[str]) -> bool:
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM project_nodes WHERE project_id = ? AND node_id = ?",
+                (project_id, node_id),
+            ).fetchone()
+            if not row:
+                return False
+            val = instructions.strip() if instructions and instructions.strip() else None
+            conn.execute(
+                "UPDATE project_nodes SET instructions = ? WHERE project_id = ? AND node_id = ?",
+                (val, project_id, node_id),
+            )
+            return True
+
+    def get_project_node_instructions(self, project_id: int, node_id: int) -> Optional[str]:
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT instructions FROM project_nodes WHERE project_id = ? AND node_id = ?",
+                (project_id, node_id),
+            ).fetchone()
+            return row["instructions"] if row else None
+
+    def is_node_in_project(self, project_id: int, node_id: int) -> bool:
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM project_nodes WHERE project_id = ? AND node_id = ?",
+                (project_id, node_id),
+            ).fetchone()
+            return row is not None
+
+    def list_node_project_outgoing_relations(self, project_id: int, node_id: int) -> List[dict]:
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT r.id, r.from_node, r.to_node, r.approval,
+                       rt.name AS type_name,
+                       tn.name AS to_name
+                FROM relations r
+                JOIN project_relations pr ON pr.relation_id = r.id AND pr.project_id = ?
+                JOIN relation_types rt ON rt.id = r.type_id
+                JOIN nodes tn ON tn.id = r.to_node
+                WHERE r.from_node = ?
+                ORDER BY rt.name COLLATE NOCASE ASC, tn.name COLLATE NOCASE ASC, r.id ASC
+                """,
+                (project_id, node_id),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def list_projects_for_relation(self, relation_id: int) -> List[ProjectModel]:
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT p.* FROM projects p
+                JOIN project_relations pr ON pr.project_id = p.id
+                WHERE pr.relation_id = ?
+                ORDER BY p.name COLLATE NOCASE ASC, p.id ASC
+                """,
+                (relation_id,),
+            ).fetchall()
+            return [self._row_to_project(r) for r in rows]
+
+
+def compose_project_instructions(
+    project_name: str,
+    project_instructions: Optional[str],
+    node_instructions: Optional[str],
+    outgoing_relations: List[dict],
+) -> str:
+    """Pure function to compose RFC-15 project and node instructions block."""
+    sections = []
+    p_inst = (project_instructions or "").strip()
+    if p_inst:
+        sections.append(f"[Placet · Project {project_name}]\n{p_inst}")
+
+    n_inst = (node_instructions or "").strip()
+    if n_inst:
+        sections.append(f"[Placet · Your role in {project_name}]\n{n_inst}")
+
+    if outgoing_relations:
+        sorted_rels = sorted(
+            outgoing_relations,
+            key=lambda r: (
+                (r.get("type_name") or "").lower(),
+                (r.get("to_name") or "").lower(),
+                r.get("id") or 0,
+            ),
+        )
+        rel_lines = [
+            f"- {r['type_name']} → {r['to_name']} ({r['approval']})"
+            for r in sorted_rels
+        ]
+        sections.append(f"[Placet · Your relations in {project_name}]\n" + "\n".join(rel_lines))
+
+    return "\n".join(sections) if sections else ""
+

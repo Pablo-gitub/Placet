@@ -29,7 +29,10 @@ from backend.app.auth import (
     require_human,
 )
 from backend.app.config import PlacetConfig, load_agents_config
-from backend.app.database import Database, NameTaken, NodeNameTaken, ProjectNameTaken
+from backend.app.database import (
+    Database, NameTaken, NodeNameTaken, ProjectNameTaken,
+    compose_project_instructions,
+)
 from backend.app.models import (
     ProviderUsage,
     UsageReport,
@@ -185,6 +188,7 @@ class ProjectCreate(BaseModel):
     relation_rule: Optional[str] = Field(None, max_length=4000)
     max_auto_hops: Optional[int] = Field(None, ge=1, le=100)
     max_auto_per_hour: Optional[int] = Field(None, ge=1, le=1000)
+    instructions: Optional[str] = Field(None, max_length=4000)
 
 
 class ProjectUpdate(BaseModel):
@@ -193,6 +197,11 @@ class ProjectUpdate(BaseModel):
     relation_rule: Optional[str] = Field(None, max_length=4000)
     max_auto_hops: Optional[int] = Field(None, ge=1, le=100)
     max_auto_per_hour: Optional[int] = Field(None, ge=1, le=1000)
+    instructions: Optional[str] = Field(None, max_length=4000)
+
+
+class ProjectNodeUpdate(BaseModel):
+    instructions: Optional[str] = Field(None, max_length=4000)
 
 
 class PushKeys(BaseModel):
@@ -716,6 +725,17 @@ def create_app(
                                    req.relation_type_id)
         if relation is not None:
             db.set_request_relation(created.id, relation.id)
+            # RFC-15: project instructions for relation
+            projects_for_rel = db.list_projects_for_relation(relation.id)
+            blocks = []
+            for proj in projects_for_rel:
+                node_inst = db.get_project_node_instructions(proj.id, relation.to_node)
+                outgoing = db.list_node_project_outgoing_relations(proj.id, relation.to_node)
+                b = compose_project_instructions(proj.name, proj.instructions, node_inst, outgoing)
+                if b:
+                    blocks.append(b)
+            if blocks:
+                db.set_request_project_context(created.id, "\n\n".join(blocks))
             created = db.get_request(created.id)
             effective_policy = db.get_relation_effective_policy(relation.id)
             effective_rule = effective_policy["rule"]
@@ -1370,10 +1390,23 @@ def create_app(
                 + "\n" + text("message.upload_note", language)
             )
             mention_context = "\n\n".join(part for part in (mention_context, upload_context) if part)
+        project_context = None
+        if body.project_id is not None:
+            project = db.get_project(body.project_id)
+            if project is None:
+                raise ProductError(404, "project.not_found", "Project not found")
+            if not session.node_id or not db.is_node_in_project(project.id, session.node_id):
+                raise ProductError(409, "project.node_not_in_project", "The session's node is not part of this project.")
+            node_inst = db.get_project_node_instructions(project.id, session.node_id)
+            outgoing = db.list_node_project_outgoing_relations(project.id, session.node_id)
+            block = compose_project_instructions(project.name, project.instructions, node_inst, outgoing)
+            if block:
+                project_context = block
         created = db.create_request(
             RequestCreate(
                 sender_id="human", recipient_id=session.agent_id, question_type=QuestionType.MESSAGE,
                 prompt=prompt, context=mention_context, recipient_session_id=session.id, priority=Priority.NORMAL,
+                project_id=body.project_id, project_context=project_context,
             ),
             actor=who.actor,
         )
@@ -1650,6 +1683,7 @@ def create_app(
                 relation_rule=body.relation_rule,
                 max_auto_hops=body.max_auto_hops,
                 max_auto_per_hour=body.max_auto_per_hour,
+                instructions=body.instructions,
             )
         except ProjectNameTaken:
             raise ProductError(409, "project.name_taken", "A project with this name already exists.")
@@ -1673,6 +1707,7 @@ def create_app(
                 relation_rule=body.relation_rule,
                 max_auto_hops=body.max_auto_hops,
                 max_auto_per_hour=body.max_auto_per_hour,
+                instructions=body.instructions,
                 fields_set=body.model_fields_set,
             )
         except ProjectNameTaken:
@@ -1697,6 +1732,17 @@ def create_app(
             raise ProductError(404, "node.not_found", "Node not found")
         db.add_node_to_project(project_id, node_id)
         return {"ok": True}
+
+    @app.patch("/api/projects/{project_id}/nodes/{node_id}")
+    async def update_project_node(project_id: int, node_id: int, body: ProjectNodeUpdate, who: Principal = Depends(principal)):
+        require_human(who)
+        if not db.get_project(project_id):
+            raise ProductError(404, "project.not_found", "Project not found")
+        if not db.get_node(node_id):
+            raise ProductError(404, "node.not_found", "Node not found")
+        if not db.update_project_node_instructions(project_id, node_id, body.instructions):
+            raise ProductError(404, "project.node_not_in_project", "Node not in project.")
+        return {"ok": True, "instructions": body.instructions}
 
     @app.delete("/api/projects/{project_id}/nodes/{node_id}")
     async def remove_project_node(project_id: int, node_id: int, who: Principal = Depends(principal)):
