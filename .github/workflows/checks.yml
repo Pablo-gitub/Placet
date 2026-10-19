@@ -81,11 +81,11 @@ jobs:
       - name: Install application dependencies
         run: python -m pip install -r requirements.txt
       - name: Test backend, bridge, hooks and MCP server
-        # The administrative package has its own job and environment; the
-        # backend side of reserved commands (test_admin_commands.py) runs here.
+        # Reserved commands run in the two jobs below. A module skipped for a
+        # missing dependency fails the job instead of passing unnoticed.
         run: |
-          ignore=$(ls tests/test_admin_*.py | grep -v test_admin_commands.py | sed 's/^/--ignore=/')
-          python -m pytest -q $ignore
+          python -m pytest -q -rs --ignore-glob='tests/test_admin_*.py' | tee pytest.log
+          ! grep -qE "could not import|Install admin_executor/requirements.txt" pytest.log
 
   admin:
     name: Reserved commands (separate environment)
@@ -108,4 +108,28 @@ jobs:
         # No shared conftest: it imports the application. The systemd unit
         # checks (PLACET_TEST_SYSTEMD=1) resolve this host's binaries, such as
         # tailscaled: they run on the PC before installing, not here.
-        run: python -m pytest -q --noconftest $(ls tests/test_admin_*.py | grep -v test_admin_commands.py)
+        run: |
+          python -m pytest -q -rs --noconftest $(ls tests/test_admin_*.py | grep -v test_admin_commands.py) | tee pytest.log
+          ! grep -qE "could not import|Install admin_executor/requirements.txt" pytest.log
+
+  admin-integration:
+    name: Reserved commands through the backend (integration)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            admin_executor/requirements.txt
+      - name: Install both environments' dependencies (tests only; never deployed together)
+        run: python -m pip install -r requirements.txt -r admin_executor/requirements.txt
+      - name: Test the backend command API against a real broker and real passkey signatures
+        run: |
+          python -m pytest -q -rs tests/test_admin_commands.py | tee pytest.log
+          ! grep -qE "could not import|Install admin_executor/requirements.txt" pytest.log

@@ -40,7 +40,7 @@ python3 -m venv /tmp/admin-venv
 
 Before installing on the PC, also set `PLACET_TEST_SYSTEMD=1`: it checks the generated units against this host's binaries (CI skips it).
 
-GitHub Actions (`.github/workflows/checks.yml`) runs four jobs on every pull request and on `main`: documentation links, PWA (tests, lint, build), backend (with the built PWA) and the administrative package in its separate environment. Actions are pinned to commit SHAs; Dependabot proposes weekly updates as pull requests. CI never deploys: a release is installed only through a reserved command confirmed with a passkey (see [reserved commands](docs/plans/reserved-commands.md)).
+GitHub Actions (`.github/workflows/checks.yml`) runs five jobs on every pull request and on `main`: documentation links, PWA (tests, lint, build), backend (with the built PWA), the administrative package in its separate environment, and the backend command API against a real broker (`tests/test_admin_commands.py`, which needs both environments' dependencies: test-only, they are never installed together). A test module skipped for a missing dependency fails its job. Actions are pinned to commit SHAs; Dependabot proposes weekly updates as pull requests. CI never deploys: a release is installed only through a reserved command confirmed with a passkey (see [reserved commands](docs/plans/reserved-commands.md)).
 
 Please add tests with behavior changes. For provider integrations, also describe what you verified with the real app and on which version: automated tests cannot prove that an undocumented provider interface still behaves the same.
 
