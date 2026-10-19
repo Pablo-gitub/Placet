@@ -50,6 +50,8 @@ class BrokerServer(socketserver.UnixStreamServer):
     The installer must create distinct protected directories/groups for the web
     and backend sockets. Role checking also applies after the socket is opened.
     Sequential requests bound resource use; timeouts limit incomplete clients.
+    A permitted slow peer can delay the other socket by up to three seconds
+    while sending its request; neither socket provides privileged dispatch.
     """
     allow_reuse_address = False
 

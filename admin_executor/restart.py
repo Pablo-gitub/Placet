@@ -17,8 +17,10 @@ def run_fixed(argv, **options):
     return result.stdout.decode('utf-8', errors='strict')
 
 
-def backend_health():
-    connection = HTTPConnection('127.0.0.1', 8000, timeout=2)
+def backend_health(port):
+    if type(port) is not int or not 1 <= port <= 65535:
+        raise ValueError('Protected health port required')
+    connection = HTTPConnection('127.0.0.1', port, timeout=2)
     try:
         connection.request('GET', '/api/health')
         return connection.getresponse().status == 200
@@ -28,7 +30,7 @@ def backend_health():
         connection.close()
 
 
-def restart_service(unit, *, user=False, run=run_fixed, env=None, pause=time.sleep, health=backend_health):
+def restart_service(unit, *, user=False, run=run_fixed, env=None, pause=time.sleep, health=None):
     """A changed active invocation confirms restart, not application readiness.
 
     No retry after timeout: the manager may still be processing RestartUnit.
@@ -37,6 +39,8 @@ def restart_service(unit, *, user=False, run=run_fixed, env=None, pause=time.sle
     """
     if (unit, user) not in ((BACKEND, False), (BRIDGE, True)):
         raise ValueError('Unknown fixed service')
+    if not user and health is None:
+        raise ValueError('Configured backend health check required')
     prefix = ['/usr/bin/systemctl'] + (['--user'] if user else [])
     options = dict(timeout=10, env=ENV.copy() if env is None else env)
     show = prefix + ['show', unit, '--property=ActiveState,SubState,InvocationID,NRestarts']
@@ -69,12 +73,14 @@ def restart_service(unit, *, user=False, run=run_fixed, env=None, pause=time.sle
 
 
 class RestartHandlers:
-    def __init__(self, *, desktop_uid, desktop_gid, run=run_fixed, pause=time.sleep, health=backend_health):
+    def __init__(self, *, desktop_uid, desktop_gid, health_port, run=run_fixed, pause=time.sleep, health=None):
         if (type(desktop_uid) is not int or type(desktop_gid) is not int
                 or desktop_uid <= 0 or desktop_gid <= 0):
             raise ValueError('Explicit unprivileged desktop identity required')
+        if type(health_port) is not int or not 1 <= health_port <= 65535:
+            raise ValueError('Protected health port required')
         self.uid, self.gid, self.run = desktop_uid, desktop_gid, run
-        self.pause, self.health = pause, health
+        self.pause, self.health = pause, health if health is not None else lambda: backend_health(health_port)
 
     def __call__(self, action):
         if action == 'restart-backend':

@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 
 from .authorization import confirmation
 from .execution import ACTIONS, ExecutionStore
-from .jobs import canonical_proposal
+from .jobs import canonical_proposal, PROPOSAL_TTL_SECONDS
 
 
 SUMMARIES = {
@@ -47,9 +47,12 @@ class ConfirmationBroker:
 
     def catalogue(self):
         policy = self._policy()
+        with closing(sqlite3.connect(self.store.path)) as db:
+            recent = db.execute('SELECT id FROM confirmation_proposals ORDER BY created_at DESC,rowid DESC LIMIT 10').fetchall()
         return {'revision': policy.revision, 'execution_enabled': bool(policy.enabled),
                 'actions': [{'id': action, 'summary': SUMMARIES[action], 'parameters': {},
-                             'enabled': action in policy.enabled} for action in sorted(ACTIONS)]}
+                             'enabled': action in policy.enabled} for action in sorted(ACTIONS)],
+                'recent': [self.view(row[0]) for row in recent]}
 
     def propose(self, request_key, action, parameters):
         if not isinstance(request_key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', request_key):
@@ -74,7 +77,7 @@ class ConfirmationBroker:
         if not isinstance(identifier, str) or not re.fullmatch(r'[a-f0-9]{32}', identifier):
             raise ValueError('Invalid proposal ID')
         with closing(sqlite3.connect(self.store.path)) as db:
-            row = db.execute('SELECT canonical FROM confirmation_proposals WHERE id=?', (identifier,)).fetchone()
+            row = db.execute('SELECT canonical,created_at FROM confirmation_proposals WHERE id=?', (identifier,)).fetchone()
         if row is None:
             raise ValueError('Unknown proposal')
         try:
@@ -84,17 +87,21 @@ class ConfirmationBroker:
                 raise ValueError('Changed protected proposal')
         except (KeyError, TypeError) as error:
             raise ValueError('Invalid protected proposal') from error
-        return action, parameters
+        return action, parameters, row[1] + PROPOSAL_TTL_SECONDS
 
     def _operation(self, identifier):
-        action, parameters = self._proposal(identifier)
+        action, parameters, expires_at = self._proposal(identifier)
+        with closing(sqlite3.connect(self.store.path)) as db:
+            authorized = db.execute('SELECT 1 FROM proposal_jobs WHERE proposal_id=?', (identifier,)).fetchone()
+        if not authorized and time.time() >= expires_at:
+            raise ValueError('Proposal expired')
         if action not in self._policy().enabled:
             raise ValueError('Action is no longer enabled')
         return confirmation(action, parameters, installed_commit=None, artifact_sha256=None,
                             summary=SUMMARIES[action])
 
     def view(self, identifier):
-        action, parameters = self._proposal(identifier)
+        action, parameters, expires_at = self._proposal(identifier)
         policy = self._policy()
         with closing(sqlite3.connect(self.store.path)) as db:
             bound = db.execute('''SELECT p.job_id,a.operation FROM proposal_jobs p
@@ -106,9 +113,11 @@ class ConfirmationBroker:
                                  summary=SUMMARIES[action])
         if bound:
             operation = bound[1]
+        expired = not job_id and time.time() >= expires_at
         return {'id': identifier, 'action': action, 'operation': json.loads(operation),
-                'enabled': action in policy.enabled, 'return_url': self.return_url,
-                'state': status['state'] if status else 'authorized' if job_id else 'awaiting_confirmation',
+                'enabled': action in policy.enabled and not expired, 'return_url': self.return_url,
+                'confirmation_url': self.store.origin + '/?proposal=' + identifier, 'expires_at': expires_at,
+                'state': status['state'] if status else 'authorized' if job_id else 'expired' if expired else 'awaiting_confirmation',
                 'job_id': job_id, 'result_code': status['result_code'] if status else None,
                 'evidence': 'user_service_report' if action == 'restart-bridge' else 'system_service_health'}
 

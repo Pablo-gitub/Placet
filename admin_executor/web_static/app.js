@@ -106,7 +106,7 @@
       if (currentView) currentView = { ...currentView, enabled: false };
     }
     render();
-    if (alive && !["succeeded", "failed"].includes(currentView?.state)) poll = setTimeout(loadCommand, 2000);
+    if (alive && !["succeeded", "failed", "expired"].includes(currentView?.state)) poll = setTimeout(loadCommand, 2000);
   }
   confirm.addEventListener("click", async () => {
     if (busy || changed || !currentView?.enabled || currentView.state !== "awaiting_confirmation") return;

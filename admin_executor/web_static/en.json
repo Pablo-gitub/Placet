@@ -32,5 +32,6 @@
   "commandUnsupported": "Passkey confirmation is unavailable. Open this HTTPS page in Safari.",
   "bridgeEvidence": "Restart requested; the outcome is reported by the desktop user service. It is not independent proof of service health.",
   "restart-backendDescription": "Restart the Placet backend. The PWA will disconnect briefly and recover its saved state.",
-  "restart-bridgeDescription": "Restart the bridge in the configured desktop user session. Message delivery will pause briefly."
+  "restart-bridgeDescription": "Restart the bridge in the configured desktop user session. Message delivery will pause briefly.",
+  "expired": "Proposal expired. Create another from the PWA."
 }

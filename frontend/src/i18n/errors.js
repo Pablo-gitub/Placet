@@ -31,6 +31,8 @@ export function apiErrorDescriptor(body, status) {
     "upload.failed": "errors.uploadFailed",
     "bridge.offline": "errors.bridgeOffline",
     "bridge.timeout": "errors.bridgeTimeout",
+    "admin.unavailable": "errors.adminUnavailable",
+    "admin.rejected": "errors.adminRejected",
     "transcript.not_found": "errors.transcriptNotFound",
     "transcript.unsupported": "errors.transcriptUnsupported",
     "transcript.invalid": "errors.invalidSession",

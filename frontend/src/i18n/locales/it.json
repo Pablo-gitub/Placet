@@ -148,7 +148,9 @@
     "nodeNotInProject": "Il nodo della sessione non appartiene a questo progetto.",
     "relationSave": "Impossibile salvare la relazione. Controlla la connessione.",
     "forwardInvalid": "Scegli una sessione aperta diversa dal mittente e da chi ha risposto.",
-    "automation": "Impossibile modificare gli automatismi. Controlla la connessione."
+    "automation": "Impossibile modificare gli automatismi. Controlla la connessione.",
+    "adminUnavailable": "Servizio amministrativo non disponibile. Controlla lo stato salvato o ritenta la stessa proposta; non crearne un’altra.",
+    "adminRejected": "Questa proposta amministrativa non è disponibile o è stata rifiutata dalle regole."
   },
   "sessions": {
     "closed": "Chiusa",

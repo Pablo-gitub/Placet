@@ -148,7 +148,9 @@
     "nodeNotInProject": "The session's node does not belong to this project.",
     "relationSave": "Unable to save the relation. Check your connection.",
     "forwardInvalid": "Choose an open session other than the sender and the one that replied.",
-    "automation": "Unable to change the automation. Check your connection."
+    "automation": "Unable to change the automation. Check your connection.",
+    "adminUnavailable": "Administrative service unavailable. Check the saved state or retry the same proposal; do not create another one.",
+    "adminRejected": "This administrative proposal is unavailable or was rejected by policy."
   },
   "sessions": {
     "closed": "Closed",

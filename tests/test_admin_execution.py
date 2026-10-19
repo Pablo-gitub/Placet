@@ -129,7 +129,7 @@ def test_fixed_backend_restart_checks_new_invocation():
         if 'show' in argv:
             return 'ActiveState=active\nSubState=running\nNRestarts=0\nInvocationID=' + ('old' if len(calls) == 1 else 'new') + '\n'
         return ''
-    assert RestartHandlers(desktop_uid=1000, desktop_gid=1000, run=run,
+    assert RestartHandlers(health_port=8123, desktop_uid=1000, desktop_gid=1000, run=run,
                            pause=lambda _: None, health=lambda: True)('restart-backend') == 'succeeded'
     assert calls[1][0] == ['/usr/bin/systemctl', 'restart', 'placet-backend.service']
     assert all(c[1]['timeout'] <= 30 for c in calls)
@@ -139,7 +139,7 @@ def test_fixed_backend_restart_checks_new_invocation():
 def test_backend_unchanged_invocation_is_not_success():
     def run(argv, **kwargs):
         return 'ActiveState=active\nSubState=running\nInvocationID=same\n' if 'show' in argv else ''
-    handler = RestartHandlers(desktop_uid=1000, desktop_gid=1000, run=run)
+    handler = RestartHandlers(health_port=8123, desktop_uid=1000, desktop_gid=1000, run=run)
     assert handler('restart-backend') == 'outcome_unknown'
 
 
@@ -148,7 +148,7 @@ def test_bridge_worker_drops_privileges_and_cannot_take_free_arguments():
     def run(argv, **kwargs):
         calls.append((argv, kwargs))
         return 'succeeded\n'
-    handler = RestartHandlers(desktop_uid=1000, desktop_gid=1000, run=run)
+    handler = RestartHandlers(health_port=8123, desktop_uid=1000, desktop_gid=1000, run=run)
     assert handler('restart-bridge') == 'succeeded'
     argv, options = calls[0]
     assert argv == ['/usr/bin/python3', '-I', '/usr/local/lib/placet-admin/admin_executor/bridge_restart.py']
@@ -160,7 +160,7 @@ def test_bridge_worker_drops_privileges_and_cannot_take_free_arguments():
     with pytest.raises(ValueError):
         handler('some-shell-command')
     with pytest.raises(ValueError):
-        RestartHandlers(desktop_uid=0, desktop_gid=0)
+        RestartHandlers(health_port=8123, desktop_uid=0, desktop_gid=0)
 
 
 def test_lock_symlink_is_refused_without_execution(store, tmp_path):
@@ -179,7 +179,7 @@ def test_backend_timeout_after_request_is_uncertain():
         if 'restart' in argv:
             raise subprocess.TimeoutExpired(argv, kwargs['timeout'])
         return 'ActiveState=active\nSubState=running\nInvocationID=old\n'
-    assert RestartHandlers(desktop_uid=1000, desktop_gid=1000, run=run)('restart-backend') == 'outcome_unknown'
+    assert RestartHandlers(health_port=8123, desktop_uid=1000, desktop_gid=1000, run=run)('restart-backend') == 'outcome_unknown'
 
 
 def test_user_manager_missing_does_not_request_restart():
@@ -236,7 +236,7 @@ def test_backend_must_remain_stable_and_healthy_before_success(unstable, healthy
         number = sum('show' in c for c in calls)
         active = not (unstable and number == 3)
         return ('ActiveState=active\nSubState=running\n' if active else 'ActiveState=failed\nSubState=failed\n') + 'InvocationID=' + ('old' if number == 1 else 'new') + '\nNRestarts=0\n'
-    handler = RestartHandlers(desktop_uid=1000, desktop_gid=1000, run=run,
+    handler = RestartHandlers(health_port=8123, desktop_uid=1000, desktop_gid=1000, run=run,
                               pause=lambda _: None, health=lambda: healthy)
     assert handler('restart-backend') == 'failed'
 
@@ -264,6 +264,32 @@ def test_backend_automatic_restart_during_stabilization_is_failure():
         reads += 1
         return ('ActiveState=active\nSubState=running\nInvocationID=' + ('old' if reads == 1 else 'new')
                 + '\nNRestarts=' + ('1' if reads == 3 else '0') + '\n')
-    handler = RestartHandlers(desktop_uid=1000, desktop_gid=1000, run=run,
+    handler = RestartHandlers(health_port=8123, desktop_uid=1000, desktop_gid=1000, run=run,
                               pause=lambda _: None, health=lambda: True)
     assert handler('restart-backend') == 'failed'
+
+
+def test_health_port_is_validated_protected_configuration():
+    from admin_executor.supervisor import health_configuration
+    assert health_configuration({'port': 8123}) == 8123
+    for value in ({'port': 0}, {'port': 65536}, {'port': True}, {'port': '8000'},
+                  {'port': 8123, 'host': 'external.example'}, {}):
+        with pytest.raises(ValueError):
+            health_configuration(value)
+
+
+def test_backend_health_uses_only_configured_loopback_port(monkeypatch):
+    from admin_executor.restart import backend_health
+    calls = []
+    class Connection:
+        def __init__(self, host, port, timeout):
+            calls.append((host, port, timeout))
+        def request(self, method, path):
+            calls.append((method, path))
+        def getresponse(self):
+            return type('Response', (), {'status': 200})()
+        def close(self):
+            pass
+    monkeypatch.setattr('admin_executor.restart.HTTPConnection', Connection)
+    assert backend_health(8123) is True
+    assert calls == [('127.0.0.1', 8123, 2), ('GET', '/api/health')]

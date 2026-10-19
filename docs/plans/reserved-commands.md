@@ -208,6 +208,27 @@ page.
 
 ## Trust boundaries
 
+- The agent/desktop account must have no root-equivalent access. Control of a
+  rootful Docker daemon (including membership in `docker` with access to its
+  root socket) permits replacing host files and bypasses every boundary below.
+  Membership/access through `lxd`, `lxc`, `disk`, an exposed privileged daemon,
+  unattended administrative sudo or equivalent host powers must be assessed too.
+  Virtualization permissions such as `libvirt` require policy-specific review;
+  `kvm` alone is not automatically equivalent to root. Unreviewed administrative
+  access is not evidence of isolation.
+- The activation installer must fail closed if the desktop/agent UID retains
+  root-equivalent access, or if that access has not been assessed. Check NSS
+  membership and supplementary groups retained by running desktop/agent
+  processes: removing a group from account configuration does not remove it from
+  existing processes. Also reject desktop membership in the web/backend socket
+  groups, whether primary or supplementary; `SO_PEERCRED` is a second barrier,
+  not a reason to weaken socket permissions. This is a mandatory E preflight,
+  not implemented activation logic in the current bootstrap.
+- The operator chooses remediation: rootless Docker (for example for a personal
+  ntfy container), root-managed containers without desktop daemon access, or a
+  genuinely separate unprivileged agent account. These commits change no groups,
+  container setup, sudo rules or existing user sessions. Root-owned files and
+  passkeys cannot protect against an agent that already has root.
 - Agents and the bridge can propose an action and read the allowed outcomes.
   They cannot authorize, enrol credentials, change the protected catalogue or
   start a privileged job.
@@ -368,7 +389,9 @@ drops supplemental groups, GID and UID before running its protected helper,
 which addresses only `placet-bridge.service` on that user's manager. Missing
 user managers are not started. Backend success requires a new active invocation
 that remains stable for five seconds, with unchanged `NRestarts`, followed by
-HTTP 200 from the fixed `127.0.0.1:8000/api/health` endpoint. This is a point-in-time
+HTTP 200 from `127.0.0.1:<protected-port>/api/health`. The port must come from
+root-owned `health.json`, matching the deployed backend; neither hostname nor
+path is configurable, and no proposal supplies a port. This is a point-in-time
 check, not a future availability guarantee. Bridge results are explicitly
 labelled `user_service_report`: the desktop UID can influence the helper and
 manager, so this evidence must never authorize another action. Timeouts after a restart request
@@ -384,6 +407,12 @@ existing job; an unbound challenge replay is still rejected. No retry dispatches
 another effect. Previously authorized summaries remain the summaries displayed
 for those jobs even if the protected description changes later.
 
+Unconfirmed proposals expire 15 minutes after creation, independently of the
+60-second challenge. Expiration is checked before and after signature verification
+inside the authorization transaction. Reading or retrying an idempotency key
+does not renew it. Expired proposals remain readable and require a new explicit
+proposal from the PWA. Already authorized jobs do not expire under this rule.
+
 The web process calls the root broker over a bounded Unix protocol with mutual
 UID checks, never opens its credential database, and exposes no dispatch route.
 Distinct web/backend socket roles restrict the backend to catalogue, proposals
@@ -393,7 +422,15 @@ cause an automatic signature or authorization retry. English/Italian interaction
 tests and Chromium at 375 px use simulated browser credentials; cryptographic
 broker tests use real ES256 assertions. These are not live phone execution tests.
 
-Backend/PWA integration, root reconciliation, supervised units and the reviewed
+The human-only backend API is implemented: catalogue/public recent references,
+idempotent proposal creation and status reads. Agent/bridge tokens cannot use
+it. The ordinary backend client imports no administrative/crypto package, checks
+the broker's root UID, has no authorization/dispatch methods, and projects only
+public fields. Missing, unreachable or malformed catalogues expose no actions.
+Lost creation acknowledgements are recovered with the same request key, not a
+new proposal. Job state remains in administrative storage across backend restarts.
+
+The PWA Commands screen, root reconciliation, supervised units and the reviewed
 active-installation upgrade remain pending. No broker or supervisor unit is
 installed by the current bootstrap, and all catalogue entries remain disabled.
 Tests use injected restart handlers and never restart real services.

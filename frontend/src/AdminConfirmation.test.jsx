@@ -86,3 +86,11 @@ describe("protected administrative confirmation page", () => {
     expect(getCredential).not.toHaveBeenCalled();
   });
 });
+
+it("explains expired proposals without requesting another signature", async () => {
+  view = { ...view, state: "expired", enabled: false };
+  window.eval(source);
+  await waitFor(() => expect(document.querySelector("#command-state")?.textContent).toBe(messages.en.expired));
+  expect(document.querySelector("#confirm").hidden).toBe(true);
+  expect(getCredential).not.toHaveBeenCalled();
+});

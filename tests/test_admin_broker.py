@@ -188,3 +188,54 @@ def test_broker_entrypoint_refuses_nonroot(monkeypatch):
     monkeypatch.setattr('os.geteuid', lambda: 1000)
     with pytest.raises(ValueError, match='root'):
         main()
+
+
+def test_unconfirmed_proposal_expires_after_fifteen_minutes(broker):
+    service, private, _ = broker
+    identifier = proposal(service)
+    challenge = service.challenge(identifier)
+    with sqlite3.connect(service.store.path) as db:
+        db.execute('UPDATE confirmation_proposals SET created_at=created_at-901 WHERE id=?', (identifier,))
+    shown = service.view(identifier)
+    assert shown['state'] == 'expired'
+    assert shown['enabled'] is False
+    with pytest.raises(ValueError):
+        service.challenge(identifier)
+    with pytest.raises(ValueError):
+        service.authorize(identifier, challenge['id'], assertion(private, challenge))
+    with sqlite3.connect(service.store.path) as db:
+        assert db.execute('SELECT count(*) FROM authorized_jobs').fetchone()[0] == 0
+
+
+def test_authorized_proposal_does_not_expire_while_its_job_is_waiting(broker):
+    service, private, _ = broker
+    identifier = proposal(service)
+    challenge = service.challenge(identifier)
+    first = service.authorize(identifier, challenge['id'], assertion(private, challenge))
+    with sqlite3.connect(service.store.path) as db:
+        db.execute('UPDATE confirmation_proposals SET created_at=0')
+    assert service.view(identifier)['state'] == 'authorized'
+    assert service.challenge(identifier)['job_id'] == first['job_id']
+
+
+def test_proposal_expiring_during_verification_rolls_back_authorization(broker, monkeypatch):
+    import time
+    import webauthn
+    service, private, _ = broker
+    identifier = proposal(service)
+    now = time.time()
+    with sqlite3.connect(service.store.path) as db:
+        db.execute('UPDATE confirmation_proposals SET created_at=?', (now - 899,))
+    challenge = service.challenge(identifier)
+    response = assertion(private, challenge)
+    actual = webauthn.verify_authentication_response
+    def verify(**kwargs):
+        result = actual(**kwargs)
+        monkeypatch.setattr('admin_executor.authorization.time.time', lambda: now + 2)
+        return result
+    monkeypatch.setattr(webauthn, 'verify_authentication_response', verify)
+    with pytest.raises(ValueError, match='Proposal expired during verification'):
+        service.authorize(identifier, challenge['id'], response)
+    with sqlite3.connect(service.store.path) as db:
+        assert db.execute('SELECT count(*) FROM authorized_jobs').fetchone()[0] == 0
+        assert db.execute('SELECT consumed FROM challenges').fetchone()[0] == 0

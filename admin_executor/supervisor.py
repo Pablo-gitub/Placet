@@ -46,6 +46,13 @@ def configuration(catalogue, identity):
     return enabled, identity['uid'], identity['gid']
 
 
+def health_configuration(data):
+    if (not isinstance(data, dict) or set(data) != {'port'}
+            or type(data['port']) is not int or not 1 <= data['port'] <= 65535):
+        raise ValueError('A protected loopback health port is required')
+    return data['port']
+
+
 def protected_file(path):
     for parent in path.parents:
         metadata = parent.lstat()
@@ -95,7 +102,9 @@ def main():
         # without a daemon restart. A handler already running is not cancelled.
         enabled, uid, gid = configuration(json.loads(protected_file(CONFIG / 'catalogue.json')),
                                           json.loads(protected_file(CONFIG / 'desktop-identity.json')))
-        Supervisor(store, enabled=enabled, handler=RestartHandlers(desktop_uid=uid, desktop_gid=gid)).run_once()
+        port = health_configuration(json.loads(protected_file(CONFIG / 'health.json')))
+        Supervisor(store, enabled=enabled,
+                   handler=RestartHandlers(desktop_uid=uid, desktop_gid=gid, health_port=port)).run_once()
         time.sleep(1)
 
 

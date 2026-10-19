@@ -150,3 +150,10 @@ it("changes language through the visible selector and can withhold a reply", asy
   fireEvent.click(screen.getByRole("button", { name: "Do not forward" }));
   await waitFor(() => expect(screen.getByTestId("feedback-banner")).toHaveTextContent(en.return.rejected));
 });
+
+it.each(["en", "it"])("translates administrative errors without rendering broker diagnostics in %s", async (language) => {
+  await i18n.changeLanguage(language);
+  const catalog = language === "en" ? en : italian;
+  expect(apiErrorMessage({ code: "admin.unavailable", detail: "private broker diagnostic" }, 503, i18n.t.bind(i18n))).toBe(catalog.errors.adminUnavailable);
+  expect(apiErrorMessage({ code: "admin.rejected", detail: "private broker diagnostic" }, 409, i18n.t.bind(i18n))).toBe(catalog.errors.adminRejected);
+});

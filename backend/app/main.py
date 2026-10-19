@@ -68,6 +68,7 @@ from backend.app import envelopes
 from backend.app.upload_limits import MessageBodyLimit
 from backend.app.bridge_jobs import BridgeJobs, BridgeOffline, BridgeTimeout
 from backend.app.webpush import WebPush, allowed_endpoint
+from backend.app.admin_commands import AdminCommands, install_routes as install_admin_routes
 from backend.app.notifier import NtfyConfig, send_ntfy_alert, send_ntfy_notification, send_ntfy_turn_end, session_label
 
 logger = logging.getLogger(__name__)
@@ -278,6 +279,7 @@ def create_app(
     bridge_token: Optional[str] = None,
     transcripts_local: Optional[bool] = None,
     web_push: Optional[WebPush] = None,
+    admin_commands=None,
 ) -> FastAPI:
     # Waiters registered by long-polling calls, keyed by request id.
     request_waiters: Dict[int, Set[asyncio.Event]] = {}
@@ -485,6 +487,8 @@ def create_app(
 
     def principal(request: Request) -> Principal:
         return authenticator.identify(request)
+
+    install_admin_routes(app, principal, AdminCommands() if admin_commands is None else admin_commands)
 
     def get_or_404(request_id: int) -> RequestModel:
         req = db.get_request(request_id)

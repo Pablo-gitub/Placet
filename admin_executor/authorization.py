@@ -13,7 +13,7 @@ import time
 import uuid
 from urllib.parse import urlsplit
 
-from .jobs import canonical_proposal
+from .jobs import canonical_proposal, PROPOSAL_TTL_SECONDS
 
 
 def confirmation(action, parameters, *, installed_commit, artifact_sha256, summary):
@@ -140,12 +140,14 @@ class AuthorizationStore:
         with sqlite3.connect(self.path) as db:
             db.execute('BEGIN IMMEDIATE')
             if proposal_id is not None:
-                bound = db.execute('SELECT canonical FROM confirmation_proposals WHERE id=?', (proposal_id,)).fetchone()
+                bound = db.execute('SELECT canonical,created_at FROM confirmation_proposals WHERE id=?', (proposal_id,)).fetchone()
                 if not bound or bound[0] != canonical_proposal(proposal['action'], proposal['parameters']):
                     raise ValueError('Proposal binding changed')
                 existing = db.execute('SELECT job_id FROM proposal_jobs WHERE proposal_id=?', (proposal_id,)).fetchone()
                 if existing:
                     return {'job_id': existing[0], 'state': 'authorized'}
+                if time.time() >= bound[1] + PROPOSAL_TTL_SECONDS:
+                    raise ValueError('Proposal expired')
             credentials = db.execute("SELECT credential_id FROM credentials WHERE revoked = 0").fetchall()
             if not credentials:
                 raise ValueError("No administratively enrolled passkey")
@@ -187,6 +189,14 @@ class AuthorizationStore:
                 raise ValueError("Authorization challenge already consumed")
             if time.time() >= challenge[2]:
                 raise ValueError("Authorization challenge expired")
+            proposal_deadline = None
+            if proposal_id is not None:
+                intent = db.execute('SELECT created_at FROM confirmation_proposals WHERE id=?', (proposal_id,)).fetchone()
+                if intent is None:
+                    raise ValueError('Unknown proposal')
+                proposal_deadline = intent[0] + PROPOSAL_TTL_SECONDS
+                if time.time() >= proposal_deadline:
+                    raise ValueError('Proposal expired')
             credential = db.execute("SELECT public_key, sign_count FROM credentials WHERE credential_id = ? AND revoked = 0",
                                     (credential_id,)).fetchone()
             if not credential:
@@ -202,6 +212,8 @@ class AuthorizationStore:
                 raise ValueError("Credential identity mismatch")
             if time.time() >= challenge[2]:
                 raise ValueError("Authorization challenge expired during verification")
+            if proposal_deadline is not None and time.time() >= proposal_deadline:
+                raise ValueError('Proposal expired during verification')
             job_id = uuid.uuid4().hex
             db.execute("UPDATE credentials SET sign_count = ? WHERE credential_id = ?",
                        (verified.new_sign_count, credential_id))

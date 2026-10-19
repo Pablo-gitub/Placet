@@ -146,6 +146,33 @@ set socket groups, provide reconciliation and configure restart rate limits
 before enabling an action. Do not rerun the pre-service failed-bootstrap recovery
 against the active installation. Existing credentials must be preserved.
 
+The activation preflight must reject root-equivalent desktop/agent access,
+including a writable rootful Docker socket or retained `docker`/`lxd`/`disk`
+group access, and desktop membership in either administrative socket group.
+Account membership and running-process supplementary groups both matter.
+Rootless Docker or a separate agent account are operator decisions, never an
+automatic remediation. Review other virtualization/admin privileges explicitly.
+The installer must also provision protected `health.json` with only a validated
+backend port (1–65535); the health hostname and `/api/health` path stay fixed.
+
+### Human backend proposal API (implemented, not deployed)
+
+`GET /api/admin/catalogue` returns enabled actions and up to ten recent public
+proposal references. If the broker is missing, unreachable or malformed, it
+returns `status: not_configured`, no actions and `execution_enabled: false`.
+`POST /api/admin/proposals` accepts only `request_key`, a fixed restart action
+and empty parameters; its result contains the protected confirmation URL.
+`GET /api/admin/proposals/{id}` recovers durable state after backend restart.
+All three routes require the human listener/identity; agent and bridge tokens
+are refused. No route accepts an assertion or dispatches a service restart.
+
+Preserve the same request key after a timeout/lost acknowledgement. Retrying
+creation recovers the original intent; it does not renew the 15-minute lifetime
+or authorize it. A different key is a different explicit human intent. Expired
+proposals remain readable, show an expiration message and cannot be signed.
+The lifetime is checked inside the cryptographic transaction as well as before
+challenge generation; authorized jobs remain visible after that lifetime.
+
 Tests cover HTTP origin/host boundaries, invitations, single-use response staging,
 actual WebAuthn signatures/registration, privilege checks, runtime copying and
 systemd syntax. Chromium at 360/390px was checked in English and Italian,
@@ -154,7 +181,8 @@ a physical iPhone/Face ID test. The actual system Python runtime relocation was
 tested; the privileged DynamicUser installation still needs a live check.
 
 The confirmation endpoints and restart execution core have offline coverage;
-they are not installed or operational. The Commands screen, backend integration,
+they are not installed or operational. Backend integration is implemented but
+not deployed. The Commands screen,
 root-only reconciliation and supervised activation remain pending, along with
 the complete isolated deploy/build path. An enrolled passkey alone grants no
 ability to run a command.

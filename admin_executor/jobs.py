@@ -13,6 +13,7 @@ from pathlib import Path
 
 
 CATALOGUE_REVISION = 1
+PROPOSAL_TTL_SECONDS = 15 * 60
 CATALOGUE = {
     "deploy": frozenset({"commit"}),
     "restart-backend": frozenset(),
