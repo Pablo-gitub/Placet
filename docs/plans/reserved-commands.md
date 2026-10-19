@@ -136,7 +136,8 @@ resource bounds and rejection of untrusted build scripts as root.
   Registration and revocation methods require a root-authorized terminal context;
   no network enrollment endpoint exists. Changing origin requires an explicit
   credential migration. Neither a cryptographic signature nor an authorized row
-  dispatches a privileged action: supervisor integration is still absent.
+  dispatches a privileged action by itself. The offline restart supervisor is
+  described under Operational status; network integration remains absent.
 
 Passkey tests use actual ES256 signatures and registration data; they do not
 demonstrate Face ID compatibility on a physical iPhone. Install the separate
@@ -349,6 +350,31 @@ opens the same confirmation; no new authorization shortcut. Test missing
 references, an updated catalogue and text that misrepresents the real action.
 
 ## Operational status
+
+The restart execution core is implemented but not installed or enabled. It
+serializes dispatch under an exclusive lock, claims each authorized job once,
+and keeps execution states/events in the protected authorization database.
+Recovery marks interrupted work as `outcome_unknown`, without retrying the
+restart. Unresolved uncertain outcomes also block later jobs: a timed-out
+manager request might still take effect. A root-only reconciliation workflow
+must be provided before enabling the supervisor. Disabled, unknown,
+noncanonical or changed handler operations fail
+before any effect. Public status excludes WebAuthn assertions and credentials.
+
+The fixed backend handler restarts `placet-backend.service`. The bridge handler
+drops supplemental groups, GID and UID before running its protected helper,
+which addresses only `placet-bridge.service` on that user's manager. Missing
+user managers are not started. Success means a new active systemd invocation,
+not an application-level health guarantee. Timeouts after a restart request
+remain uncertain. The root entry point accepts no arguments and reads only
+protected catalogue/desktop identity files; the latter is not provisioned yet.
+
+The authorization broker, binding multiple challenges to one proposal, HTTP
+confirmation, PWA integration and active-installation upgrade remain pending.
+The existing single-use WebAuthn challenge behavior is unchanged: replay is
+rejected, and polling an existing job does not dispatch it again. No supervisor
+unit is installed by the current bootstrap, and all catalogue entries remain
+disabled. Tests use injected handlers and never restart real services.
 
 This document defines the plan; it installs no services, passkeys, sudo
 privileges or new operational routes. The protected bootstrap will need an
