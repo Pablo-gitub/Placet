@@ -620,9 +620,27 @@ def create_app(
             raise ProductError(422, "request.no_recipient", "Specify recipient_id or target_node.")
 
         # The relation is known before anything is created (RFC-04/06).
-        sender_session = created_sender_session(who)
+        if req.sender_session_id:
+            own = db.get_session(req.sender_session_id)
+            if own is None or own.agent_id != who.id:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                                    detail="sender_session_id is not a session of this agent.")
+            sender_session = own.id
+        else:
+            sender_session = created_sender_session(who)
         relation = (relation_of(sender_session, req.recipient_session_id, req.relation_type_id)
                     if req.recipient_id != "human" else None)
+        if req.target_node and relation is None:
+            # Addressing a node means using a relation: never fall back to an
+            # ad hoc request the sender did not ask for.
+            if sender_session is None:
+                raise ProductError(409, "relation.sender_unknown",
+                                   "Placet cannot tell which session is sending: pass sender_session_id "
+                                   "(your session ID). Nothing was sent.")
+            raise ProductError(409, "relation.not_found",
+                               f"No relation from your node to {req.target_node!r}"
+                               + (f" of type {req.relation_type!r}" if req.relation_type else "")
+                               + ". Nothing was sent; see placet_list_relations.")
         rule = (db.get_relation_effective_policy(relation.id)["rule"]
                 if relation is not None else db.get_relation_rule().strip())
         if relation is not None and relation.approval == "automatic" and rule and not req.rule_acknowledged:
@@ -660,7 +678,7 @@ def create_app(
 
         if req.recipient_session_id is not None:
             check_target_session(req.recipient_session_id, req.recipient_id)
-            if req.recipient_session_id == created_sender_session(who):
+            if req.recipient_session_id == sender_session:
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail="A session cannot send a request to itself.",
@@ -687,8 +705,7 @@ def create_app(
         # The session making a request is in the middle of a turn: if exactly
         # one session of this agent is busy, it is the sender. The PostToolUse
         # hook links it too, but must not be the only way.
-        busy = [s for s in db.list_sessions(agent_id=who.id) if s.state == "busy"]
-        if len(busy) == 1 and db.link_sender_session(created.id, busy[0].id, who.id):
+        if sender_session and db.link_sender_session(created.id, sender_session, who.id):
             created = db.get_request(created.id)
 
         # RFC-04/05: the relation between the two nodes decides the policy.

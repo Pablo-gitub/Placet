@@ -239,7 +239,7 @@ async def test_a_relation_opens_a_route_agents_md_does_not_list(env, tmp_path):
     })
     app = create_app(db=db, config=config)
     a, b = await two_nodes(app, db)
-    assert (await post(app, {"target_node": "builder"})).status_code == 403
+    assert (await post(app, {"target_node": "builder"})).status_code == 409  # no relation: refused, never ad hoc
     db.create_relation(a.id, b.id, db.create_relation_type("review", "").id, "manual")
     assert (await post(app, {"target_node": "builder"})).status_code == 201
 
@@ -358,3 +358,36 @@ async def test_stop_all_holds_queued_prompts_until_resumed(env):
         assert (await human.put("/api/automation", json={"max_hops": 0})).status_code == 422
     async with agent_client(app, "tok-claude") as client:
         assert (await client.post("/api/automation/stop")).status_code in (401, 403, 404)
+
+
+@pytest.mark.asyncio
+async def test_the_sender_names_its_session_when_several_are_busy(env):
+    app, db = env
+    a, b = await two_nodes(app, db)
+    review = db.create_relation_type("review", "Ask for a code review")
+    db.create_relation(a.id, b.id, review.id, "automatic")
+    # A second busy Claude session: the backend can no longer guess the sender.
+    await event(app, "claude", "cl2", {"event": "start", "provider": "claude-code", "cwd": "/q"})
+    await event(app, "claude", "cl2", {"event": "prompt", "provider": "claude-code"})
+    before = len(db.list_requests())
+    resp = await post(app, {"target_node": "builder"})
+    assert resp.status_code == 409 and resp.json()["code"] == "relation.sender_unknown"
+    assert len(db.list_requests()) == before  # never a silent ad hoc request
+    resp = await post(app, {"target_node": "builder", "sender_session_id": "cl"})
+    assert resp.status_code == 201, resp.text
+    out = resp.json()
+    assert out["delivery_policy"] == "automatic" and out["sender_session_id"] == "cl"
+    assert out["relation_id"] == db.find_relation(a.id, b.id).id
+    # Only a session of the calling agent.
+    resp = await post(app, {"target_node": "builder", "sender_session_id": "cx"})
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_a_node_without_a_relation_is_refused(env):
+    app, db = env
+    await two_nodes(app, db)
+    before = len(db.list_requests())
+    resp = await post(app, {"target_node": "builder"})
+    assert resp.status_code == 409 and resp.json()["code"] == "relation.not_found"
+    assert len(db.list_requests()) == before

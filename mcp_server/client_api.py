@@ -73,6 +73,7 @@ class PlacetClient:
         relation_type: Optional[str] = None,
         rule_acknowledged: bool = False,
         context: Optional[str] = None,
+        sender_session_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         timeout = max(5, min(int(timeout_seconds), 600))
         url = f"{self.base_url}/api/requests"
@@ -80,6 +81,7 @@ class PlacetClient:
             "sender_id": self.agent_id,
             "recipient_id": target_agent,
             "recipient_session_id": target_session,
+            "sender_session_id": sender_session_id,
             "target_node": target_node,
             "relation_type": relation_type,
             "rule_acknowledged": rule_acknowledged,

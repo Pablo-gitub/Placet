@@ -112,6 +112,9 @@ class RequestCreate(BaseModel):
     # Deliver to this session of the recipient agent (default: any of its
     # reachable sessions, or its tmux session).
     recipient_session_id: Optional[str] = None
+    # The calling session, when the agent knows it; otherwise the backend
+    # takes the agent's only busy session.
+    sender_session_id: Optional[str] = Field(None, max_length=100)
     # RFC-08: the relation type the sender means; needed when A -> B has
     # relations of several types.
     relation_type_id: Optional[int] = None

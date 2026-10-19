@@ -69,6 +69,10 @@ def test_send_to_agent_tool_logic(mock_client):
         assert res["status"] == "COMPLETED"
         assert "Ho analizzato" in res["response"]["content"]
 
+        mock_client.send_to_agent(target_agent=None, target_node="builder", prompt="p",
+                                  sender_session_id="sess-1")
+        assert mock_post.call_args.kwargs["json"]["sender_session_id"] == "sess-1"
+
 
 def test_reply_tool_logic(mock_client):
     with patch("httpx.Client.post") as mock_post:

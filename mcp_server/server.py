@@ -106,6 +106,7 @@ def placet_send_to_agent(
     target_session: Optional[str] = None,
     timeout_seconds: int = 180,
     priority: Optional[PriorityLevel] = None,
+    session_id: Optional[str] = None,
 ) -> str:
     """
     Send a prompt to another session through Placet.
@@ -117,6 +118,9 @@ def placet_send_to_agent(
       name from placet_list_relations. Prefer this when you have relations.
     - `target_agent` (+ optional `target_session` from placet_list_agents): an
       ad hoc request, always reviewed by the human.
+`session_id` is your own session ID: pass it (as for placet_list_relations)
+when Placet cannot tell which session is sending; with `target_node`, a
+missing sender or relation is an error and nothing is sent.
     The result says `delivery_policy`: "manual" means the human may edit or
     reject the prompt; "automatic" means it was delivered without review.
     If the result status is RULE_ACKNOWLEDGEMENT_REQUIRED, NOTHING was sent:
@@ -148,6 +152,7 @@ def placet_send_to_agent(
             target_node=target_node,
             relation_type=relation_type,
             rule_acknowledged=rule_acknowledged,
+            sender_session_id=session_id,
         )
         return json.dumps(res, indent=2, ensure_ascii=False)
     except Exception as e:
