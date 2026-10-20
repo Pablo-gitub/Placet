@@ -241,6 +241,7 @@ async def test_a_followed_session_notifies_the_end_of_its_turn(setup, monkeypatc
         await codex.post("/api/sessions/cx1/events", json={"event": "prompt"})
         await codex.post("/api/sessions/cx1/events", json={"event": "stop", "last_message": "fatto"})
     assert sent == []  # not followed
+    db.set_notification_preferences({"needs_you": True, "problems": True, "turn_end": "all"})
     db.set_session_pinned("cx1", True)
     async with agent_client(app, "tok-codex") as codex:
         await codex.post("/api/sessions/cx1/events", json={"event": "prompt", "title": "Review PR"})

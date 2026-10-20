@@ -218,6 +218,42 @@ class Database:
                     conn.execute("INSERT INTO app_settings (key, value) VALUES (?, ?)"
                                  " ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
 
+    DEFAULT_NOTIFICATION_PREFERENCES = {
+        "needs_you": True,
+        "problems": True,
+        "turn_end": "placet",
+    }
+
+    def get_notification_preferences(self) -> Dict[str, Any]:
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT value FROM app_settings WHERE key = 'notification_preferences'").fetchone()
+        if not row:
+            return dict(self.DEFAULT_NOTIFICATION_PREFERENCES)
+        try:
+            stored = json.loads(row[0])
+            if not isinstance(stored, dict):
+                return dict(self.DEFAULT_NOTIFICATION_PREFERENCES)
+            return {
+                "needs_you": bool(stored.get("needs_you", True)),
+                "problems": bool(stored.get("problems", True)),
+                "turn_end": stored.get("turn_end") if stored.get("turn_end") in ("all", "placet", "off") else "placet",
+            }
+        except Exception:
+            return dict(self.DEFAULT_NOTIFICATION_PREFERENCES)
+
+    def set_notification_preferences(self, prefs: Dict[str, Any]) -> None:
+        val = {
+            "needs_you": bool(prefs.get("needs_you", True)),
+            "problems": bool(prefs.get("problems", True)),
+            "turn_end": prefs.get("turn_end") if prefs.get("turn_end") in ("all", "placet", "off") else "placet",
+        }
+        with self._get_connection() as conn:
+            conn.execute(
+                "INSERT INTO app_settings (key, value) VALUES ('notification_preferences', ?)"
+                " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (json.dumps(val),),
+            )
+
     def chain_start(self, session_id: Optional[str]) -> Tuple[Optional[int], int]:
         """
         The request whose turn the session is running, and the consecutive

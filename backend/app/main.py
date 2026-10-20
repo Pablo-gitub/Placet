@@ -34,6 +34,7 @@ from backend.app.database import (
     compose_project_instructions,
 )
 from backend.app.models import (
+    NotificationSettings,
     ProviderUsage,
     UsageReport,
     RequestCreate,
@@ -338,6 +339,13 @@ def create_app(
         task.add_done_callback(background_alerts.discard)
 
     def alert(req_id: int, problem: str):
+        prefs = db.get_notification_preferences()
+        if problem == "return_waiting":
+            if not prefs.get("needs_you", True):
+                return
+        else:
+            if not prefs.get("problems", True):
+                return
         req = db.get_request(req_id)
         if req is None:
             return
@@ -536,8 +544,14 @@ def create_app(
     # A followed session's turn ends: at most one quiet notification a minute each.
     turn_end_notified: Dict[str, float] = {}
 
-    def notify_turn_end(session: SessionModel, last_message: Optional[str]) -> None:
+    def notify_turn_end(session: SessionModel, last_message: Optional[str], is_placet: bool = False) -> None:
         if not session.pinned or session.excluded:
+            return
+        prefs = db.get_notification_preferences()
+        mode = prefs.get("turn_end", "placet")
+        if mode == "off":
+            return
+        if mode == "placet" and not is_placet:
             return
         loop_time = asyncio.get_running_loop().time()
         if loop_time - turn_end_notified.get(session.id, -TURN_END_NOTIFY_GAP) < TURN_END_NOTIFY_GAP:
@@ -594,6 +608,19 @@ def create_app(
         db.set_setting("claude_auto_renew", "true" if payload.enabled else "false")
         response.headers["Cache-Control"] = "no-store"
         return {"enabled": db.get_setting("claude_auto_renew") == "true"}
+
+    @app.get("/api/settings/notifications", response_model=NotificationSettings)
+    async def get_notification_settings(response: Response, who: Principal = Depends(principal)):
+        require_human(who)
+        response.headers["Cache-Control"] = "no-store"
+        return db.get_notification_preferences()
+
+    @app.put("/api/settings/notifications", response_model=NotificationSettings)
+    async def set_notification_settings(payload: NotificationSettings, response: Response, who: Principal = Depends(principal)):
+        require_human(who)
+        db.set_notification_preferences(payload.model_dump())
+        response.headers["Cache-Control"] = "no-store"
+        return db.get_notification_preferences()
 
     def usage_guard() -> Dict[str, object]:
         def percent(key: str, default: int) -> int:
@@ -829,20 +856,22 @@ def create_app(
             )
         else:
             # Send mobile notification
-            background_tasks.add_task(
-                send_ntfy_notification,
-                request=created,
-                cfg=replace(ntfy, language=db.get_background_language()),
-                origin=origin_of(created),
-            )
-            lang = db.get_background_language()
-            sender = origin_of(created) or created.sender_id
-            web_push_later(
-                text("notify.question", lang, sender=sender) if created.recipient_id == "human"
-                else text("notify.review", lang, sender=sender, recipient=created.recipient_id),
-                text("notify.public", lang, sender=created.sender_id),
-                f"/#request-{created.id}", f"request-{created.id}",
-                "high" if created.priority in (Priority.HIGH, Priority.URGENT) else "normal")
+            prefs = db.get_notification_preferences()
+            if prefs.get("needs_you", True):
+                background_tasks.add_task(
+                    send_ntfy_notification,
+                    request=created,
+                    cfg=replace(ntfy, language=db.get_background_language()),
+                    origin=origin_of(created),
+                )
+                lang = db.get_background_language()
+                sender = origin_of(created) or created.sender_id
+                web_push_later(
+                    text("notify.question", lang, sender=sender) if created.recipient_id == "human"
+                    else text("notify.review", lang, sender=sender, recipient=created.recipient_id),
+                    text("notify.public", lang, sender=created.sender_id),
+                    f"/#request-{created.id}", f"request-{created.id}",
+                    "high" if created.priority in (Priority.HIGH, Priority.URGENT) else "normal")
         notify_change(created.id)
 
         extra: Dict[str, object] = {}
@@ -1272,9 +1301,11 @@ def create_app(
             db.set_session_state(session_id, "busy", turn_request_id)
             result["turn_request_id"] = turn_request_id
         elif payload.event == "stop":
+            was_busy = session.state == "busy"
+            is_placet = (session.turn_request_id is not None) or bool(db.steered_in_turn(session_id))
             db.set_session_state(session_id, "idle")
-            if session.state == "busy":
-                notify_turn_end(session, payload.last_message)
+            if was_busy:
+                notify_turn_end(session, payload.last_message, is_placet=is_placet)
             if session.turn_request_id is not None:
                 db.set_execution(session.turn_request_id, "completed", actor=f"{who.actor}:hook",
                                  source=source)
