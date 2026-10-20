@@ -4,7 +4,7 @@
 
 Placet lets agents running in different sessions (Claude Code, Gemini CLI /
 Antigravity, OpenAI Codex) cooperate by exchanging tasks and prompts, and gives
-you a control point on your phone (through Tailscale and `ntfy` push
+you a control point on your phone (through Tailscale and Web Push
 notifications) to review, edit and approve every prompt before it runs.
 
 ---
@@ -14,7 +14,7 @@ notifications) to review, edit and approve every prompt before it runs.
 ```text
  ┌────────────────────────────────────────────────────────┐
  │                         Phone                          │
- │  • ntfy push notifications linking to the request      │
+ │  • Web Push notifications linking to the request       │
  │  • PWA (Tailscale HTTPS): decisions, edits, history    │
  └───────────────────────────▲────────────────────────────┘
                              │ REST API / SSE
@@ -133,7 +133,9 @@ PLACET_DEV_LOGIN=you@github npx vite
 ```
 `PLACET_DEV_LOGIN` must be listed in `PLACET_ALLOWED_USERS`. The dev server listens on `127.0.0.1` only.
 
-### 6. Push notifications with self-hosted ntfy
+### 6. Optional: push notifications with self-hosted ntfy
+
+Web Push (next section) needs no extra server and is the recommended channel; set up ntfy only for devices without Web Push.
 
 A notification announces the request and opens the PWA. It has no Approve/Reject buttons: decisions are made only in the PWA, with the full text in view. Prompt and context are included in the notification only if the ntfy server is private; with the public `ntfy.sh` the notification only says who wrote.
 
@@ -293,8 +295,8 @@ Add Placet to your client's MCP configuration (e.g. `claude_desktop_config.json`
 1. `placet_ask_human(question, options, multiple, context, timeout_seconds)` (`context` optional)
    - Asks the human for a decision or a choice on the phone.
    - Without `options` it is a confirmation question (approve/reject) with an optional note. With `options` it is a single choice, or a multiple one with `multiple=True`. The free-text "Other" option is always available and must not be passed among the options. The server waits at least 60 seconds for questions to the human.
-2. `placet_send_to_agent(target_node | target_agent, prompt, relation_type, rule_acknowledged, timeout_seconds)`
-   - Sends a task to another session. `target_node` (with `relation_type` when several types connect the two nodes) uses the relations the user created; `target_agent` (optionally with `target_session`) is an ad hoc request, always reviewed. `prompt_file` can supply a Markdown prompt. The result reports `delivery_policy` (`automatic` or `manual`).
+2. `placet_send_to_agent(target_node | target_agent, prompt, relation_type, rule_acknowledged, session_id, timeout_seconds)`
+   - Sends a task to another session. `target_node` (with `relation_type` when several types connect the two nodes) uses the relations the user created; `target_agent` (optionally with `target_session`) is an ad hoc request, always reviewed. `prompt_file` can supply a Markdown prompt. The result reports `delivery_policy` (`automatic` or `manual`). `session_id` is the caller's own session: pass it so the backend knows which node is sending when the agent has several busy sessions; a `target_node` send without an identifiable sender or matching relation is refused with 409 and sends nothing.
    - On an automatic relation, when the user has set a general rule, the first call sends nothing and returns `RULE_ACKNOWLEDGEMENT_REQUIRED` with the rule; the agent sends again with `rule_acknowledged=true` only if the rule does not tell it to stop or ask first. This happens on every automatic send.
    - The tool no longer takes `context` (RF-05b): the reviewer can read the sender's chat.
 3. `placet_list_relations(session_id)`
