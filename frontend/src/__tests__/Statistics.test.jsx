@@ -135,8 +135,53 @@ describe("Statistics view (RF-64)", () => {
     expect(screen.getByTestId("stats-projects")).toHaveTextContent("Placet");
     expect(screen.getByTestId("stats-projects")).toHaveTextContent("Senza progetto");
 
-    // Check provider usage chart
-    expect(screen.getByTestId("stats-usage-chart-claude-code-5h")).toBeInTheDocument();
+    // Check provider usage chart uses provider label "Claude"
+    const usageChart = screen.getByTestId("stats-usage-chart-claude-code-5h");
+    expect(usageChart).toBeInTheDocument();
+    expect(usageChart).toHaveTextContent("Claude");
+
+    // Check decisions section renders all outcomes
+    const outcomesSection = screen.getByTestId("stats-outcomes");
+    expect(outcomesSection).toBeInTheDocument();
+    expect(outcomesSection).toHaveTextContent("12"); // approved
+    expect(outcomesSection).toHaveTextContent("2");  // edited
+    expect(outcomesSection).toHaveTextContent("3");  // rejected
+    expect(outcomesSection).toHaveTextContent("1");  // expired
+    expect(outcomesSection).toHaveTextContent("0");  // cancelled
+  });
+
+  it("does not render bar or percentage for days without usage samples", async () => {
+    const statsWithNull = {
+      ...sampleStats,
+      usage: [
+        {
+          provider: "claude-code",
+          window: "5h",
+          bucket_id: "5h",
+          bucket_group: null,
+          threshold: 80,
+          threshold_days: 0,
+          peaks: [
+            { date: "2026-10-14", peak_used_percent: null },
+            { date: "2026-10-15", peak_used_percent: 75.0 },
+          ],
+        },
+      ],
+    };
+    mockStatsFetch(statsWithNull);
+    render(<Statistics onBack={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByTestId("stats-usage-chart-claude-code-5h")).toBeInTheDocument());
+
+    const usageChart = screen.getByTestId("stats-usage-chart-claude-code-5h");
+    // Day 2026-10-14 has peak_used_percent: null, so it shouldn't show a bar or percentage label
+    const nullDayGroup = usageChart.querySelector('[data-date="2026-10-14"]');
+    expect(nullDayGroup.querySelector("rect.stats-chart-bar")).toBeNull();
+    expect(nullDayGroup.querySelector(".stats-chart-val-text")).toBeNull();
+    expect(nullDayGroup).not.toHaveTextContent("%");
+    // Day 2026-10-15 has peak_used_percent: 75, so it should render the bar and text
+    expect(usageChart.querySelector('[data-date="2026-10-15"] rect.stats-chart-bar')).not.toBeNull();
+    expect(usageChart).toHaveTextContent("75%");
   });
 
   it("changes period using chips (today, 7d, 30d, custom)", async () => {
@@ -184,6 +229,19 @@ describe("Statistics view (RF-64)", () => {
     render(<Statistics onBack={vi.fn()} />);
 
     await waitFor(() => expect(screen.getByTestId("stats-no-usage")).toBeInTheDocument());
+  });
+
+  it("displays error message when stats fetch fails", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 422,
+      json: () => Promise.resolve({ code: "stats.invalid_date" }),
+    });
+    render(<Statistics onBack={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent("Formato data non valido (atteso AAAA-MM-GG).");
+    });
   });
 
   it("calls onBack when back button is clicked", async () => {

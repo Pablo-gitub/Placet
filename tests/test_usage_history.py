@@ -98,7 +98,7 @@ async def test_usage_history_recording_conditions(env):
         assert res.status_code == 200
         samples = get_samples(db, "codex")
         assert len(samples) == 6
-        assert samples[4]["observed_at"] == t4.isoformat()
+        assert samples[4]["observed_at"] == t4.strftime("%Y-%m-%dT%H:%M:%SZ")
 
         # 5. Reset change (2 minutes after t4) is recorded
         t5 = t4 + timedelta(minutes=2)
@@ -150,7 +150,7 @@ async def test_usage_history_retention_purges_old_samples(env):
         observed = [r["observed_at"] for r in rows]
         assert old_time not in observed
         assert recent_time in observed
-        assert now.isoformat() in observed
+        assert now.strftime("%Y-%m-%dT%H:%M:%SZ") in observed
 
 
 def test_migration_applies_on_existing_database(tmp_path):
@@ -180,3 +180,37 @@ def test_migration_applies_on_existing_database(tmp_path):
         # Check schema_migrations contains the migration
         migrated = conn.execute("SELECT 1 FROM schema_migrations WHERE name = 'usage_samples_v1'").fetchone()
         assert migrated is not None
+
+
+@pytest.mark.asyncio
+async def test_usage_history_mixed_timestamp_formats_normalized(env):
+    app, db = env
+    # First report with +00:00 format
+    t1 = "2026-10-20T12:00:00+00:00"
+    buckets = [
+        {"id": "5h", "window": "5h", "used_percent": 50.0, "resets_at": "2026-10-20T17:00:00+00:00"}
+    ]
+    recorded = db.record_usage_samples("codex", buckets, observed_at=t1)
+    assert recorded is True
+
+    # Verify normalized in SQLite table to canonical format
+    with db._get_connection() as conn:
+        row = conn.execute("SELECT observed_at, resets_at FROM usage_samples WHERE provider = 'codex'").fetchone()
+        assert row["observed_at"] == "2026-10-20T12:00:00Z"
+        assert row["resets_at"] == "2026-10-20T17:00:00Z"
+
+    # Second report 5 minutes later with Z format and same usage: must NOT be recorded (elapsed 300s < 600s)
+    t2 = "2026-10-20T12:05:00Z"
+    recorded2 = db.record_usage_samples("codex", buckets, observed_at=t2)
+    assert recorded2 is False
+
+    # Third report 11 minutes after t1 with +00:00 format and microseconds: must be recorded (elapsed 660s >= 600s)
+    t3 = "2026-10-20T12:11:00.123456+00:00"
+    recorded3 = db.record_usage_samples("codex", buckets, observed_at=t3)
+    assert recorded3 is True
+    with db._get_connection() as conn:
+        rows = conn.execute("SELECT observed_at FROM usage_samples WHERE provider = 'codex' ORDER BY observed_at ASC").fetchall()
+        assert len(rows) == 2
+        assert rows[0]["observed_at"] == "2026-10-20T12:00:00Z"
+        assert rows[1]["observed_at"] == "2026-10-20T12:11:00Z"
+

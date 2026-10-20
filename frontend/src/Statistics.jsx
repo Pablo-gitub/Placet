@@ -1,6 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, BarChart2, ShieldAlert } from "lucide-react";
+import { providerOf } from "./sessionInfo";
+import { apiErrorMessage } from "./i18n/errors";
+
+function formatProviderLabel(prov, t) {
+  if (!prov) return "";
+  if (prov === "human") return t("stats.human");
+  return providerOf({ provider: prov, agent_id: prov }).label;
+}
 
 function formatYMD(date) {
   const y = date.getFullYear();
@@ -44,34 +52,38 @@ export default function Statistics({ onBack }) {
 
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     let active = true;
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
     const params = new URLSearchParams({ from: dateRange.from, to: dateRange.to, tz });
     fetch(`/api/stats?${params.toString()}`)
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to fetch stats");
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          const msg = body?.code ? apiErrorMessage(body, res.status, t) : t("stats.loadError");
+          throw new Error(msg);
+        }
         return res.json();
       })
       .then((data) => {
         if (active) {
           setStats(data);
-          setError(false);
+          setError(null);
           setLoading(false);
         }
       })
-      .catch(() => {
+      .catch((err) => {
         if (active) {
-          setError(true);
+          setError(err?.message || t("stats.loadError"));
           setLoading(false);
         }
       });
     return () => {
       active = false;
     };
-  }, [dateRange]);
+  }, [dateRange, t]);
 
   function handleSelectPeriod(key) {
     setPeriod(key);
@@ -195,7 +207,7 @@ export default function Statistics({ onBack }) {
       {loading && !stats && <p role="status" className="stats-notice">{t("stats.loading")}</p>}
       {error && (
         <p role="status" className="stats-notice error">
-          <ShieldAlert size={16} /> {t("stats.loadError")}
+          <ShieldAlert size={16} /> {typeof error === "string" ? error : t("stats.loadError")}
         </p>
       )}
 
@@ -248,7 +260,7 @@ export default function Statistics({ onBack }) {
                     const shortDate = d.date.slice(5); // MM-DD
                     return (
                       <g key={d.date} className="stats-chart-bar-group">
-                        <title>{`${d.date}: ${d.count} requests (${formatReplyTime(d.mean_reply_seconds)})`}</title>
+                        <title>{`${d.date}: ${d.count} ${t("stats.requests")} (${formatReplyTime(d.mean_reply_seconds)})`}</title>
                         <rect
                           x={x}
                           y={y}
@@ -345,7 +357,7 @@ export default function Statistics({ onBack }) {
                     return (
                       <div key={prov} className="stats-dist-row">
                         <div className="stats-dist-header">
-                          <span className="stats-dist-name">{prov}</span>
+                          <span className="stats-dist-name">{formatProviderLabel(prov, t)}</span>
                           <span className="stats-dist-count">{count}</span>
                         </div>
                         <div className="stats-dist-bar-track">
@@ -369,7 +381,7 @@ export default function Statistics({ onBack }) {
                     return (
                       <div key={prov} className="stats-dist-row">
                         <div className="stats-dist-header">
-                          <span className="stats-dist-name">{prov}</span>
+                          <span className="stats-dist-name">{formatProviderLabel(prov, t)}</span>
                           <span className="stats-dist-count">{count}</span>
                         </div>
                         <div className="stats-dist-bar-track">
@@ -387,24 +399,28 @@ export default function Statistics({ onBack }) {
 
           {/* Decisions and User Messages */}
           <div className="stats-split-grid">
-            <div className="card stats-section-card">
+            <div className="card stats-section-card" data-testid="stats-outcomes">
               <h3 className="section-label">{t("stats.outcomes")}</h3>
               <div className="stats-meta-grid">
                 <div className="stats-meta-item">
-                  <span className="stats-meta-label">Approvate</span>
+                  <span className="stats-meta-label">{t("stats.approved")}</span>
                   <strong>{stats.decisions?.approved ?? 0}</strong>
                 </div>
                 <div className="stats-meta-item">
-                  <span className="stats-meta-label">Modificate</span>
+                  <span className="stats-meta-label">{t("stats.edited")}</span>
                   <strong>{stats.decisions?.edited ?? 0}</strong>
                 </div>
                 <div className="stats-meta-item">
-                  <span className="stats-meta-label">Rifiutate</span>
+                  <span className="stats-meta-label">{t("stats.rejected")}</span>
                   <strong>{stats.decisions?.rejected ?? 0}</strong>
                 </div>
                 <div className="stats-meta-item">
-                  <span className="stats-meta-label">Scadute</span>
+                  <span className="stats-meta-label">{t("stats.expired")}</span>
                   <strong>{stats.decisions?.expired ?? 0}</strong>
+                </div>
+                <div className="stats-meta-item">
+                  <span className="stats-meta-label">{t("stats.cancelled")}</span>
+                  <strong>{stats.decisions?.cancelled ?? 0}</strong>
                 </div>
               </div>
             </div>
@@ -431,8 +447,9 @@ export default function Statistics({ onBack }) {
               <div className="stats-usage-charts">
                 {stats.usage.map((u) => {
                   const key = `${u.provider}-${u.bucket_id || u.window}`;
-                  const thresholdY = 100 - (u.threshold || 80);
+                  const thresholdY = 120 - ((u.threshold || 80) / 100) * 75;
                   const daysCount = u.peaks?.length || 1;
+                  const provLabel = formatProviderLabel(u.provider, t);
                   return (
                     <div
                       key={key}
@@ -440,7 +457,7 @@ export default function Statistics({ onBack }) {
                       data-testid={`stats-usage-chart-${key}`}
                     >
                       <div className="stats-usage-header">
-                        <strong>{u.provider}</strong>
+                        <strong>{provLabel}</strong>
                         <span className="stats-usage-badge">{u.window}</span>
                         {u.threshold_days > 0 && (
                           <span className="stats-usage-alert">
@@ -451,12 +468,12 @@ export default function Statistics({ onBack }) {
                       <div className="stats-chart-wrapper">
                         <svg
                           className="stats-svg-chart"
-                          viewBox={`0 0 ${Math.max(280, daysCount * 44)} 130`}
+                          viewBox={`0 0 ${Math.max(280, daysCount * 44 + 14)} 150`}
                           role="img"
-                          aria-label={`${u.provider} ${u.window}`}
+                          aria-label={`${provLabel} ${u.window}`}
                         >
                           {/* Baseline and threshold line */}
-                          <line x1="0" y1="100" x2="100%" y2="100" className="stats-chart-axis" />
+                          <line x1="0" y1="120" x2="100%" y2="120" className="stats-chart-axis" />
                           <line
                             x1="0"
                             y1={thresholdY}
@@ -466,7 +483,7 @@ export default function Statistics({ onBack }) {
                           />
                           <text
                             x="4"
-                            y={thresholdY - 3}
+                            y={thresholdY - 4}
                             className="stats-usage-threshold-text"
                           >
                             {t("stats.thresholdLine", { threshold: u.threshold })}
@@ -474,33 +491,42 @@ export default function Statistics({ onBack }) {
 
                           {/* Bars for daily peaks */}
                           {u.peaks?.map((p, pIdx) => {
-                            const barHeight = Math.min(100, Math.max(2, p.peak_used_percent));
+                            const hasPeak = p.peak_used_percent !== null && p.peak_used_percent !== undefined;
+                            const barHeight = hasPeak
+                              ? Math.min(75, Math.max(2, (p.peak_used_percent / 100) * 75))
+                              : 0;
                             const x = pIdx * 44 + 14;
-                            const y = 100 - barHeight;
-                            const isAbove = p.peak_used_percent >= (u.threshold || 80);
+                            const y = 120 - barHeight;
+                            const isAbove = hasPeak && p.peak_used_percent >= (u.threshold || 80);
                             const shortDate = p.date.slice(5);
                             return (
-                              <g key={p.date} className="stats-chart-bar-group">
-                                <title>{`${p.date}: ${p.peak_used_percent}%`}</title>
-                                <rect
-                                  x={x}
-                                  y={y}
-                                  width={24}
-                                  height={barHeight}
-                                  rx={3}
-                                  className={`stats-chart-bar ${isAbove ? "threshold-exceeded" : ""}`}
-                                />
+                              <g key={p.date} data-date={p.date} className="stats-chart-bar-group">
+                                <title>
+                                  {hasPeak ? `${p.date}: ${Math.round(p.peak_used_percent)}%` : `${p.date}: -`}
+                                </title>
+                                {hasPeak && (
+                                  <>
+                                    <rect
+                                      x={x}
+                                      y={y}
+                                      width={24}
+                                      height={barHeight}
+                                      rx={3}
+                                      className={`stats-chart-bar ${isAbove ? "threshold-exceeded" : ""}`}
+                                    />
+                                    <text
+                                      x={x + 12}
+                                      y={y - 5}
+                                      textAnchor="middle"
+                                      className="stats-chart-val-text"
+                                    >
+                                      {`${Math.round(p.peak_used_percent)}%`}
+                                    </text>
+                                  </>
+                                )}
                                 <text
                                   x={x + 12}
-                                  y={y - 4}
-                                  textAnchor="middle"
-                                  className="stats-chart-val-text"
-                                >
-                                  {`${Math.round(p.peak_used_percent)}%`}
-                                </text>
-                                <text
-                                  x={x + 12}
-                                  y={118}
+                                  y={138}
                                   textAnchor="middle"
                                   className="stats-chart-axis-text"
                                 >

@@ -2,7 +2,7 @@ import sqlite3
 import json
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Set, Tuple, Union
 
 import uuid
 from pathlib import Path
@@ -103,6 +103,25 @@ def _new_attempt() -> str:
 
 def _ts(value: Optional[str]) -> Optional[datetime]:
     return datetime.fromisoformat(value) if value else None
+
+
+def _normalize_utc_iso(val: Union[str, datetime, None]) -> Optional[str]:
+    if not val:
+        return None
+    if isinstance(val, str):
+        try:
+            dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
+        except Exception:
+            return val
+    elif isinstance(val, datetime):
+        dt = val
+    else:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 class Database:
@@ -2065,12 +2084,7 @@ class Database:
                 b_used = float(getattr(b, "used_percent", 0.0))
                 raw_resets = getattr(b, "resets_at", None)
 
-            if isinstance(raw_resets, datetime):
-                b_resets = raw_resets.isoformat().replace("+00:00", "Z")
-            elif raw_resets:
-                b_resets = str(raw_resets)
-            else:
-                b_resets = None
+            b_resets = _normalize_utc_iso(raw_resets)
 
             bucket_items.append({
                 "id": b_id,
@@ -2080,18 +2094,11 @@ class Database:
                 "resets_at": b_resets,
             })
 
-        if isinstance(observed_at, str):
-            try:
-                observed_at_dt = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
-            except Exception:
-                observed_at_dt = now or datetime.now(timezone.utc)
-            observed_at_str = observed_at
-        elif isinstance(observed_at, datetime):
-            observed_at_dt = observed_at
-            observed_at_str = observed_at.isoformat()
-        else:
+        observed_at_str = _normalize_utc_iso(observed_at or now or datetime.now(timezone.utc))
+        try:
+            observed_at_dt = datetime.fromisoformat(observed_at_str.replace("Z", "+00:00"))
+        except Exception:
             observed_at_dt = now or datetime.now(timezone.utc)
-            observed_at_str = observed_at_dt.isoformat()
 
         if observed_at_dt.tzinfo is None:
             observed_at_dt = observed_at_dt.replace(tzinfo=timezone.utc)
@@ -2437,6 +2444,7 @@ class Database:
                 "from": from_date.isoformat(),
                 "to": to_date.isoformat(),
                 "tz": tz_name,
+                "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "total_requests": in_range_count,
                 "per_day": per_day,
                 "by_relation_type": by_relation_type,

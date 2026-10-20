@@ -37,6 +37,8 @@ async def test_stats_requires_human(env):
         data = res.json()
         assert "per_day" in data
         assert "total_requests" in data
+        assert "generated_at" in data
+        assert data["generated_at"].endswith("Z")
 
 
 @pytest.mark.asyncio
@@ -61,6 +63,36 @@ async def test_stats_validation(env):
         # Invalid timezone
         res = await client.get("/api/stats?tz=Mars/Phobos")
         assert res.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_stats_localized_errors(env):
+    app, db = env
+    db.set_background_language("it")
+    async with human_client(app) as client:
+        res = await client.get("/api/stats?tz=Mars/Phobos")
+        assert res.status_code == 422
+        body = res.json()
+        assert body["code"] == "stats.invalid_timezone"
+        assert body["detail"] == "Fuso orario non valido: Mars/Phobos"
+
+        res = await client.get("/api/stats?from=invalid")
+        assert res.status_code == 422
+        body = res.json()
+        assert body["code"] == "stats.invalid_date"
+        assert "Formato data non valido" in body["detail"]
+
+        res = await client.get("/api/stats?from=2026-10-20&to=2026-10-01")
+        assert res.status_code == 422
+        body = res.json()
+        assert body["code"] == "stats.invalid_range"
+        assert body["detail"] == "La data di inizio non può essere successiva alla data di fine."
+
+        res = await client.get("/api/stats?from=2024-01-01&to=2026-10-20")
+        assert res.status_code == 422
+        body = res.json()
+        assert body["code"] == "stats.range_too_large"
+        assert "supera il limite massimo di 400 giorni" in body["detail"]
 
 
 @pytest.mark.asyncio

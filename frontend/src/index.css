@@ -2112,8 +2112,11 @@ body.chat-open { overflow: hidden; }
 }
 .stats-usage-threshold-text {
   fill: var(--warning, #f59e0b);
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 600;
+  stroke: var(--bg-card, var(--bg-secondary));
+  stroke-width: 3px;
+  paint-order: stroke fill;
 }
 .stats-no-data {
   color: var(--text-muted);

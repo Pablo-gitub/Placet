@@ -2068,12 +2068,13 @@ def create_app(
     ):
         """RF-64: statistics and usage history in range [from, to] localized to tz."""
         require_human(who)
+        lang = db.get_background_language()
 
         import zoneinfo
         try:
             target_tz = zoneinfo.ZoneInfo(tz)
         except Exception:
-            raise ProductError(422, "stats.invalid_timezone", f"Invalid timezone: {tz}")
+            raise ProductError(422, "stats.invalid_timezone", text("stats.invalid_timezone", lang, tz=tz), {"tz": tz})
 
         today_local = datetime.now(target_tz).date()
 
@@ -2081,7 +2082,7 @@ def create_app(
             try:
                 to_date = datetime.strptime(to, "%Y-%m-%d").date()
             except ValueError:
-                raise ProductError(422, "stats.invalid_date", f"Invalid to date format (expected YYYY-MM-DD): {to}")
+                raise ProductError(422, "stats.invalid_date", text("stats.invalid_date", lang, date=to), {"date": to})
         else:
             to_date = today_local
 
@@ -2089,15 +2090,15 @@ def create_app(
             try:
                 from_date = datetime.strptime(from_, "%Y-%m-%d").date()
             except ValueError:
-                raise ProductError(422, "stats.invalid_date", f"Invalid from date format (expected YYYY-MM-DD): {from_}")
+                raise ProductError(422, "stats.invalid_date", text("stats.invalid_date", lang, date=from_), {"date": from_})
         else:
             from_date = to_date - timedelta(days=6)
 
         if from_date > to_date:
-            raise ProductError(422, "stats.invalid_range", f"from date {from_date} cannot be after to date {to_date}")
+            raise ProductError(422, "stats.invalid_range", text("stats.invalid_range", lang))
 
         if (to_date - from_date).days > 400:
-            raise ProductError(422, "stats.range_too_large", f"Date range {(to_date - from_date).days} days exceeds maximum of 400 days")
+            raise ProductError(422, "stats.range_too_large", text("stats.range_too_large", lang))
 
         thresholds = usage_guard()
         return db.get_stats(from_date, to_date, tz_name=tz, usage_thresholds=thresholds)

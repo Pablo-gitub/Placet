@@ -150,7 +150,11 @@
     "forwardInvalid": "Scegli una sessione aperta diversa dal mittente e da chi ha risposto.",
     "automation": "Impossibile modificare gli automatismi. Controlla la connessione.",
     "adminUnavailable": "Servizio amministrativo non disponibile. Controlla lo stato salvato o ritenta la stessa proposta; non crearne un’altra.",
-    "adminRejected": "Questa proposta amministrativa non è disponibile o è stata rifiutata dalle regole."
+    "adminRejected": "Questa proposta amministrativa non è disponibile o è stata rifiutata dalle regole.",
+    "invalidTimezone": "Fuso orario non valido.",
+    "invalidDate": "Formato data non valido (atteso AAAA-MM-GG).",
+    "invalidRange": "La data iniziale non può essere successiva alla data finale.",
+    "rangeTooLarge": "L'intervallo di date supera il limite massimo consentito."
   },
   "sessions": {
     "closed": "Chiusa",
@@ -652,6 +656,13 @@
     "noData": "Nessun dato per questo periodo.",
     "thresholdLine": "Soglia ({{threshold}}%)",
     "loading": "Caricamento statistiche…",
-    "loadError": "Impossibile caricare le statistiche."
+    "loadError": "Impossibile caricare le statistiche.",
+    "requests": "richieste",
+    "approved": "Approvate",
+    "edited": "Modificate",
+    "rejected": "Rifiutate",
+    "expired": "Scadute",
+    "cancelled": "Annullate",
+    "human": "Utente"
   }
 }

@@ -51,5 +51,9 @@
   "envelope.limit_rate": "Questa relazione ha raggiunto il limite orario di prompt automatici: questo attende la revisione dell'utente. Non reinviarlo.",
   "envelope.limit_usage": "Una delle due sessioni è vicina al limite di utilizzo: finché i consumi non scendono le relazioni automatiche passano dalla revisione dell'utente. Questo prompt attende la sua revisione. Non reinviarlo.",
   "notify.test_title": "Placet: notifica di prova",
-  "notify.test_body": "Le notifiche arrivano su questo dispositivo. Tocca per aprire Placet."
+  "notify.test_body": "Le notifiche arrivano su questo dispositivo. Tocca per aprire Placet.",
+  "stats.invalid_timezone": "Fuso orario non valido: {tz}",
+  "stats.invalid_date": "Formato data non valido: {date}",
+  "stats.invalid_range": "La data di inizio non può essere successiva alla data di fine.",
+  "stats.range_too_large": "L'intervallo di date supera il limite massimo di 400 giorni."
 }
