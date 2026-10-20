@@ -21,6 +21,8 @@ Some integrations rely on undocumented internals of the provider apps. These pag
 
 ## Laboratory procedures (not yet executed)
 
+- [Root-to-user bridge helper probe](experiments/2026-10-21-bridge-drop-probe.md): a human-only drop/import experiment targeting a disposable unit.
+
 - [Bridge sandbox/chroot probe](experiments/2026-10-20-bridge-sandbox-probe.md): a human-only disposable user-service experiment; no production restart.
 
 ## Experiments (historical records)
