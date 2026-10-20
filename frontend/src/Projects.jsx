@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { loadDraft, saveDraft } from "./formDrafts";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -714,8 +715,25 @@ export function ProjectDetailView({ projectId, sessions: propSessions, requests 
   const [editingProject, setEditingProject] = useState(false);
   const [creatingRelation, setCreatingRelation] = useState(false);
   const [error, setError] = useState(null);
-  const [projInstructions, setProjInstructions] = useState("");
-  const [nodeInstructions, setNodeInstructions] = useState({});
+  // Unsaved instructions are drafts: the live refresh below reloads the
+  // project often, and must never overwrite what the user is typing.
+  const projDraftKey = `project:${projectId}:instructions`;
+  const nodeDraftKey = `project:${projectId}:nodes`;
+  const [projDraft, setProjDraftState] = useState(() => loadDraft(projDraftKey));
+  const [nodeDrafts, setNodeDraftsState] = useState(() => loadDraft(nodeDraftKey) || {});
+  const setProjDraft = (value) => {
+    setProjDraftState(value);
+    saveDraft(projDraftKey, value);
+  };
+  const setNodeDraft = (nodeId, value) => {
+    setNodeDraftsState((prev) => {
+      const next = { ...prev };
+      if (value == null) delete next[nodeId];
+      else next[nodeId] = value;
+      saveDraft(nodeDraftKey, Object.keys(next).length ? next : null);
+      return next;
+    });
+  };
 
   const sessions = propSessions || fetchedSessions;
 
@@ -725,14 +743,6 @@ export function ProjectDetailView({ projectId, sessions: propSessions, requests 
       .then((p) => {
         if (!cancelled) {
           setProject(p);
-          setProjInstructions(p.instructions || "");
-          const map = {};
-          if (p.nodes) {
-            for (const n of p.nodes) {
-              map[n.id] = n.instructions || "";
-            }
-          }
-          setNodeInstructions(map);
         }
       })
       .catch((err) => {
@@ -778,6 +788,8 @@ export function ProjectDetailView({ projectId, sessions: propSessions, requests 
     );
   }
 
+  const projInstructions = projDraft ?? (project.instructions || "");
+  const nodeText = (nodeId) => nodeDrafts[nodeId] ?? (project.nodes.find((n) => n.id === nodeId)?.instructions || "");
   const projectNodeIds = new Set(project.nodes.map((n) => n.id));
   const projectRelIds = new Set(project.relations.map((r) => r.id));
   const availableNodes = allNodes.filter((n) => !projectNodeIds.has(n.id));
@@ -839,6 +851,7 @@ export function ProjectDetailView({ projectId, sessions: propSessions, requests 
       await api("PATCH", `/api/projects/${projectId}`, {
         instructions: projInstructions.trim() || null,
       });
+      setProjDraft(null);
       load();
     } catch (err) {
       setError(err.display || { key: "errors.operation", params: { status: err.status || 500 } });
@@ -847,10 +860,11 @@ export function ProjectDetailView({ projectId, sessions: propSessions, requests 
 
   const handleSaveNodeInstructions = async (nodeId) => {
     try {
-      const val = (nodeInstructions[nodeId] || "").trim() || null;
+      const val = (nodeText(nodeId) || "").trim() || null;
       await api("PATCH", `/api/projects/${projectId}/nodes/${nodeId}`, {
         instructions: val,
       });
+      setNodeDraft(nodeId, null);
       load();
     } catch (err) {
       setError(err.display || { key: "errors.operation", params: { status: err.status || 500 } });
@@ -929,7 +943,7 @@ export function ProjectDetailView({ projectId, sessions: propSessions, requests 
             maxLength={4000}
             placeholder={t("projects.instructionsPlaceholder")}
             value={projInstructions}
-            onChange={(e) => setProjInstructions(e.target.value)}
+            onChange={(e) => setProjDraft(e.target.value)}
             rows={3}
           />
           <div className="project-instructions-actions">
@@ -1006,16 +1020,16 @@ export function ProjectDetailView({ projectId, sessions: propSessions, requests 
                       className="prompt-textarea"
                       maxLength={4000}
                       placeholder={t("projects.nodeInstructionsPlaceholder")}
-                      value={nodeInstructions[n.id] ?? ""}
-                      onChange={(e) => setNodeInstructions({ ...nodeInstructions, [n.id]: e.target.value })}
+                      value={nodeText(n.id)}
+                      onChange={(e) => setNodeDraft(n.id, e.target.value)}
                       rows={2}
                     />
                     <div className="project-instructions-actions">
-                      <span className="char-counter">{(nodeInstructions[n.id] ?? "").length} / 4000</span>
+                      <span className="char-counter">{nodeText(n.id).length} / 4000</span>
                       <button
                         type="button"
-                        className={`btn ${(nodeInstructions[n.id] ?? "").trim() !== (n.instructions || "") ? "btn-primary" : "btn-secondary"}`}
-                        disabled={(nodeInstructions[n.id] ?? "").trim() === (n.instructions || "")}
+                        className={`btn ${nodeText(n.id).trim() !== (n.instructions || "") ? "btn-primary" : "btn-secondary"}`}
+                        disabled={nodeText(n.id).trim() === (n.instructions || "")}
                         data-testid={`save-node-instructions-btn-${n.id}`}
                         onClick={() => handleSaveNodeInstructions(n.id)}
                       >

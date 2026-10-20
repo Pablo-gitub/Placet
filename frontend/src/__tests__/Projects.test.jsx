@@ -415,6 +415,35 @@ describe("Projects views (RFC-09, RF-44)", () => {
     });
   });
 
+  it("keeps unsaved instructions through the live refresh and across visits", async () => {
+    localStorage.clear();
+    const detailData = {
+      ...sampleProjects[0],
+      instructions: "Saved",
+      nodes: [{ id: 101, name: "planner", session_id: "s1", instructions: "Node saved" }],
+      relations: [],
+      effective_rule: "",
+    };
+    vi.stubGlobal("fetch", mockFetch([
+      ["/api/projects/1", detailData],
+      ["/api/nodes", []],
+      ["/api/relations", []],
+      ["/api/relation-types", []],
+    ]));
+    const view = render(<ProjectDetailView projectId={1} sessions={[{ id: "s1", state: "idle" }]} onBack={vi.fn()} />);
+    fireEvent.change(await screen.findByTestId("project-instructions-input"), { target: { value: "Half written" } });
+    fireEvent.change(screen.getByTestId("node-instructions-input-101"), { target: { value: "Node half" } });
+    // A session update re-renders with new sessions and reloads the project.
+    view.rerender(<ProjectDetailView projectId={1} sessions={[{ id: "s1", state: "busy" }]} onBack={vi.fn()} />);
+    await waitFor(() => expect(fetch.mock.calls.filter(([u]) => u === "/api/projects/1").length).toBeGreaterThan(1));
+    expect(screen.getByTestId("project-instructions-input")).toHaveValue("Half written");
+    expect(screen.getByTestId("node-instructions-input-101")).toHaveValue("Node half");
+    view.unmount();
+    render(<ProjectDetailView projectId={1} sessions={[]} onBack={vi.fn()} />);
+    expect(await screen.findByTestId("project-instructions-input")).toHaveValue("Half written");
+    expect(screen.getByTestId("save-project-instructions-btn")).not.toBeDisabled();
+  });
+
   it("opens node session with project context on tap in node list", async () => {
     const detailData = {
       ...sampleProjects[0],
