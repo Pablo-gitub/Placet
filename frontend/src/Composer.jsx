@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { formatNumber, formattingLocale } from "./i18n/formatters";
 import React, { useEffect, useRef, useState } from "react";
+import { loadDraft, saveDraft } from "./formDrafts";
 import { providerOf, sessionLabels, sessionName, sessionProject, sessionStatus } from "./sessionInfo";
 import { resetClock } from "./usage";
 import { Paperclip, SendHorizontal, X } from "lucide-react";
@@ -48,7 +49,7 @@ function savedMode() {
   }
 }
 
-export default function Composer({ session, sessions = [], onSend, draft, limitAt, onSelectProject }) {
+export default function Composer({ session, sessions = [], onSend, draft, draftKey, limitAt, onSelectProject }) {
   const { t } = useTranslation();
   // Queue (end of the turn) or Now (inside the running turn): the
   // last choice is the default on this device (RF-35).
@@ -63,7 +64,10 @@ export default function Composer({ session, sessions = [], onSend, draft, limitA
   };
   // A withdrawn message to edit starts the composer again with
   // its text; its files must be picked again.
-  const [text, setText] = useState(draft?.text || "");
+  // Otherwise it resumes the unsent text kept on this device for this chat,
+  // so a notification or another screen does not empty it.
+  const [saved] = useState(() => (draft || !draftKey ? null : loadDraft(draftKey)));
+  const [text, setText] = useState(draft?.text || saved?.text || "");
   const input = useRef(null);
   const fileInput = useRef(null);
   const [files, setFiles] = useState([]);
@@ -80,7 +84,11 @@ export default function Composer({ session, sessions = [], onSend, draft, limitA
     }
     setFiles(selected); setFileError("");
   };
-  const [mentions, setMentions] = useState(draft?.mentions || []);
+  const [mentions, setMentions] = useState(draft?.mentions || saved?.mentions || []);
+  useEffect(() => {
+    if (!draftKey) return;
+    saveDraft(draftKey, text ? { text, mentions: mentions.filter((m) => text.includes(m.token)) } : null);
+  }, [draftKey, text, mentions]);
   const [refiles, setRefiles] = useState(draft?.files || []);
   const [query, setQuery] = useState(null);
   const [highlight, setHighlight] = useState(0);

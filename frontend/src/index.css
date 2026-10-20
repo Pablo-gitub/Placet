@@ -1832,6 +1832,8 @@ body.chat-open { overflow: hidden; }
 
 /* The session picker scrolls inside the sheet on phones (iOS keeps the page still). */
 .dialog { max-height: 85dvh; min-height: 0; }
+/* Fixed rows of a dialog never shrink when the list below is long. */
+.dialog-header, .provider-tabs { flex-shrink: 0; }
 .dialog-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 .pick-folder { border-bottom: 1px solid var(--border-color); }
 .pick-folder > summary { display: flex; align-items: center; gap: 0.4rem; padding: 0.65rem 0; cursor: pointer; list-style: none; font-weight: 600; font-size: 0.88rem; min-width: 0; }
