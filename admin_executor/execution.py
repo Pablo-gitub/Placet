@@ -14,6 +14,7 @@ import sqlite3
 import time
 
 from .authorization import confirmation
+from .restart import RestartResult
 
 
 STATES = ('running', 'succeeded', 'failed', 'outcome_unknown')
@@ -160,9 +161,18 @@ class Supervisor:
                 outcome = self.handler(action)
             except Exception:
                 # No exception text or subprocess output crosses the boundary.
-                outcome = 'outcome_unknown'
-            if outcome not in ('succeeded', 'failed', 'outcome_unknown'):
-                outcome = 'outcome_unknown'
-            return self.store._finish(job_id, outcome, outcome)
+                outcome = RestartResult('outcome_unknown', 'handler_failed')
+            if isinstance(outcome, RestartResult):
+                try:
+                    valid = RestartResult(str(outcome), outcome.code)
+                    state, code = str(valid), valid.code
+                except (ValueError, AttributeError):
+                    state, code = 'outcome_unknown', 'invalid_result'
+            elif type(outcome) is str and outcome in ('succeeded', 'failed', 'outcome_unknown'):
+                # Existing durable tests/handlers may return legacy states.
+                state, code = outcome, outcome
+            else:
+                state, code = 'outcome_unknown', 'invalid_result'
+            return self.store._finish(job_id, state, code)
         finally:
             os.close(fd)

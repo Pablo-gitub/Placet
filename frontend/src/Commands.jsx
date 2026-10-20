@@ -32,6 +32,7 @@ function publicView(row) {
         || (["awaiting_confirmation", "expired"].includes(row.state) !== (row.job_id === null))) return null;
     return { id: row.id, action: row.action, state: row.state, enabled: row.enabled,
       expires_at: row.expires_at, job_id: row.job_id, confirmation_url: url.href,
+      result_code: typeof row.result_code === "string" && /^[a-z_]{1,64}$/.test(row.result_code) ? row.result_code : null,
       evidence: row.evidence === "user_service_report" ? "user_service_report" : "system_service_health" };
   } catch { return null; }
 }
@@ -50,7 +51,7 @@ function TerminalHelp({ id }) {
 }
 
 export default function Commands({ onBack }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [initial] = useState(loadReferences);
   const journal = useRef(initial);
   const [pending, setPending] = useState(initial.pending);
@@ -185,6 +186,9 @@ export default function Commands({ onBack }) {
   const selected = (action) => views[watched[action]] || rows.find((row) => row.action === action);
   const renderStatus = (row) => <>
     <p className="commands-state" role="status">{t(`commands.states.${row.state}`)}</p>
+    {row.result_code && i18n.exists(`commands.results.${row.result_code}`)
+      ? <p className="commands-hint">{t(`commands.results.${row.result_code}`)}</p>
+      : ["failed", "outcome_unknown"].includes(row.state) && <p className="commands-hint">{t("commands.noDiagnostic")}</p>}
     {row.evidence === "user_service_report" && <p className="commands-hint">{t("commands.bridgeEvidence")}</p>}
   </>;
 

@@ -33,6 +33,10 @@
     document.querySelector("#operation-description").textContent = catalogue[`${currentView?.action}Description`] || "";
     document.querySelector("#operation-summary").textContent = currentView?.operation.summary || "";
     document.querySelector("#command-state").textContent = catalogue[currentView?.state || (commandFeedback ? "" : "loadingCommand")] || "";
+    const diagnostic = typeof currentView?.result_code === "string" && /^[a-z_]{1,64}$/.test(currentView.result_code)
+      ? catalogue[`result_${currentView.result_code}`] : null;
+    document.querySelector("#command-diagnostic").textContent = diagnostic
+      || (["failed", "outcome_unknown"].includes(currentView?.state) ? catalogue.noDiagnostic : "") || "";
     document.querySelector("#command-evidence").textContent = currentView?.evidence === "user_service_report" ? catalogue.bridgeEvidence : "";
     document.querySelector("#command-feedback").textContent = catalogue[commandFeedback] || "";
     const back = document.querySelector("#return-link");
