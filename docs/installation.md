@@ -4,7 +4,7 @@
 
 Placet lets agents running in different sessions (Claude Code, Gemini CLI /
 Antigravity, OpenAI Codex) cooperate by exchanging tasks and prompts, and gives
-you a control point on your phone (through Tailscale and `ntfy` push
+you a control point on your phone (through Tailscale and Web Push
 notifications) to review, edit and approve every prompt before it runs.
 
 ---
@@ -14,7 +14,7 @@ notifications) to review, edit and approve every prompt before it runs.
 ```text
  ┌────────────────────────────────────────────────────────┐
  │                         Phone                          │
- │  • ntfy push notifications linking to the request      │
+ │  • Web Push notifications linking to the request       │
  │  • PWA (Tailscale HTTPS): decisions, edits, history    │
  └───────────────────────────▲────────────────────────────┘
                              │ REST API / SSE
@@ -133,7 +133,9 @@ PLACET_DEV_LOGIN=you@github npx vite
 ```
 `PLACET_DEV_LOGIN` must be listed in `PLACET_ALLOWED_USERS`. The dev server listens on `127.0.0.1` only.
 
-### 6. Push notifications with self-hosted ntfy
+### 6. Optional: push notifications with self-hosted ntfy
+
+Web Push (next section) needs no extra server and is the recommended channel; set up ntfy only for devices without Web Push.
 
 A notification announces the request and opens the PWA. It has no Approve/Reject buttons: decisions are made only in the PWA, with the full text in view. Prompt and context are included in the notification only if the ntfy server is private; with the public `ntfy.sh` the notification only says who wrote.
 

@@ -36,7 +36,7 @@ Problems addressed:
 | **User** | Receives phone notifications, reads sessions, approves or edits requests, writes to sessions, defines projects and relations. |
 | **Sessions** | Provider conversations in desktop apps or CLIs. Send and receive requests; each belongs to an agent (`claude`, `codex`, `gemini`). |
 | **Node** | A stable named Placet session (name, provider, folder) to which a real session attaches; survives `/clear` and reopening. |
-| **Placet backend** | FastAPI, SQLite and ntfy over Tailscale; source of truth and coordinator. Never reads provider conversation files in production. |
+| **Placet backend** | FastAPI and SQLite over Tailscale, with Web Push notifications (self-hosted ntfy optional); source of truth and coordinator. Never reads provider conversation files in production. |
 | **Placet MCP server** | Tools exposed to each agent through stdio, with identity derived from its token. |
 | **Local bridge** | User daemon on the PC: delivers through provider channels, reads conversations on demand, collects usage and context. |
 | **Executor** | Separate service performing external actions, such as publishing, only after approval [Future]. |
@@ -124,7 +124,7 @@ Problems addressed:
 | RF-41 | **Add / view all:** choose a provider and select sessions to pin; others stay off Home. | [Implemented] per session; nodes in phase 3. Closed sessions remain removable from selection. |
 | RF-42 | Sessions that **never used Placet** still register through global hooks, except excluded projects (RF-45). | [Implemented], `hooks/install.py`. |
 | RF-43 | Two notification types: **question** (high priority, sound) and **turn ended** (quiet, pinned sessions only). Title includes provider/session; tap opens session. | [Implemented], at most one turn-end notification/minute/session. |
-| RF-11 | Self-hosted ntfy on tailnet, with only **Open**; decide in the PWA with full text. | [Implemented] in code; ntfy needs separate installation/configuration. |
+| RF-11 | Notifications with only **Open**; decide in the PWA with full text. | [Implemented]: Web Push to the installed PWA is the default and needs no server; self-hosted ntfy on the tailnet remains optional, for devices without Web Push. |
 | RF-12 | Edit a prompt before approval; sender is informed of the edit. | [Implemented] |
 | RF-13 | Complete history/audit with per-request timeline. | [Implemented] |
 | RF-45 | **Present but quiet:** sessions register, then act only when Placet messages arrive, returning to silence after the turn. `.placet-off` excludes a folder and descendants across hooks, spool, reads, delivery and PWA. Undelivered messages are cancelled with a reason; stored data is **hidden**, retained for audit and shown again if exclusion is removed. | [Implemented] |
@@ -175,7 +175,7 @@ The interface supports English/Italian, English fallback and a local browser pre
 | MCP server | Official Python `mcp` SDK over stdio |
 | Local bridge | Python daemon, systemd user service, provider adapters for delivery/reads/usage/commands |
 | Hooks | Claude `~/.claude/settings.json`, Codex `~/.codex/hooks.json`, Antigravity `~/.gemini/config/hooks.json`; project configuration was also used in the laboratory |
-| Notifications | Self-hosted ntfy over tailnet; Open action only |
+| Notifications | Web Push to the PWA (self-hosted ntfy optional); Open action only |
 | Frontend | React/Vite, `react-markdown` with raw HTML ignored; `react-i18next` and `Intl` |
 | Network | Tailscale Serve HTTPS to the backend Unix socket |
 | Agent registry | `AGENTS.md` definitions/tokens/descriptions; project/node/relation database management is planned |

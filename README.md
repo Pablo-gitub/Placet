@@ -76,7 +76,7 @@ Placet sits between your agents and your phone. Every session registers itself; 
 
 ```mermaid
 flowchart LR
-    phone["📱 Phone<br/>PWA + ntfy"]
+    phone["📱 Phone<br/>PWA + Web Push"]
     subgraph pc["Your PC"]
         backend["Placet backend<br/>FastAPI · SQLite · audit log"]
         bridge["Bridge<br/>runs as you"]
