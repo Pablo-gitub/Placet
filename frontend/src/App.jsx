@@ -7,6 +7,7 @@ import Home from "./Home";
 import History from "./History";
 import Settings from "./Settings";
 import Commands from "./Commands";
+import Statistics from "./Statistics";
 import SessionView from "./SessionView";
 import { ProjectsView, ProjectDetailView } from "./Projects";
 import { requestIdFromHash, routeFromHash } from "./decisions";
@@ -362,10 +363,15 @@ export default function App() {
       onBack={() => navigate("#/impostazioni")} />
   );
   const settingsView = route.view === "settings" && (
-    <Settings onOpenHistory={() => navigate("#/storico")} onOpenCommands={() => navigate("#/comandi")} />
+    <Settings
+      onOpenHistory={() => navigate("#/storico")}
+      onOpenCommands={() => navigate("#/comandi")}
+      onOpenStats={() => navigate("#/statistiche")}
+    />
   );
   const commandsView = route.view === "commands" && <Commands onBack={() => navigate("#/impostazioni")} />;
-  const inSettings = ["settings", "history", "commands"].includes(route.view);
+  const statsView = route.view === "statistics" && <Statistics onBack={() => navigate("#/impostazioni")} />;
+  const inSettings = ["settings", "history", "commands", "statistics"].includes(route.view);
   const projectsView = route.view === "projects" && (
     <ProjectsView onOpenProject={(id) => navigate(`#/progetti/${id}`)} />
   );
@@ -448,7 +454,7 @@ export default function App() {
             {homeView}
           </aside>
           <main className="pane" data-testid="pane">
-            {sessionView || historyView || settingsView || commandsView || projectsView || projectDetailView || (
+            {sessionView || historyView || settingsView || commandsView || statsView || projectsView || projectDetailView || (
               <div className="pane-empty" data-testid="pane-empty">
                 <MessagesSquare size={28} />
                 <p>{t("app.openSession")}</p>
@@ -463,6 +469,7 @@ export default function App() {
             {historyView}
             {settingsView}
             {commandsView}
+            {statsView}
             {sessionView}
             {projectsView}
             {projectDetailView}

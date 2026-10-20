@@ -565,6 +565,7 @@
     "pushHint": "Notifiche push su questo dispositivo.",
     "records": "Registro",
     "historyHint": "Richieste concluse e cronologia di ogni decisione.",
+    "statsHint": "Volume delle richieste, tasso di automazione e consumi dei provider.",
     "automation": "Automazione e consumi",
     "guardTitle": "Relazioni in manuale vicino al limite",
     "guardHint": "Quando un provider supera una soglia, tutte le sue relazioni automatiche, in entrata e in uscita, passano dalla tua revisione finché i consumi non scendono.",
@@ -622,5 +623,35 @@
       "failed": "Fallita.",
       "outcome_unknown": "Esito da verificare dal terminale amministrativo."
     }
+  },
+  "stats": {
+    "title": "Statistiche",
+    "today": "Oggi",
+    "days7": "7 giorni",
+    "days30": "30 giorni",
+    "custom": "Personalizzato",
+    "from": "Dal",
+    "to": "Al",
+    "apply": "Applica",
+    "totalRequests": "Richieste totali",
+    "automationRate": "Tasso automazione",
+    "meanReply": "Tempo medio risposta",
+    "thresholdDays": "Giorni sopra soglia",
+    "volumeOverTime": "Volume richieste nel tempo",
+    "byRelationType": "Distribuzione per tipo di relazione",
+    "byProject": "Distribuzione per progetto",
+    "byProvider": "Distribuzione per provider",
+    "sender": "Mittente",
+    "recipient": "Destinatario",
+    "outcomes": "Esiti e decisioni",
+    "userMessages": "Messaggi utente",
+    "userSent": "Richieste create",
+    "userReplies": "Risposte fornite",
+    "providerUsage": "Consumi provider (picchi giornalieri)",
+    "noUsageData": "Nessun dato di utilizzo registrato per questo periodo.",
+    "noData": "Nessun dato per questo periodo.",
+    "thresholdLine": "Soglia ({{threshold}}%)",
+    "loading": "Caricamento statistiche…",
+    "loadError": "Impossibile caricare le statistiche."
   }
 }
