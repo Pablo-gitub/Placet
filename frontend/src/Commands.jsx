@@ -8,7 +8,7 @@ const ID = /^[a-f0-9]{32}$/;
 const KEY = "placet.commands.references.v1";
 const GUIDE = "https://github.com/Pablo-gitub/Placet/blob/main/docs/installation.md#reserved-administrative-commands";
 const STATES = new Set(["awaiting_confirmation", "expired", "authorized", "running", "succeeded", "failed", "outcome_unknown"]);
-const TERMINAL = "sudo /usr/bin/env -i PATH=/usr/bin:/bin PYTHONPATH=/usr/local/lib/placet-admin /usr/local/lib/placet-admin-venv/bin/python -s -m admin_executor.terminal";
+const TERMINAL = "sudo /usr/bin/env -i PATH=/usr/bin:/bin PYTHONPATH=/usr/local/lib/placet-admin /usr/local/lib/placet-admin-venv/bin/python -P -s -m admin_executor.terminal";
 
 function loadReferences() {
   try {
