@@ -36,7 +36,7 @@ Three flows:
 
 - Python 3.11+, FastAPI, SQLite WAL, Pydantic, Uvicorn.
 - **Two listeners in one process** (`serve.py`): TCP `127.0.0.1:8000` for agents/bridge; Unix socket `/run/placet/human.sock` in production for the PWA through Tailscale Serve. If either listener stops, the process stops.
-- Requests/lifecycle, hook-driven session registry, per-session inboxes, routing, SSE (`request_update`, `session_update`, `usage_update`, `automation_update`), notifications and a 30-second expiration/redelivery sweeper. Notifications go through Web Push to the installed PWA (VAPID keys generated on first use and kept in the database; only browser vendors' push services are contacted; payloads carry a short title, never request text) and through ntfy when configured.
+- Requests/lifecycle, hook-driven session registry, per-session inboxes, routing, SSE (`request_update`, `session_update`, `usage_update`, `automation_update`), notifications and a 30-second expiration/redelivery sweeper. Notifications go through Web Push to the installed PWA (VAPID keys generated on first use and kept in the database; only browser vendors' push services are contacted; payloads carry a short title, never request text) and through ntfy when configured. Notification preferences are managed via human-only `GET/PUT /api/settings/notifications` and stored in `app_settings` under `notification_preferences` (`needs_you`, `problems`, `turn_end`); preferences currently apply globally to all devices.
 - Relays bridge-read conversation pages (§5).
 - **Planned:** nodes, projects and relations/types. Provider usage is now reported by the bridge and shown in the PWA.
 
@@ -272,7 +272,7 @@ bridge → find/read/filter provider file → POST /api/bridge/jobs/{id}/result 
 - **`project_nodes`:** composite primary key `(project_id, node_id)`, `instructions` (role of the node within this project, RFC-15). Nodes can belong to multiple projects.
 - **`project_relations`:** composite primary key `(project_id, relation_id)` (RFC-09). Relations can belong to multiple projects. Adding a relation to a project automatically ensures its `from_node` and `to_node` are in `project_nodes`. Removing a node from a project removes its associated project relations. Deletions are cleaned up explicitly without relying on `PRAGMA foreign_keys`.
 - **`agent_states`:** per-agent tmux state.
-- **`app_settings`:** persistent key/value settings; `background_language` is human-controlled, independent of local UI preference; `relation_rule` is the general rule for automatic relations (RFC-08b); `automation_paused`, `max_auto_hops` and `max_auto_per_hour` hold Stop all and the loop limits (RFC-14).
+- **`app_settings`:** persistent key/value settings; `background_language` is human-controlled, independent of local UI preference; `relation_rule` is the general rule for automatic relations (RFC-08b); `automation_paused`, `max_auto_hops` and `max_auto_per_hour` hold Stop all and the loop limits (RFC-14); `notification_preferences` holds JSON-encoded notification preferences (`needs_you`, `problems`, `turn_end`), applied to all devices.
 
 ### Effective relation policy
 

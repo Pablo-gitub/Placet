@@ -124,6 +124,7 @@ Problems addressed:
 | RF-41 | **Add / view all:** choose a provider and select sessions to pin; others stay off Home. | [Implemented] per session; nodes in phase 3. Closed sessions remain removable from selection. |
 | RF-42 | Sessions that **never used Placet** still register through global hooks, except excluded projects (RF-45). | [Implemented], `hooks/install.py`. |
 | RF-43 | Two notification types: **question** (high priority, sound) and **turn ended** (quiet, pinned sessions only). Title includes provider/session; tap opens session. | [Implemented], at most one turn-end notification/minute/session. |
+| RF-43b | **Notification preferences:** Settings allow filtering notifications by type: requests that need you (`needs_you`, questions, prompt reviews, return approvals), problem alerts (`problems`, delivery failures/uncertainty, stalled work, held queues, unreachable agents), and turn-end notifications (`turn_end`: all, only Placet work, or off). Test notifications are never filtered. Applied globally across devices. | [Implemented] 2026-10-20 |
 | RF-11 | Self-hosted ntfy on tailnet, with only **Open**; decide in the PWA with full text. | [Implemented] in code; ntfy needs separate installation/configuration. |
 | RF-12 | Edit a prompt before approval; sender is informed of the edit. | [Implemented] |
 | RF-13 | Complete history/audit with per-request timeline. | [Implemented] |
