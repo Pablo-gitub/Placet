@@ -473,9 +473,24 @@ protected terminal commands. Replace `<job_id>` with the full 32-character job
 ID displayed in Commands. No job is rerun; an audit event records the decision.
 A live supervisor holds the lock and reconciliation is refused until it releases.
 
+The command requires Python 3.11 or newer: `-P` prevents the working directory
+from being prepended to the import path; `env -i`, the single absolute protected
+`PYTHONPATH` and `-s` remain required. The installed protected interpreter was
+checked with `-I -P` (Python 3.14.4). Until the isolated administrative launcher
+is available, also change to `/` in the trusted operator terminal before running
+these commands. The command itself must remain safe from any working directory;
+changing directories is an additional operational precaution, not the fix.
+
+Do not remove `-P`: importing an agent-writable checkout can execute its package
+initializers before the terminal's protected-installation refusal is reached.
+Do not replace these flags with `-I` alone: isolated mode ignores `PYTHONPATH`,
+and the administrative package may then be unavailable. These command/UI changes
+do not modify the installed administrative package or require a root upgrade.
+
 ```bash
-sudo /usr/bin/env -i PATH=/usr/bin:/bin PYTHONPATH=/usr/local/lib/placet-admin /usr/local/lib/placet-admin-venv/bin/python -s -m admin_executor.terminal reconcile --id <job_id> --outcome succeeded
-sudo /usr/bin/env -i PATH=/usr/bin:/bin PYTHONPATH=/usr/local/lib/placet-admin /usr/local/lib/placet-admin-venv/bin/python -s -m admin_executor.terminal reconcile --id <job_id> --outcome failed
+cd /
+sudo /usr/bin/env -i PATH=/usr/bin:/bin PYTHONPATH=/usr/local/lib/placet-admin /usr/local/lib/placet-admin-venv/bin/python -P -s -m admin_executor.terminal reconcile --id <job_id> --outcome succeeded
+sudo /usr/bin/env -i PATH=/usr/bin:/bin PYTHONPATH=/usr/local/lib/placet-admin /usr/local/lib/placet-admin-venv/bin/python -P -s -m admin_executor.terminal reconcile --id <job_id> --outcome failed
 ```
 
 Choose the outcome you actually established. Repeating the same reconciliation
