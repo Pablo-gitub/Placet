@@ -498,6 +498,7 @@ export default function SessionView({
           session={session}
           limitAt={limitAt}
           draft={draft}
+          draftKey={`chat:${sessionId}`}
           sessions={sessions}
           onSelectProject={(pid) => setActiveProjectId(pid)}
           onSend={async (text, mentions, attachments, mode) => {

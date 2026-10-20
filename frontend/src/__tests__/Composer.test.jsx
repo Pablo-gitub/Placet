@@ -115,3 +115,26 @@ describe("project hash mentions (#)", () => {
     expect(await screen.findByText("Nessun progetto per questa sessione")).toBeInTheDocument();
   });
 });
+
+describe("unsent drafts", () => {
+  it("resumes the unsent text after leaving the chat and forgets it once sent", async () => {
+    localStorage.clear();
+    const send = vi.fn().mockResolvedValue(true);
+    const first = render(<Composer session={session} sessions={sessions} onSend={send} draftKey="chat:current" />);
+    type("Prompt a metà");
+    first.unmount();
+    render(<Composer session={session} sessions={sessions} onSend={send} draftKey="chat:current" />);
+    expect(screen.getByRole("textbox")).toHaveValue("Prompt a metà");
+    fireEvent.click(screen.getByRole("button", { name: "Invia" }));
+    await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue(""));
+    expect(localStorage.getItem("placet.draft.chat:current")).toBeNull();
+  });
+  it("does not leak a draft into another chat", () => {
+    localStorage.clear();
+    const first = render(<Composer session={session} sessions={sessions} onSend={vi.fn()} draftKey="chat:current" />);
+    type("Solo per questa chat");
+    first.unmount();
+    render(<Composer session={session} sessions={sessions} onSend={vi.fn()} draftKey="chat:other" />);
+    expect(screen.getByRole("textbox")).toHaveValue("");
+  });
+});
