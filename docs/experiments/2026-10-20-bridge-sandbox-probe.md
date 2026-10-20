@@ -135,7 +135,7 @@ UNIT
       visible) protection=default ;;
       *) return 2 ;;
     esac
-    sudo /usr/bin/systemd-run --unit="placet-probe-$label.service" \
+    /usr/bin/sudo /usr/bin/systemd-run --unit="placet-probe-$label.service" \
       --uid=1000 --gid=1000 --service-type=exec --wait --pipe --collect \
       "${properties[@]}" "--property=ProtectProc=$protection" \
       /usr/bin/env -i PATH=/usr/bin:/bin LC_ALL=C \
