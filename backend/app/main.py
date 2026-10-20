@@ -2031,6 +2031,7 @@ def create_app(
         require_bridge(who)
         for item in payload.providers:
             db.set_usage(item.provider, item.model_dump_json())
+            db.record_usage_samples(item.provider, item.buckets, item.observed_at)
         _broadcast(("usage", None))
         return {"providers": [p.provider for p in payload.providers]}
 
@@ -2051,6 +2052,7 @@ def create_app(
             row = claude_usage()
             if row is not None:
                 db.set_usage(row.provider, row.model_dump_json())
+                db.record_usage_samples(row.provider, row.buckets, row.observed_at)
                 _broadcast(("usage", None))
             return {"renewed": True}
 

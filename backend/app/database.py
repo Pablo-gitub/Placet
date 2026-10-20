@@ -108,6 +108,7 @@ def _ts(value: Optional[str]) -> Optional[datetime]:
 class Database:
     def __init__(self, db_path: str = "placet.db"):
         self.db_path = db_path
+        self._last_usage_purge_time = 0.0
 
     @contextmanager
     def _get_connection(self) -> Iterator[sqlite3.Connection]:
@@ -467,6 +468,25 @@ class Database:
                     " AND entrypoint = 'claude-desktop' AND ended_at IS NOT NULL"
                 )
                 cursor.execute("INSERT INTO schema_migrations (name) VALUES (?)", (migration,))
+            migration_samples = 'usage_samples_v1'
+            if cursor.execute("SELECT 1 FROM schema_migrations WHERE name = ?", (migration_samples,)).fetchone() is None:
+                cursor.execute(
+                    "CREATE TABLE IF NOT EXISTS usage_samples ("
+                    "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    "  provider TEXT NOT NULL,"
+                    "  observed_at TEXT NOT NULL,"
+                    "  window TEXT NOT NULL,"
+                    "  bucket_id TEXT NOT NULL,"
+                    "  bucket_group TEXT,"
+                    "  used_percent REAL NOT NULL,"
+                    "  resets_at TEXT"
+                    ");"
+                )
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_usage_samples_provider_observed"
+                    " ON usage_samples (provider, observed_at);"
+                )
+                cursor.execute("INSERT INTO schema_migrations (name) VALUES (?)", (migration_samples,))
             # The three aspects of a request (RF-29); older rows are backfilled
             # from their status once.
             if "delivery_state" not in cols:
@@ -1972,6 +1992,151 @@ class Database:
     def list_usage(self) -> List[str]:
         with self._get_connection() as conn:
             return [r["data"] for r in conn.execute("SELECT data FROM provider_usage ORDER BY provider")]
+
+    def record_usage_samples(
+        self,
+        provider: str,
+        buckets: Any,
+        observed_at: Optional[Any] = None,
+        now: Optional[datetime] = None,
+    ) -> bool:
+        """
+        RF-64b: record usage samples into usage_samples table when:
+        1. No previous samples for this provider;
+        2. >= 10 minutes elapsed since last sample;
+        3. used_percent of any bucket changed by >= 1.0 percentage points;
+        4. resets_at of any bucket changed (e.g. window reset).
+
+        Also purges samples older than 400 days (throttled to at most once per hour).
+        """
+        if not buckets:
+            return False
+
+        bucket_items = []
+        for b in buckets:
+            if isinstance(b, dict):
+                b_id = str(b.get("id", ""))
+                b_group = b.get("group") or b.get("bucket_group")
+                b_window = str(b.get("window", ""))
+                b_used = float(b.get("used_percent", 0.0))
+                raw_resets = b.get("resets_at")
+            else:
+                b_id = str(getattr(b, "id", ""))
+                b_group = getattr(b, "group", None)
+                b_window = str(getattr(b, "window", ""))
+                b_used = float(getattr(b, "used_percent", 0.0))
+                raw_resets = getattr(b, "resets_at", None)
+
+            if isinstance(raw_resets, datetime):
+                b_resets = raw_resets.isoformat().replace("+00:00", "Z")
+            elif raw_resets:
+                b_resets = str(raw_resets)
+            else:
+                b_resets = None
+
+            bucket_items.append({
+                "id": b_id,
+                "group": b_group,
+                "window": b_window,
+                "used_percent": b_used,
+                "resets_at": b_resets,
+            })
+
+        if isinstance(observed_at, str):
+            try:
+                observed_at_dt = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+            except Exception:
+                observed_at_dt = now or datetime.now(timezone.utc)
+            observed_at_str = observed_at
+        elif isinstance(observed_at, datetime):
+            observed_at_dt = observed_at
+            observed_at_str = observed_at.isoformat()
+        else:
+            observed_at_dt = now or datetime.now(timezone.utc)
+            observed_at_str = observed_at_dt.isoformat()
+
+        if observed_at_dt.tzinfo is None:
+            observed_at_dt = observed_at_dt.replace(tzinfo=timezone.utc)
+
+        with self._get_connection() as conn:
+            last_row = conn.execute(
+                "SELECT observed_at FROM usage_samples WHERE provider = ? ORDER BY observed_at DESC, id DESC LIMIT 1",
+                (provider,),
+            ).fetchone()
+
+            should_record = False
+            if last_row is None:
+                should_record = True
+            else:
+                last_obs_str = last_row["observed_at"]
+                try:
+                    last_obs_dt = datetime.fromisoformat(last_obs_str.replace("Z", "+00:00"))
+                    if last_obs_dt.tzinfo is None:
+                        last_obs_dt = last_obs_dt.replace(tzinfo=timezone.utc)
+                    elapsed_seconds = (observed_at_dt - last_obs_dt).total_seconds()
+                except Exception:
+                    elapsed_seconds = 600.0
+
+                if elapsed_seconds >= 600.0:
+                    should_record = True
+                else:
+                    prev_rows = conn.execute(
+                        "SELECT bucket_id, bucket_group, used_percent, resets_at FROM usage_samples"
+                        " WHERE provider = ? AND observed_at = ?",
+                        (provider, last_obs_str),
+                    ).fetchall()
+                    prev_map = {(r["bucket_id"], r["bucket_group"]): r for r in prev_rows}
+
+                    if len(prev_map) != len(bucket_items):
+                        should_record = True
+                    else:
+                        for b in bucket_items:
+                            key = (b["id"], b["group"])
+                            if key not in prev_map:
+                                should_record = True
+                                break
+                            prev_b = prev_map[key]
+                            if abs(b["used_percent"] - prev_b["used_percent"]) >= 1.0 - 1e-9:
+                                should_record = True
+                                break
+                            r1 = b["resets_at"]
+                            r2 = prev_b["resets_at"]
+                            if (r1 or None) != (r2 or None):
+                                if not r1 or not r2:
+                                    should_record = True
+                                    break
+                                try:
+                                    dt1 = datetime.fromisoformat(r1.replace("Z", "+00:00"))
+                                    dt2 = datetime.fromisoformat(r2.replace("Z", "+00:00"))
+                                    if dt1 != dt2:
+                                        should_record = True
+                                        break
+                                except Exception:
+                                    if r1 != r2:
+                                        should_record = True
+                                        break
+
+            if not should_record:
+                return False
+
+            for b in bucket_items:
+                conn.execute(
+                    "INSERT INTO usage_samples (provider, observed_at, window, bucket_id, bucket_group, used_percent, resets_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (provider, observed_at_str, b["window"], b["id"], b["group"], b["used_percent"], b["resets_at"]),
+                )
+
+            # Retention: purge samples older than 400 days (throttled once per hour)
+            purge_now = now or observed_at_dt or datetime.now(timezone.utc)
+            if purge_now.tzinfo is None:
+                purge_now = purge_now.replace(tzinfo=timezone.utc)
+            purge_ts = purge_now.timestamp()
+            if abs(purge_ts - self._last_usage_purge_time) >= 3600.0:
+                cutoff = purge_now - timedelta(days=400)
+                conn.execute("DELETE FROM usage_samples WHERE observed_at < ?", (cutoff.isoformat(),))
+                self._last_usage_purge_time = purge_ts
+
+            return True
 
     def limited_providers(self, now: Optional[datetime] = None) -> Set[str]:
         """
