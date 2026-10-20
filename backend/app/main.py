@@ -2062,6 +2062,7 @@ def create_app(
         require_bridge(who)
         for item in payload.providers:
             db.set_usage(item.provider, item.model_dump_json())
+            db.record_usage_samples(item.provider, item.buckets, item.observed_at)
         _broadcast(("usage", None))
         return {"providers": [p.provider for p in payload.providers]}
 
@@ -2082,11 +2083,56 @@ def create_app(
             row = claude_usage()
             if row is not None:
                 db.set_usage(row.provider, row.model_dump_json())
+                db.record_usage_samples(row.provider, row.buckets, row.observed_at)
                 _broadcast(("usage", None))
             return {"renewed": True}
 
         errors = {"failed": (502, "Claude credential renewal failed.")}
         return await bridge_call("claude_renew", {}, local, errors)
+
+    @app.get("/api/stats")
+    async def get_stats_endpoint(
+        from_: Optional[str] = Query(None, alias="from"),
+        to: Optional[str] = None,
+        tz: str = "UTC",
+        who: Principal = Depends(principal),
+    ):
+        """RF-64: statistics and usage history in range [from, to] localized to tz."""
+        require_human(who)
+        lang = db.get_background_language()
+
+        import zoneinfo
+        try:
+            target_tz = zoneinfo.ZoneInfo(tz)
+        except Exception:
+            raise ProductError(422, "stats.invalid_timezone", text("stats.invalid_timezone", lang, tz=tz), {"tz": tz})
+
+        today_local = datetime.now(target_tz).date()
+
+        if to is not None:
+            try:
+                to_date = datetime.strptime(to, "%Y-%m-%d").date()
+            except ValueError:
+                raise ProductError(422, "stats.invalid_date", text("stats.invalid_date", lang, date=to), {"date": to})
+        else:
+            to_date = today_local
+
+        if from_ is not None:
+            try:
+                from_date = datetime.strptime(from_, "%Y-%m-%d").date()
+            except ValueError:
+                raise ProductError(422, "stats.invalid_date", text("stats.invalid_date", lang, date=from_), {"date": from_})
+        else:
+            from_date = to_date - timedelta(days=6)
+
+        if from_date > to_date:
+            raise ProductError(422, "stats.invalid_range", text("stats.invalid_range", lang))
+
+        if (to_date - from_date).days > 400:
+            raise ProductError(422, "stats.range_too_large", text("stats.range_too_large", lang))
+
+        thresholds = usage_guard()
+        return db.get_stats(from_date, to_date, tz_name=tz, usage_thresholds=thresholds)
 
     @app.post("/api/bridge/folders")
     async def bridge_folders(payload: FoldersReport, who: Principal = Depends(principal)):

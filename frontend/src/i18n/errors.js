@@ -63,6 +63,10 @@ export function apiErrorDescriptor(body, status) {
     "project.not_found": "errors.notFound",
     "project.node_not_in_project": "errors.nodeNotInProject",
     "claude_renew.failed": "errors.claudeRenewFailed",
+    "stats.invalid_timezone": "errors.invalidTimezone",
+    "stats.invalid_date": "errors.invalidDate",
+    "stats.invalid_range": "errors.invalidRange",
+    "stats.range_too_large": "errors.rangeTooLarge",
   };
   const key = Object.hasOwn(codes, body?.code) ? codes[body.code] : null;
   if (key) {

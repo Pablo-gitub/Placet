@@ -150,7 +150,11 @@
     "forwardInvalid": "Choose an open session other than the sender and the one that replied.",
     "automation": "Unable to change the automation. Check your connection.",
     "adminUnavailable": "Administrative service unavailable. Check the saved state or retry the same proposal; do not create another one.",
-    "adminRejected": "This administrative proposal is unavailable or was rejected by policy."
+    "adminRejected": "This administrative proposal is unavailable or was rejected by policy.",
+    "invalidTimezone": "Invalid timezone.",
+    "invalidDate": "Invalid date format (expected YYYY-MM-DD).",
+    "invalidRange": "Start date cannot be after end date.",
+    "rangeTooLarge": "Date range exceeds maximum allowed."
   },
   "sessions": {
     "closed": "Closed",
@@ -565,6 +569,7 @@
     "pushHint": "Push notifications on this device.",
     "records": "Records",
     "historyHint": "Settled requests and the timeline of every decision.",
+    "statsHint": "Request volume, automation rate and provider usage.",
     "automation": "Automation and usage",
     "guardTitle": "Manual relations near the limit",
     "guardHint": "When a provider goes over a threshold, all its automatic relations, incoming and outgoing, need your review until usage goes down.",
@@ -631,5 +636,42 @@
       "failed": "Failed.",
       "outcome_unknown": "Outcome to be checked from the administrator terminal."
     }
+  },
+  "stats": {
+    "title": "Statistics",
+    "today": "Today",
+    "days7": "7 days",
+    "days30": "30 days",
+    "custom": "Custom",
+    "from": "From",
+    "to": "To",
+    "apply": "Apply",
+    "totalRequests": "Total requests",
+    "automationRate": "Automation rate",
+    "meanReply": "Mean reply time",
+    "thresholdDays": "Days above threshold",
+    "volumeOverTime": "Request volume over time",
+    "byRelationType": "Distribution by relation type",
+    "byProject": "Distribution by project",
+    "byProvider": "Distribution by provider",
+    "sender": "Sender",
+    "recipient": "Recipient",
+    "outcomes": "Outcomes and decisions",
+    "userMessages": "User messages",
+    "userSent": "Requests created",
+    "userReplies": "Replies provided",
+    "providerUsage": "Provider usage (daily peaks)",
+    "noUsageData": "No usage data recorded for this period.",
+    "noData": "No data for this period.",
+    "thresholdLine": "Threshold ({{threshold}}%)",
+    "loading": "Loading statistics…",
+    "loadError": "Could not load statistics.",
+    "requests": "requests",
+    "approved": "Approved",
+    "edited": "Edited",
+    "rejected": "Rejected",
+    "expired": "Expired",
+    "cancelled": "Cancelled",
+    "human": "Human"
   }
 }
