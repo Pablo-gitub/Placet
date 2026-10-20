@@ -207,7 +207,7 @@ sequenceDiagram
     A->>M: placet_send_to_agent(target, prompt)
     M->>B: POST /api/requests
     Note over B: Current registry policy; typed relations planned
-    B-->>U: ntfy question
+    B-->>U: push notification
     U->>B: approve / edit / reject
     Note over M,B: Tool long-poll, then PENDING
     B->>Br: authorized mail for B
