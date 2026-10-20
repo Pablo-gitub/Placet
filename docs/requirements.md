@@ -147,6 +147,8 @@ Problems addressed:
 | RF-61 | Session shows **context** (`72.7k / 1M · 7%`), model and effort. | [Implemented] Claude (model, effort, context tokens from the transcript; window size not known), Codex (model, effort, context and window from the rollout), Antigravity (model from the hooks' `modelName`) |
 | RF-62 | Remote **compact/effort** where supported (tmux CLI; Antigravity needs verification; Codex: `codex queue` ignores `-m`/`-c`, see [experiment](experiments/2026-10-18-codex-effort.md)). Claude desktop: “available only on PC”. | [Decided] |
 | RF-63 | Model switching is not planned: rereading context consumes usage. | [Decided] |
+| RF-64 | **Statistics dashboard**, accessible from Settings (`#/statistiche`), showing request volume over time, automation rate, mean reply seconds, distributions by relation type, project, and provider, decisions, user message counts, and daily peak usage trends. | [Implemented] October 20, 2026. Aggregated by `GET /api/stats` with period filtering (`today`, `7d`, `30d`, `custom`) and client timezone translation. Visualized with responsive SVGs and summary cards without external charting libraries. |
+| RF-64b | **Usage history recording and retention**, logging provider quota samples (`usage_samples`) on change, turn-boundary, and periodic heartbeats, with 400-day retention. | [Implemented] October 20, 2026. Samples deduplicated by bucket and timestamp; retention cleanup throttled hourly. Exposes daily peak usage percentages and days exceeding thresholds for the statistics dashboard. |
 
 ### Later implementation: collaboration return approval and localization
 
@@ -189,7 +191,7 @@ The interface supports English/Italian, English fallback and a local browser pre
 | 2b | **Reliability:** local spool (RF-28), three request aspects/one request per session (RF-29), exclusions throughout (RF-45). |
 | 2 | **Phone sessions:** chat (RF-30…33), writes/wakeup (RF-34/35), Home/questions/pinned sessions (RF-40…43), provider bridge adapters (RF-24…27). |
 | 3 | **Nodes, relations and types** (RFC-02…10), `send(target, type_id, prompt)`, removal of `context` (RF-05b). Completed October 18, 2026, with change of recipient (RFC-07b), the general rule (RFC-08b), loop limits (RFC-14), projects (RFC-09, October 19, 2026) and project/node instructions (RFC-15, October 19, 2026); RFC-10 (retiring `AGENTS.md` rules) and RFC-16 (reply policies) remain. |
-| 4 | **Context, effort, compact and usage** (RF-60…63). RF-60/61 completed; RF-62 open (not possible through `codex queue`). |
+| 4 | **Context, effort, compact, usage and statistics** (RF-60…64b). RF-60/61 and RF-64/64b completed October 20, 2026; RF-62 open (not possible through `codex queue`). |
 | 5 | **Session creation and temporary sessions** (RF-50…53). |
 | 6 | **Project graph/editor** (RF-44), `/` skill picker (RF-36). |
 
