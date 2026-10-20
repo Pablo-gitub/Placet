@@ -4,6 +4,7 @@ import { ChevronRight, ShieldCheck, Terminal } from "lucide-react";
 import LanguageSelect from "./i18n/LanguageSelect";
 import BackgroundLanguage from "./i18n/BackgroundLanguage";
 import PushControl from "./PushControl";
+import NotificationPreferences from "./NotificationPreferences";
 import UsageGuard from "./UsageGuard";
 
 function Row({ title, hint, children }) {
@@ -34,6 +35,7 @@ export default function Settings({ onOpenHistory, onOpenCommands }) {
       <section className="card settings-group">
         <h3 className="section-label">{t("settings.notifications")}</h3>
         <Row title={t("push.title")} hint={t("settings.pushHint")}><PushControl /></Row>
+        <NotificationPreferences />
       </section>
 
       <section className="card settings-group">

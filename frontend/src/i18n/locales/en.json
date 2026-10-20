@@ -576,7 +576,16 @@
     "renewHint": "Renews Claude Code's login when it expires, without using the model, so its usage stays current.",
     "save": "Save",
     "saveError": "Could not save.",
-    "loadError": "Settings unavailable."
+    "loadError": "Settings unavailable.",
+    "notifyNeedsYouTitle": "Requests that need you",
+    "notifyNeedsYouHint": "Questions for you, prompt reviews before sending, and completed replies waiting for approval.",
+    "notifyProblemsTitle": "Problems",
+    "notifyProblemsHint": "Delivery failed or uncertain, stalled work, held queues, or unreachable agents.",
+    "turnEndTitle": "Turn completion",
+    "turnEndAll": "All completed turns",
+    "turnEndPlacet": "Only Placet work",
+    "turnEndPlacetHint": "Only turns started by a Placet request or by a message sent from here.",
+    "turnEndOff": "None"
   },
   "commands": {
     "title": "Commands",

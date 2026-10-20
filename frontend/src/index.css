@@ -1805,6 +1805,9 @@ body.chat-open { overflow: hidden; }
 .usage-guard-active { margin: 0 0 0.5rem; font-size: 0.8rem; color: var(--warning); }
 .usage-guard-warning { margin: 0 0 0.5rem; padding: 0.5rem 0.65rem; font-size: 0.78rem; border-left: 3px solid var(--warning); background: rgba(245, 158, 11, 0.08); border-radius: 6px; }
 .automation-usage { margin: 0.35rem 0 0; font-size: 0.78rem; color: var(--warning); }
+.settings-turn-end { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.55rem 0 0.25rem; border-top: 1px solid var(--border-color); min-width: 0; }
+.settings-options { display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; }
+.settings-option-hint { font-size: 0.75rem; color: var(--text-muted); margin-top: -0.15rem; margin-bottom: 0.2rem; padding-left: 0.5rem; line-height: 1.4; }
 
 /* Reserved actions: public intent/status only; signing stays on Placet Admin. */
 .commands { display: flex; flex-direction: column; gap: 0.85rem; min-width: 0; }

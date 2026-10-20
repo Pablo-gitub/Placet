@@ -576,7 +576,16 @@
     "renewHint": "Rinnova l'accesso di Claude Code quando scade, senza usare il modello, così i suoi consumi restano aggiornati.",
     "save": "Salva",
     "saveError": "Salvataggio non riuscito.",
-    "loadError": "Impostazioni non disponibili."
+    "loadError": "Impostazioni non disponibili.",
+    "notifyNeedsYouTitle": "Richieste che hanno bisogno di te",
+    "notifyNeedsYouHint": "Domande per te, revisione dei prompt prima dell'invio e risposte pronte che attendono l'ok.",
+    "notifyProblemsTitle": "Problemi",
+    "notifyProblemsHint": "Invio fallito o incerto, lavoro bloccato, code ferme o agenti irraggiungibili.",
+    "turnEndTitle": "Fine del turno",
+    "turnEndAll": "Tutti i turni completati",
+    "turnEndPlacet": "Solo lavoro di Placet",
+    "turnEndPlacetHint": "Solo i turni avviati da una richiesta Placet o da un messaggio inviato da qui.",
+    "turnEndOff": "Nessuno"
   },
   "commands": {
     "title": "Comandi",
