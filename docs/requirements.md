@@ -152,8 +152,8 @@ Problems addressed:
 | RF-61 | Session shows **context** (`72.7k / 1M · 7%`), model and effort. | [Implemented] Claude (model, effort, context tokens from the transcript; window size not known), Codex (model, effort, context and window from the rollout), Antigravity (model from the hooks' `modelName`) |
 | RF-62 | Remote **compact/effort** where supported (tmux CLI; Antigravity needs verification; Codex: `codex queue` ignores `-m`/`-c`, see [experiment](experiments/2026-10-18-codex-effort.md)). Claude desktop: “available only on PC”. | [Decided] |
 | RF-63 | Model switching is not planned: rereading context consumes usage. | [Decided] |
-| RF-64 | **Statistics in Settings:** requests per day, week, month or custom range; by relation type, project, node and provider; automatic versus manual; approved, edited or rejected; mean time to reply. Computed by the backend in one call from existing requests, so history is available backwards. Each request stores its relation type name, so statistics survive a deleted relation. | [Planned] Proposed by the maintainer on October 20, 2026. |
-| RF-64b | **Usage history:** the backend records each provider usage reading over time (today it keeps only the latest), so Statistics can show daily peaks per window, usage-guard threshold crossings and how long automatic relations were held back. History starts when recording ships; nothing earlier can be recovered, so recording comes before the charts. | [Planned] October 20, 2026. |
+| RF-64 | **Statistics in Settings:** requests per day, week, month or custom range; by relation type, project, node and provider; automatic versus manual; approved, edited or rejected; mean time to reply. Computed by the backend in one call from existing requests, so history is available backwards. Each request stores its relation type name, so statistics survive a deleted relation. | [Implemented] October 20, 2026: `GET /api/stats` (human only, local-day buckets, at most 400 days) and Settings → Statistics (`#/statistiche`). The response shape is documented in the architecture. |
+| RF-64b | **Usage history:** the backend records each provider usage reading over time (today it keeps only the latest), so Statistics can show daily peaks per window, usage-guard threshold crossings and how long automatic relations were held back. History starts when recording ships; nothing earlier can be recovered, so recording comes before the charts. | [Implemented] October 20, 2026: `usage_samples` records a reading when a bucket moved by at least one point, its reset changed or 10 minutes passed, with canonical UTC timestamps and 400-day retention. Recording starts with this version. |
 
 ### Later implementation: collaboration return approval and localization
 
@@ -197,7 +197,7 @@ The interface supports English/Italian, English fallback and a local browser pre
 | 2b | **Reliability:** local spool (RF-28), three request aspects/one request per session (RF-29), exclusions throughout (RF-45). |
 | 2 | **Phone sessions:** chat (RF-30…33), writes/wakeup (RF-34/35), Home/questions/pinned sessions (RF-40…43), provider bridge adapters (RF-24…27). |
 | 3 | **Nodes, relations and types** (RFC-02…10), `send(target, type_id, prompt)`, removal of `context` (RF-05b). Completed October 18, 2026, with change of recipient (RFC-07b), the general rule (RFC-08b), loop limits (RFC-14), projects (RFC-09, October 19, 2026) and project/node instructions (RFC-15, October 19, 2026); RFC-10 (retiring `AGENTS.md` rules) and RFC-16 (reply policies) remain. |
-| 4 | **Context, effort, compact and usage** (RF-60…63). RF-60/61 completed; RF-62 open (not possible through `codex queue`). |
+| 4 | **Context, effort, compact, usage and statistics** (RF-60…64b). RF-60/61 and RF-64/64b completed October 20, 2026; RF-62 open (not possible through `codex queue`). |
 | 5 | **Session creation and temporary sessions** (RF-50…53). |
 | 6 | **Project graph/editor** (RF-44), `/` skill picker (RF-36). |
 

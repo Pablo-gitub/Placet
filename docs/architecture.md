@@ -262,8 +262,9 @@ bridge → find/read/filter provider file → POST /api/bridge/jobs/{id}/result 
 
 ### Existing core tables
 
-- **`requests`:** `id`, `sender_id`, `recipient_id`, `question_type`, `prompt`, `edited_prompt`, `prompt_source`, `context`, `options`, `selected_options`, `custom_text`, `status`, `priority`, `created_at`, `expires_at`, `decided_at`, `completed_at`, `updated_at`, `delivered_at`, `delivery_attempts`, `delivering_since`, `executing_since`, `sender_session_id`, `recipient_session_id`; three-aspect columns in §3.7; `delivery_mode`; return policy fields `allow_auto_return`, `return_decision`, `return_text`; `project_id` (explicit user project context, RFC-15) and `project_context` (rendered instructions prepended to the prompt).
+- **`requests`:** `id`, `sender_id`, `recipient_id`, `question_type`, `prompt`, `edited_prompt`, `prompt_source`, `context`, `options`, `selected_options`, `custom_text`, `status`, `priority`, `created_at`, `expires_at`, `decided_at`, `completed_at`, `updated_at`, `delivered_at`, `delivery_attempts`, `delivering_since`, `executing_since`, `sender_session_id`, `recipient_session_id`; three-aspect columns in §3.7; `delivery_mode`; return policy fields `allow_auto_return`, `return_decision`, `return_text`; `project_id` (explicit user project context, RFC-15), `project_context` (rendered instructions prepended to the prompt), and `relation_type_name` (denormalized immutable relation type name captured upon assignment or redirection for analytics, RF-64).
 - **`responses`:** unique `request_id`, `responder_id`, `content`, `implicit`, `created_at`.
+- **`usage_samples`:** `id`, `provider`, `bucket_id`, `window`, `bucket_group`, `used_percent`, `resets_at`, `observed_at`, `created_at` (RF-64b). Index `idx_usage_samples_provider_observed` on `(provider, observed_at)`. Records provider quota samples with 400-day retention.
 - **`request_events`:** per-request `actor`, `event`, `details`, `at` timeline.
 - **`sessions`:** provider `id`, `agent_id`, `provider`, `entrypoint`, `cwd`, `title`, `tmux_session`, `state`, `turn_request_id`, `started_at`, `last_seen_at`, `waiter_seen_at`, `ended_at`, `activity_at` (turn activity), `pinned_at`, `model`, `node_id`, and suspension/exclusion metadata. Closed/suspended/reachable are derived using lifecycle observations, not simply an idle label.
 - **`nodes`:** `id`, `name` (unique, case-insensitive), `provider`, `cwd`, `created_at` (RFC-02). A node's current session is its attached session seen most recently. The user names a session from the chat header, attaches it to an existing node of the same provider or detaches it. A Claude Code `SessionStart` with source `clear` takes the node of the conversation that ended within two minutes for the same agent, provider, folder and tmux session, unless the node already has an open conversation.
@@ -397,3 +398,26 @@ The bridge reports normalized 5-hour/weekly windows to `POST /api/bridge/usage`;
 Account-wide 100% windows with future timezone-aware reset timestamps hold provider delivery until reset. Per-model-group limits do not hold an entire provider. These are observations, not a guarantee that the provider will accept the next request.
 
 Newest transcript pages carry optional model/effort/context metadata for Claude and Codex; Antigravity model comes from hook `modelName`. Unreadable optional metadata does not prevent chat reads. Claude context-window size is not inferred; unavailable values stay absent. Session changes clear previous metadata. Provider model IDs and effort values remain provider data, while surrounding labels and numbers follow the interface locale.
+
+### Usage history recording and retention (RF-64b)
+
+The bridge reports quota windows to `POST /api/bridge/usage`, and Claude manual renew calls `/api/usage/claude/renew`. To track utilization over time without unbounded growth, samples are recorded in `usage_samples` (`provider`, `bucket_id`, `window`, `bucket_group`, `used_percent`, `resets_at`, `observed_at`) under four criteria:
+1. Significant change in `used_percent` compared to the previous recorded sample for that bucket.
+2. The turn boundaries of any active conversation (first sample after `executing_since` or `completed_at`).
+3. Transition across the configured usage guard threshold.
+4. Periodic heartbeat (recorded at least once every 30 minutes even without changes).
+
+Samples older than 400 days are automatically purged in the background, throttled to execute at most once per hour.
+
+### Statistics API and Dashboard (RF-64)
+
+The human supervisor can inspect aggregated usage, automation efficiency, and collaboration metrics from Settings → Records → Statistics (`#/statistiche`).
+
+- **Backend Aggregation (`GET /api/stats`):** Accepts `from` (YYYY-MM-DD), `to` (YYYY-MM-DD), and `tz` (IANA time zone name) parameters. Aggregates:
+  - Total requests, automation rate (`automatic` / `total`), mean reply time in seconds, and days exceeding provider quota thresholds.
+  - Request volume and mean reply time grouped per day in the client timezone.
+  - Distribution by relation type using `requests.relation_type_name`, ensuring historical requests remain correctly classified even if relations or types are edited or deleted.
+  - Distribution by project and by sender/recipient provider.
+  - Decision outcomes (approved, edited, rejected, expired, cancelled) and human user messages (requests sent vs. direct replies).
+  - Daily peak quota percentages per provider window from `usage_samples`, annotated with threshold crossing alerts.
+- **Frontend Presentation:** Implemented with lightweight SVG charts and responsive CSS grids in `frontend/src/Statistics.jsx`. Supports period presets (`today`, `7d` default, `30d`, and `custom` date inputs), responsive down to 375 px mobile viewports, keyboard accessibility, and full localization.

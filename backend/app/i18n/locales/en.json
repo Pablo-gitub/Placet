@@ -51,5 +51,9 @@
   "envelope.limit_rate": "This relation reached its hourly limit of automatic prompts: this one waits for the user's review. Do not resend it.",
   "envelope.limit_usage": "One of the two sessions is close to its usage limit: automatic relations are reviewed by the user until usage goes down. This prompt waits for the user's review. Do not resend it.",
   "notify.test_title": "Placet: test notification",
-  "notify.test_body": "Notifications reach this device. Tap to open Placet."
+  "notify.test_body": "Notifications reach this device. Tap to open Placet.",
+  "stats.invalid_timezone": "Invalid timezone: {tz}",
+  "stats.invalid_date": "Invalid date format: {date}",
+  "stats.invalid_range": "From date cannot be after to date.",
+  "stats.range_too_large": "Date range exceeds maximum of 400 days."
 }

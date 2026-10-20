@@ -63,6 +63,7 @@ export function routeFromHash(hash) {
   if (project) return { view: "project_detail", projectId: Number(project[1]) };
   if (hash === "#/progetti" || hash === "#projects") return { view: "projects" };
   if (hash === "#/storico") return { view: "history" };
+  if (hash === "#/statistiche") return { view: "statistics" };
   if (hash === "#/impostazioni") return { view: "settings" };
   if (hash === "#/comandi") return { view: "commands" };
   return { view: "home" };

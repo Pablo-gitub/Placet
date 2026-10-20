@@ -2,7 +2,7 @@ import sqlite3
 import json
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Set, Tuple, Union
 
 import uuid
 from pathlib import Path
@@ -105,9 +105,29 @@ def _ts(value: Optional[str]) -> Optional[datetime]:
     return datetime.fromisoformat(value) if value else None
 
 
+def _normalize_utc_iso(val: Union[str, datetime, None]) -> Optional[str]:
+    if not val:
+        return None
+    if isinstance(val, str):
+        try:
+            dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
+        except Exception:
+            return val
+    elif isinstance(val, datetime):
+        dt = val
+    else:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 class Database:
     def __init__(self, db_path: str = "placet.db"):
         self.db_path = db_path
+        self._last_usage_purge_time = 0.0
 
     @contextmanager
     def _get_connection(self) -> Iterator[sqlite3.Connection]:
@@ -288,7 +308,8 @@ class Database:
                 recipient_session_id TEXT,
                 prompt_source TEXT,
                 project_id INTEGER,
-                project_context TEXT
+                project_context TEXT,
+                relation_type_name TEXT
             );
             """)
             cursor.execute("""
@@ -467,6 +488,25 @@ class Database:
                     " AND entrypoint = 'claude-desktop' AND ended_at IS NOT NULL"
                 )
                 cursor.execute("INSERT INTO schema_migrations (name) VALUES (?)", (migration,))
+            migration_samples = 'usage_samples_v1'
+            if cursor.execute("SELECT 1 FROM schema_migrations WHERE name = ?", (migration_samples,)).fetchone() is None:
+                cursor.execute(
+                    "CREATE TABLE IF NOT EXISTS usage_samples ("
+                    "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    "  provider TEXT NOT NULL,"
+                    "  observed_at TEXT NOT NULL,"
+                    "  window TEXT NOT NULL,"
+                    "  bucket_id TEXT NOT NULL,"
+                    "  bucket_group TEXT,"
+                    "  used_percent REAL NOT NULL,"
+                    "  resets_at TEXT"
+                    ");"
+                )
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_usage_samples_provider_observed"
+                    " ON usage_samples (provider, observed_at);"
+                )
+                cursor.execute("INSERT INTO schema_migrations (name) VALUES (?)", (migration_samples,))
             # The three aspects of a request (RF-29); older rows are backfilled
             # from their status once.
             if "delivery_state" not in cols:
@@ -511,6 +551,23 @@ class Database:
             if "project_context" not in cols:
                 # RFC-15: composed project and node instructions block
                 cursor.execute("ALTER TABLE requests ADD COLUMN project_context TEXT;")
+            if "relation_type_name" not in cols:
+                # RF-64: historical relation type name on requests
+                cursor.execute("ALTER TABLE requests ADD COLUMN relation_type_name TEXT;")
+            migration_rtn = 'request_relation_type_name_v1'
+            if cursor.execute("SELECT 1 FROM schema_migrations WHERE name = ?", (migration_rtn,)).fetchone() is None:
+                cursor.execute("PRAGMA table_info(requests);")
+                current_req_cols = [r["name"] for r in cursor.fetchall()]
+                if "relation_type_name" not in current_req_cols:
+                    cursor.execute("ALTER TABLE requests ADD COLUMN relation_type_name TEXT;")
+                cursor.execute(
+                    "UPDATE requests SET relation_type_name = ("
+                    "  SELECT rt.name FROM relations rel"
+                    "  JOIN relation_types rt ON rt.id = rel.type_id"
+                    "  WHERE rel.id = requests.relation_id"
+                    ") WHERE relation_id IS NOT NULL AND relation_type_name IS NULL;"
+                )
+                cursor.execute("INSERT INTO schema_migrations (name) VALUES (?)", (migration_rtn,))
             cursor.execute("PRAGMA table_info(projects);")
             project_cols = [r["name"] for r in cursor.fetchall()]
             if "instructions" not in project_cols:
@@ -681,6 +738,7 @@ class Database:
             project_id=row["project_id"] if "project_id" in keys else None,
             project_name=row["project_name"] if "project_name" in keys else None,
             project_context=row["project_context"] if "project_context" in keys else None,
+            relation_type_name=row["relation_type_name"] if "relation_type_name" in keys else None,
         )
 
     def list_requests(
@@ -1924,10 +1982,19 @@ class Database:
                               " WHERE id = ? AND status = 'PENDING'", (request_id,)).fetchone()
             if row is None:
                 return False
+            type_name = None
+            if relation_id is not None:
+                rt_row = cur.execute(
+                    "SELECT rt.name FROM relations r JOIN relation_types rt ON rt.id = r.type_id WHERE r.id = ?",
+                    (relation_id,),
+                ).fetchone()
+                if rt_row:
+                    type_name = rt_row["name"]
             cur.execute(
                 "UPDATE requests SET recipient_id = COALESCE(?, recipient_id), relation_id = ?,"
+                " relation_type_name = COALESCE(?, relation_type_name),"
                 " recipient_session_id = ? WHERE id = ? AND status = 'PENDING'",
-                (recipient_id, relation_id, recipient_session_id, request_id))
+                (recipient_id, relation_id, type_name, recipient_session_id, request_id))
             if cur.rowcount == 0:
                 return False
             self._log(cur, request_id, actor, "redirected", {
@@ -1954,7 +2021,17 @@ class Database:
 
     def set_request_relation(self, request_id: int, relation_id: int) -> None:
         with self._get_connection() as conn:
-            conn.execute("UPDATE requests SET relation_id = ? WHERE id = ?", (relation_id, request_id))
+            type_name = None
+            row = conn.execute(
+                "SELECT rt.name FROM relations r JOIN relation_types rt ON rt.id = r.type_id WHERE r.id = ?",
+                (relation_id,),
+            ).fetchone()
+            if row:
+                type_name = row["name"]
+            conn.execute(
+                "UPDATE requests SET relation_id = ?, relation_type_name = COALESCE(?, relation_type_name) WHERE id = ?",
+                (relation_id, type_name, request_id),
+            )
 
     def set_request_project_context(self, request_id: int, project_context: Optional[str]) -> None:
         with self._get_connection() as conn:
@@ -1972,6 +2049,139 @@ class Database:
     def list_usage(self) -> List[str]:
         with self._get_connection() as conn:
             return [r["data"] for r in conn.execute("SELECT data FROM provider_usage ORDER BY provider")]
+
+    def record_usage_samples(
+        self,
+        provider: str,
+        buckets: Any,
+        observed_at: Optional[Any] = None,
+        now: Optional[datetime] = None,
+    ) -> bool:
+        """
+        RF-64b: record usage samples into usage_samples table when:
+        1. No previous samples for this provider;
+        2. >= 10 minutes elapsed since last sample;
+        3. used_percent of any bucket changed by >= 1.0 percentage points;
+        4. resets_at of any bucket changed (e.g. window reset).
+
+        Also purges samples older than 400 days (throttled to at most once per hour).
+        """
+        if not buckets:
+            return False
+
+        bucket_items = []
+        for b in buckets:
+            if isinstance(b, dict):
+                b_id = str(b.get("id", ""))
+                b_group = b.get("group") or b.get("bucket_group")
+                b_window = str(b.get("window", ""))
+                b_used = float(b.get("used_percent", 0.0))
+                raw_resets = b.get("resets_at")
+            else:
+                b_id = str(getattr(b, "id", ""))
+                b_group = getattr(b, "group", None)
+                b_window = str(getattr(b, "window", ""))
+                b_used = float(getattr(b, "used_percent", 0.0))
+                raw_resets = getattr(b, "resets_at", None)
+
+            b_resets = _normalize_utc_iso(raw_resets)
+
+            bucket_items.append({
+                "id": b_id,
+                "group": b_group,
+                "window": b_window,
+                "used_percent": b_used,
+                "resets_at": b_resets,
+            })
+
+        observed_at_str = _normalize_utc_iso(observed_at or now or datetime.now(timezone.utc))
+        try:
+            observed_at_dt = datetime.fromisoformat(observed_at_str.replace("Z", "+00:00"))
+        except Exception:
+            observed_at_dt = now or datetime.now(timezone.utc)
+
+        if observed_at_dt.tzinfo is None:
+            observed_at_dt = observed_at_dt.replace(tzinfo=timezone.utc)
+
+        with self._get_connection() as conn:
+            last_row = conn.execute(
+                "SELECT observed_at FROM usage_samples WHERE provider = ? ORDER BY observed_at DESC, id DESC LIMIT 1",
+                (provider,),
+            ).fetchone()
+
+            should_record = False
+            if last_row is None:
+                should_record = True
+            else:
+                last_obs_str = last_row["observed_at"]
+                try:
+                    last_obs_dt = datetime.fromisoformat(last_obs_str.replace("Z", "+00:00"))
+                    if last_obs_dt.tzinfo is None:
+                        last_obs_dt = last_obs_dt.replace(tzinfo=timezone.utc)
+                    elapsed_seconds = (observed_at_dt - last_obs_dt).total_seconds()
+                except Exception:
+                    elapsed_seconds = 600.0
+
+                if elapsed_seconds >= 600.0:
+                    should_record = True
+                else:
+                    prev_rows = conn.execute(
+                        "SELECT bucket_id, bucket_group, used_percent, resets_at FROM usage_samples"
+                        " WHERE provider = ? AND observed_at = ?",
+                        (provider, last_obs_str),
+                    ).fetchall()
+                    prev_map = {(r["bucket_id"], r["bucket_group"]): r for r in prev_rows}
+
+                    if len(prev_map) != len(bucket_items):
+                        should_record = True
+                    else:
+                        for b in bucket_items:
+                            key = (b["id"], b["group"])
+                            if key not in prev_map:
+                                should_record = True
+                                break
+                            prev_b = prev_map[key]
+                            if abs(b["used_percent"] - prev_b["used_percent"]) >= 1.0 - 1e-9:
+                                should_record = True
+                                break
+                            r1 = b["resets_at"]
+                            r2 = prev_b["resets_at"]
+                            if (r1 or None) != (r2 or None):
+                                if not r1 or not r2:
+                                    should_record = True
+                                    break
+                                try:
+                                    dt1 = datetime.fromisoformat(r1.replace("Z", "+00:00"))
+                                    dt2 = datetime.fromisoformat(r2.replace("Z", "+00:00"))
+                                    if dt1 != dt2:
+                                        should_record = True
+                                        break
+                                except Exception:
+                                    if r1 != r2:
+                                        should_record = True
+                                        break
+
+            if not should_record:
+                return False
+
+            for b in bucket_items:
+                conn.execute(
+                    "INSERT INTO usage_samples (provider, observed_at, window, bucket_id, bucket_group, used_percent, resets_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (provider, observed_at_str, b["window"], b["id"], b["group"], b["used_percent"], b["resets_at"]),
+                )
+
+            # Retention: purge samples older than 400 days (throttled once per hour)
+            purge_now = now or observed_at_dt or datetime.now(timezone.utc)
+            if purge_now.tzinfo is None:
+                purge_now = purge_now.replace(tzinfo=timezone.utc)
+            purge_ts = purge_now.timestamp()
+            if abs(purge_ts - self._last_usage_purge_time) >= 3600.0:
+                cutoff = purge_now - timedelta(days=400)
+                conn.execute("DELETE FROM usage_samples WHERE observed_at < ?", (cutoff.isoformat(),))
+                self._last_usage_purge_time = purge_ts
+
+            return True
 
     def limited_providers(self, now: Optional[datetime] = None) -> Set[str]:
         """
@@ -2015,6 +2225,243 @@ class Database:
                    for b in usage.buckets):
                 near.add(usage.provider)
         return near
+
+    def get_stats(
+        self,
+        from_date: Any,
+        to_date: Any,
+        tz_name: str = "UTC",
+        usage_thresholds: Optional[Dict[str, int]] = None,
+    ) -> Dict[str, Any]:
+        """
+        RF-64: compute aggregate statistics for requests and provider usage
+        in the range [from_date, to_date] localized to tz_name.
+        """
+        import zoneinfo
+
+        tz = zoneinfo.ZoneInfo(tz_name)
+        start_local = datetime(from_date.year, from_date.month, from_date.day, 0, 0, 0, tzinfo=tz)
+        start_utc = start_local.astimezone(timezone.utc)
+        end_local = datetime(to_date.year, to_date.month, to_date.day, 0, 0, 0, tzinfo=tz) + timedelta(days=1)
+        end_utc = end_local.astimezone(timezone.utc)
+
+        start_sql = (start_utc - timedelta(days=1)).isoformat()
+        end_sql = (end_utc + timedelta(days=1)).isoformat()
+
+        days = []
+        cur = from_date
+        while cur <= to_date:
+            days.append(cur.isoformat())
+            cur += timedelta(days=1)
+
+        day_counts = {d: 0 for d in days}
+        day_human_deltas: Dict[str, List[float]] = {d: [] for d in days}
+        by_relation_type: Dict[str, int] = {}
+        by_project_map: Dict[Tuple[Optional[int], str], int] = {}
+        by_sender_provider = {"claude-code": 0, "gemini": 0, "codex": 0, "human": 0}
+        by_recipient_provider = {"claude-code": 0, "gemini": 0, "codex": 0, "human": 0}
+        approval = {"automatic": 0, "manual": 0, "ad_hoc": 0}
+        decisions = {"approved": 0, "edited": 0, "rejected": 0, "expired": 0, "cancelled": 0}
+        user_requests_count = 0
+        user_replies_count = 0
+        all_human_deltas: List[float] = []
+
+        def resolve_provider(party_id: str, sess_provider: Optional[str]) -> str:
+            if party_id == "human":
+                return "human"
+            if sess_provider:
+                sp = sess_provider.lower()
+                if "claude" in sp:
+                    return "claude-code"
+                if "gemini" in sp or "antigravity" in sp:
+                    return "gemini"
+                if "codex" in sp or "chatgpt" in sp:
+                    return "codex"
+                return sess_provider
+            p = (party_id or "").lower()
+            if "claude" in p:
+                return "claude-code"
+            if "gemini" in p or "antigravity" in p:
+                return "gemini"
+            if "codex" in p or "chatgpt" in p:
+                return "codex"
+            return party_id or "unknown"
+
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT r.id, r.sender_id, r.recipient_id, r.question_type, r.prompt, r.status,
+                       r.edited_prompt, r.created_at, r.decided_at, r.completed_at, r.approval,
+                       r.relation_id, r.relation_type_name, r.project_id,
+                       p.name AS project_name,
+                       s_send.provider AS sender_session_provider,
+                       s_rec.provider AS recipient_session_provider
+                FROM requests r
+                LEFT JOIN projects p ON p.id = r.project_id
+                LEFT JOIN sessions s_send ON s_send.id = r.sender_session_id
+                LEFT JOIN sessions s_rec ON s_rec.id = r.recipient_session_id
+                WHERE r.created_at >= ? AND r.created_at <= ?
+                ORDER BY r.created_at ASC
+                """,
+                (start_sql, end_sql),
+            ).fetchall()
+
+            in_range_count = 0
+            for r in rows:
+                try:
+                    dt = datetime.fromisoformat(r["created_at"].replace("Z", "+00:00"))
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    if not (start_utc <= dt < end_utc):
+                        continue
+                except Exception:
+                    continue
+
+                in_range_count += 1
+                local_date = dt.astimezone(tz).date().isoformat()
+                if local_date in day_counts:
+                    day_counts[local_date] += 1
+
+                if r["recipient_id"] == "human" and r["decided_at"] is not None:
+                    try:
+                        decided_dt = datetime.fromisoformat(r["decided_at"].replace("Z", "+00:00"))
+                        if decided_dt.tzinfo is None:
+                            decided_dt = decided_dt.replace(tzinfo=timezone.utc)
+                        delta_s = max(0.0, (decided_dt - dt).total_seconds())
+                        if local_date in day_human_deltas:
+                            day_human_deltas[local_date].append(delta_s)
+                        all_human_deltas.append(delta_s)
+                    except Exception:
+                        pass
+
+                rel_name = r["relation_type_name"]
+                if rel_name:
+                    by_relation_type[rel_name] = by_relation_type.get(rel_name, 0) + 1
+
+                proj_id = r["project_id"]
+                proj_name = r["project_name"] if proj_id is not None else "Senza progetto"
+                proj_key = (proj_id, proj_name)
+                by_project_map[proj_key] = by_project_map.get(proj_key, 0) + 1
+
+                send_p = resolve_provider(r["sender_id"], r["sender_session_provider"])
+                rec_p = resolve_provider(r["recipient_id"], r["recipient_session_provider"])
+                by_sender_provider[send_p] = by_sender_provider.get(send_p, 0) + 1
+                by_recipient_provider[rec_p] = by_recipient_provider.get(rec_p, 0) + 1
+
+                if r["sender_id"] == "human":
+                    approval["ad_hoc"] += 1
+                elif r["approval"] == "automatic":
+                    approval["automatic"] += 1
+                elif r["approval"] == "manual":
+                    approval["manual"] += 1
+
+                st = r["status"]
+                if st in ("APPROVED", "COMPLETED", "DELIVERING", "EXECUTING", "STALLED"):
+                    if r["edited_prompt"]:
+                        decisions["edited"] += 1
+                    else:
+                        decisions["approved"] += 1
+                elif st == "REJECTED":
+                    decisions["rejected"] += 1
+                elif st == "EXPIRED":
+                    decisions["expired"] += 1
+                elif st == "CANCELLED":
+                    decisions["cancelled"] += 1
+
+                if r["sender_id"] == "human":
+                    user_requests_count += 1
+                if r["recipient_id"] == "human" and (r["decided_at"] is not None or st in ("APPROVED", "COMPLETED")):
+                    user_replies_count += 1
+
+            per_day = []
+            for d in days:
+                deltas = day_human_deltas[d]
+                mean_s = round(sum(deltas) / len(deltas), 1) if deltas else None
+                per_day.append({
+                    "date": d,
+                    "count": day_counts[d],
+                    "mean_reply_seconds": mean_s,
+                })
+
+            by_project = [
+                {"id": pid, "name": pname, "count": cnt}
+                for (pid, pname), cnt in sorted(by_project_map.items(), key=lambda x: (-x[1], str(x[0][1])))
+            ]
+
+            mean_reply_s = round(sum(all_human_deltas) / len(all_human_deltas), 1) if all_human_deltas else None
+
+            # Provider usage samples in period
+            usage_guard_cfg = usage_thresholds or {"five_hour": 90, "seven_day": 95}
+            sample_rows = conn.execute(
+                """
+                SELECT provider, observed_at, window, bucket_id, bucket_group, used_percent
+                FROM usage_samples
+                WHERE observed_at >= ? AND observed_at <= ?
+                ORDER BY observed_at ASC
+                """,
+                (start_sql, end_sql),
+            ).fetchall()
+
+            buckets_data: Dict[Tuple[str, str, str, Optional[str]], Dict[str, List[float]]] = {}
+            for s in sample_rows:
+                try:
+                    s_dt = datetime.fromisoformat(s["observed_at"].replace("Z", "+00:00"))
+                    if s_dt.tzinfo is None:
+                        s_dt = s_dt.replace(tzinfo=timezone.utc)
+                    if not (start_utc <= s_dt < end_utc):
+                        continue
+                    s_date = s_dt.astimezone(tz).date().isoformat()
+                    b_key = (s["provider"], s["window"], s["bucket_id"], s["bucket_group"])
+                    if b_key not in buckets_data:
+                        buckets_data[b_key] = {d: [] for d in days}
+                    if s_date in buckets_data[b_key]:
+                        buckets_data[b_key][s_date].append(s["used_percent"])
+                except Exception:
+                    continue
+
+            usage_result = []
+            for (prov, win, b_id, b_grp), day_dict in sorted(buckets_data.items()):
+                thresh = usage_guard_cfg.get("five_hour", 90) if win == "5h" else usage_guard_cfg.get("seven_day", 95)
+                peaks = []
+                threshold_days = 0
+                for d in days:
+                    vals = day_dict.get(d, [])
+                    peak_val = round(max(vals), 1) if vals else None
+                    peaks.append({"date": d, "peak_used_percent": peak_val})
+                    if peak_val is not None and peak_val >= thresh:
+                        threshold_days += 1
+                usage_result.append({
+                    "provider": prov,
+                    "window": win,
+                    "bucket_id": b_id,
+                    "bucket_group": b_grp,
+                    "threshold": thresh,
+                    "threshold_days": threshold_days,
+                    "peaks": peaks,
+                })
+
+            return {
+                "from": from_date.isoformat(),
+                "to": to_date.isoformat(),
+                "tz": tz_name,
+                "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "total_requests": in_range_count,
+                "per_day": per_day,
+                "by_relation_type": by_relation_type,
+                "by_project": by_project,
+                "by_sender_provider": by_sender_provider,
+                "by_recipient_provider": by_recipient_provider,
+                "approval": approval,
+                "decisions": decisions,
+                "user_messages": {
+                    "requests": user_requests_count,
+                    "replies": user_replies_count,
+                    "sent": user_requests_count,
+                    "received": user_replies_count,
+                },
+                "mean_reply_seconds": mean_reply_s,
+                "usage": usage_result,
+            }
 
     def reopen_session(self, session_id: str) -> None:
         """The session runs again (it started, or a turn began): neither ended nor suspended."""

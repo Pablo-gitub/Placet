@@ -1,6 +1,6 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronRight, ShieldCheck, Terminal } from "lucide-react";
+import { BarChart2, ChevronRight, ShieldCheck, Terminal } from "lucide-react";
 import LanguageSelect from "./i18n/LanguageSelect";
 import BackgroundLanguage from "./i18n/BackgroundLanguage";
 import PushControl from "./PushControl";
@@ -19,7 +19,7 @@ function Row({ title, hint, children }) {
 }
 
 /** Settings: language, notifications, and the way to the history. */
-export default function Settings({ onOpenHistory, onOpenCommands }) {
+export default function Settings({ onOpenHistory, onOpenCommands, onOpenStats }) {
   const { t } = useTranslation();
   return (
     <div className="settings" data-testid="settings-section">
@@ -59,6 +59,19 @@ export default function Settings({ onOpenHistory, onOpenCommands }) {
           <span className="settings-row-text">
             <strong>{t("app.history")}</strong>
             <small>{t("settings.historyHint")}</small>
+          </span>
+          <ChevronRight size={16} />
+        </button>
+        <button
+          type="button"
+          className="settings-link"
+          data-testid="settings-stats"
+          onClick={onOpenStats || (() => { window.location.hash = "#/statistiche"; })}
+        >
+          <BarChart2 size={16} />
+          <span className="settings-row-text">
+            <strong>{t("stats.title")}</strong>
+            <small>{t("settings.statsHint")}</small>
           </span>
           <ChevronRight size={16} />
         </button>
