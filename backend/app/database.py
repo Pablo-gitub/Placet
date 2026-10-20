@@ -289,7 +289,8 @@ class Database:
                 recipient_session_id TEXT,
                 prompt_source TEXT,
                 project_id INTEGER,
-                project_context TEXT
+                project_context TEXT,
+                relation_type_name TEXT
             );
             """)
             cursor.execute("""
@@ -531,6 +532,23 @@ class Database:
             if "project_context" not in cols:
                 # RFC-15: composed project and node instructions block
                 cursor.execute("ALTER TABLE requests ADD COLUMN project_context TEXT;")
+            if "relation_type_name" not in cols:
+                # RF-64: historical relation type name on requests
+                cursor.execute("ALTER TABLE requests ADD COLUMN relation_type_name TEXT;")
+            migration_rtn = 'request_relation_type_name_v1'
+            if cursor.execute("SELECT 1 FROM schema_migrations WHERE name = ?", (migration_rtn,)).fetchone() is None:
+                cursor.execute("PRAGMA table_info(requests);")
+                current_req_cols = [r["name"] for r in cursor.fetchall()]
+                if "relation_type_name" not in current_req_cols:
+                    cursor.execute("ALTER TABLE requests ADD COLUMN relation_type_name TEXT;")
+                cursor.execute(
+                    "UPDATE requests SET relation_type_name = ("
+                    "  SELECT rt.name FROM relations rel"
+                    "  JOIN relation_types rt ON rt.id = rel.type_id"
+                    "  WHERE rel.id = requests.relation_id"
+                    ") WHERE relation_id IS NOT NULL AND relation_type_name IS NULL;"
+                )
+                cursor.execute("INSERT INTO schema_migrations (name) VALUES (?)", (migration_rtn,))
             cursor.execute("PRAGMA table_info(projects);")
             project_cols = [r["name"] for r in cursor.fetchall()]
             if "instructions" not in project_cols:
@@ -701,6 +719,7 @@ class Database:
             project_id=row["project_id"] if "project_id" in keys else None,
             project_name=row["project_name"] if "project_name" in keys else None,
             project_context=row["project_context"] if "project_context" in keys else None,
+            relation_type_name=row["relation_type_name"] if "relation_type_name" in keys else None,
         )
 
     def list_requests(
@@ -1944,10 +1963,19 @@ class Database:
                               " WHERE id = ? AND status = 'PENDING'", (request_id,)).fetchone()
             if row is None:
                 return False
+            type_name = None
+            if relation_id is not None:
+                rt_row = cur.execute(
+                    "SELECT rt.name FROM relations r JOIN relation_types rt ON rt.id = r.type_id WHERE r.id = ?",
+                    (relation_id,),
+                ).fetchone()
+                if rt_row:
+                    type_name = rt_row["name"]
             cur.execute(
                 "UPDATE requests SET recipient_id = COALESCE(?, recipient_id), relation_id = ?,"
+                " relation_type_name = COALESCE(?, relation_type_name),"
                 " recipient_session_id = ? WHERE id = ? AND status = 'PENDING'",
-                (recipient_id, relation_id, recipient_session_id, request_id))
+                (recipient_id, relation_id, type_name, recipient_session_id, request_id))
             if cur.rowcount == 0:
                 return False
             self._log(cur, request_id, actor, "redirected", {
@@ -1974,7 +2002,17 @@ class Database:
 
     def set_request_relation(self, request_id: int, relation_id: int) -> None:
         with self._get_connection() as conn:
-            conn.execute("UPDATE requests SET relation_id = ? WHERE id = ?", (relation_id, request_id))
+            type_name = None
+            row = conn.execute(
+                "SELECT rt.name FROM relations r JOIN relation_types rt ON rt.id = r.type_id WHERE r.id = ?",
+                (relation_id,),
+            ).fetchone()
+            if row:
+                type_name = row["name"]
+            conn.execute(
+                "UPDATE requests SET relation_id = ?, relation_type_name = COALESCE(?, relation_type_name) WHERE id = ?",
+                (relation_id, type_name, request_id),
+            )
 
     def set_request_project_context(self, request_id: int, project_context: Optional[str]) -> None:
         with self._get_connection() as conn:
@@ -2180,6 +2218,242 @@ class Database:
                    for b in usage.buckets):
                 near.add(usage.provider)
         return near
+
+    def get_stats(
+        self,
+        from_date: Any,
+        to_date: Any,
+        tz_name: str = "UTC",
+        usage_thresholds: Optional[Dict[str, int]] = None,
+    ) -> Dict[str, Any]:
+        """
+        RF-64: compute aggregate statistics for requests and provider usage
+        in the range [from_date, to_date] localized to tz_name.
+        """
+        import zoneinfo
+
+        tz = zoneinfo.ZoneInfo(tz_name)
+        start_local = datetime(from_date.year, from_date.month, from_date.day, 0, 0, 0, tzinfo=tz)
+        start_utc = start_local.astimezone(timezone.utc)
+        end_local = datetime(to_date.year, to_date.month, to_date.day, 0, 0, 0, tzinfo=tz) + timedelta(days=1)
+        end_utc = end_local.astimezone(timezone.utc)
+
+        start_sql = (start_utc - timedelta(days=1)).isoformat()
+        end_sql = (end_utc + timedelta(days=1)).isoformat()
+
+        days = []
+        cur = from_date
+        while cur <= to_date:
+            days.append(cur.isoformat())
+            cur += timedelta(days=1)
+
+        day_counts = {d: 0 for d in days}
+        day_human_deltas: Dict[str, List[float]] = {d: [] for d in days}
+        by_relation_type: Dict[str, int] = {}
+        by_project_map: Dict[Tuple[Optional[int], str], int] = {}
+        by_sender_provider = {"claude-code": 0, "gemini": 0, "codex": 0, "human": 0}
+        by_recipient_provider = {"claude-code": 0, "gemini": 0, "codex": 0, "human": 0}
+        approval = {"automatic": 0, "manual": 0, "ad_hoc": 0}
+        decisions = {"approved": 0, "edited": 0, "rejected": 0, "expired": 0, "cancelled": 0}
+        user_requests_count = 0
+        user_replies_count = 0
+        all_human_deltas: List[float] = []
+
+        def resolve_provider(party_id: str, sess_provider: Optional[str]) -> str:
+            if party_id == "human":
+                return "human"
+            if sess_provider:
+                sp = sess_provider.lower()
+                if "claude" in sp:
+                    return "claude-code"
+                if "gemini" in sp or "antigravity" in sp:
+                    return "gemini"
+                if "codex" in sp or "chatgpt" in sp:
+                    return "codex"
+                return sess_provider
+            p = (party_id or "").lower()
+            if "claude" in p:
+                return "claude-code"
+            if "gemini" in p or "antigravity" in p:
+                return "gemini"
+            if "codex" in p or "chatgpt" in p:
+                return "codex"
+            return party_id or "unknown"
+
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT r.id, r.sender_id, r.recipient_id, r.question_type, r.prompt, r.status,
+                       r.edited_prompt, r.created_at, r.decided_at, r.completed_at, r.approval,
+                       r.relation_id, r.relation_type_name, r.project_id,
+                       p.name AS project_name,
+                       s_send.provider AS sender_session_provider,
+                       s_rec.provider AS recipient_session_provider
+                FROM requests r
+                LEFT JOIN projects p ON p.id = r.project_id
+                LEFT JOIN sessions s_send ON s_send.id = r.sender_session_id
+                LEFT JOIN sessions s_rec ON s_rec.id = r.recipient_session_id
+                WHERE r.created_at >= ? AND r.created_at <= ?
+                ORDER BY r.created_at ASC
+                """,
+                (start_sql, end_sql),
+            ).fetchall()
+
+            in_range_count = 0
+            for r in rows:
+                try:
+                    dt = datetime.fromisoformat(r["created_at"].replace("Z", "+00:00"))
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    if not (start_utc <= dt < end_utc):
+                        continue
+                except Exception:
+                    continue
+
+                in_range_count += 1
+                local_date = dt.astimezone(tz).date().isoformat()
+                if local_date in day_counts:
+                    day_counts[local_date] += 1
+
+                if r["recipient_id"] == "human" and r["decided_at"] is not None:
+                    try:
+                        decided_dt = datetime.fromisoformat(r["decided_at"].replace("Z", "+00:00"))
+                        if decided_dt.tzinfo is None:
+                            decided_dt = decided_dt.replace(tzinfo=timezone.utc)
+                        delta_s = max(0.0, (decided_dt - dt).total_seconds())
+                        if local_date in day_human_deltas:
+                            day_human_deltas[local_date].append(delta_s)
+                        all_human_deltas.append(delta_s)
+                    except Exception:
+                        pass
+
+                rel_name = r["relation_type_name"]
+                if rel_name:
+                    by_relation_type[rel_name] = by_relation_type.get(rel_name, 0) + 1
+
+                proj_id = r["project_id"]
+                proj_name = r["project_name"] if proj_id is not None else "Senza progetto"
+                proj_key = (proj_id, proj_name)
+                by_project_map[proj_key] = by_project_map.get(proj_key, 0) + 1
+
+                send_p = resolve_provider(r["sender_id"], r["sender_session_provider"])
+                rec_p = resolve_provider(r["recipient_id"], r["recipient_session_provider"])
+                by_sender_provider[send_p] = by_sender_provider.get(send_p, 0) + 1
+                by_recipient_provider[rec_p] = by_recipient_provider.get(rec_p, 0) + 1
+
+                if r["sender_id"] == "human":
+                    approval["ad_hoc"] += 1
+                elif r["approval"] == "automatic":
+                    approval["automatic"] += 1
+                elif r["approval"] == "manual":
+                    approval["manual"] += 1
+
+                st = r["status"]
+                if st in ("APPROVED", "COMPLETED", "DELIVERING", "EXECUTING", "STALLED"):
+                    if r["edited_prompt"]:
+                        decisions["edited"] += 1
+                    else:
+                        decisions["approved"] += 1
+                elif st == "REJECTED":
+                    decisions["rejected"] += 1
+                elif st == "EXPIRED":
+                    decisions["expired"] += 1
+                elif st == "CANCELLED":
+                    decisions["cancelled"] += 1
+
+                if r["sender_id"] == "human":
+                    user_requests_count += 1
+                if r["recipient_id"] == "human" and (r["decided_at"] is not None or st in ("APPROVED", "COMPLETED")):
+                    user_replies_count += 1
+
+            per_day = []
+            for d in days:
+                deltas = day_human_deltas[d]
+                mean_s = round(sum(deltas) / len(deltas), 1) if deltas else None
+                per_day.append({
+                    "date": d,
+                    "count": day_counts[d],
+                    "mean_reply_seconds": mean_s,
+                })
+
+            by_project = [
+                {"id": pid, "name": pname, "count": cnt}
+                for (pid, pname), cnt in sorted(by_project_map.items(), key=lambda x: (-x[1], str(x[0][1])))
+            ]
+
+            mean_reply_s = round(sum(all_human_deltas) / len(all_human_deltas), 1) if all_human_deltas else None
+
+            # Provider usage samples in period
+            usage_guard_cfg = usage_thresholds or {"five_hour": 90, "seven_day": 95}
+            sample_rows = conn.execute(
+                """
+                SELECT provider, observed_at, window, bucket_id, bucket_group, used_percent
+                FROM usage_samples
+                WHERE observed_at >= ? AND observed_at <= ?
+                ORDER BY observed_at ASC
+                """,
+                (start_sql, end_sql),
+            ).fetchall()
+
+            buckets_data: Dict[Tuple[str, str, str, Optional[str]], Dict[str, List[float]]] = {}
+            for s in sample_rows:
+                try:
+                    s_dt = datetime.fromisoformat(s["observed_at"].replace("Z", "+00:00"))
+                    if s_dt.tzinfo is None:
+                        s_dt = s_dt.replace(tzinfo=timezone.utc)
+                    if not (start_utc <= s_dt < end_utc):
+                        continue
+                    s_date = s_dt.astimezone(tz).date().isoformat()
+                    b_key = (s["provider"], s["window"], s["bucket_id"], s["bucket_group"])
+                    if b_key not in buckets_data:
+                        buckets_data[b_key] = {d: [] for d in days}
+                    if s_date in buckets_data[b_key]:
+                        buckets_data[b_key][s_date].append(s["used_percent"])
+                except Exception:
+                    continue
+
+            usage_result = []
+            for (prov, win, b_id, b_grp), day_dict in sorted(buckets_data.items()):
+                thresh = usage_guard_cfg.get("five_hour", 90) if win == "5h" else usage_guard_cfg.get("seven_day", 95)
+                peaks = []
+                threshold_days = 0
+                for d in days:
+                    vals = day_dict.get(d, [])
+                    peak_val = round(max(vals), 1) if vals else None
+                    peaks.append({"date": d, "peak_used_percent": peak_val})
+                    if peak_val is not None and peak_val >= thresh:
+                        threshold_days += 1
+                usage_result.append({
+                    "provider": prov,
+                    "window": win,
+                    "bucket_id": b_id,
+                    "bucket_group": b_grp,
+                    "threshold": thresh,
+                    "threshold_days": threshold_days,
+                    "peaks": peaks,
+                })
+
+            return {
+                "from": from_date.isoformat(),
+                "to": to_date.isoformat(),
+                "tz": tz_name,
+                "total_requests": in_range_count,
+                "per_day": per_day,
+                "by_relation_type": by_relation_type,
+                "by_project": by_project,
+                "by_sender_provider": by_sender_provider,
+                "by_recipient_provider": by_recipient_provider,
+                "approval": approval,
+                "decisions": decisions,
+                "user_messages": {
+                    "requests": user_requests_count,
+                    "replies": user_replies_count,
+                    "sent": user_requests_count,
+                    "received": user_replies_count,
+                },
+                "mean_reply_seconds": mean_reply_s,
+                "usage": usage_result,
+            }
 
     def reopen_session(self, session_id: str) -> None:
         """The session runs again (it started, or a turn began): neither ended nor suspended."""

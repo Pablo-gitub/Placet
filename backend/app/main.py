@@ -2059,6 +2059,49 @@ def create_app(
         errors = {"failed": (502, "Claude credential renewal failed.")}
         return await bridge_call("claude_renew", {}, local, errors)
 
+    @app.get("/api/stats")
+    async def get_stats_endpoint(
+        from_: Optional[str] = Query(None, alias="from"),
+        to: Optional[str] = None,
+        tz: str = "UTC",
+        who: Principal = Depends(principal),
+    ):
+        """RF-64: statistics and usage history in range [from, to] localized to tz."""
+        require_human(who)
+
+        import zoneinfo
+        try:
+            target_tz = zoneinfo.ZoneInfo(tz)
+        except Exception:
+            raise ProductError(422, "stats.invalid_timezone", f"Invalid timezone: {tz}")
+
+        today_local = datetime.now(target_tz).date()
+
+        if to is not None:
+            try:
+                to_date = datetime.strptime(to, "%Y-%m-%d").date()
+            except ValueError:
+                raise ProductError(422, "stats.invalid_date", f"Invalid to date format (expected YYYY-MM-DD): {to}")
+        else:
+            to_date = today_local
+
+        if from_ is not None:
+            try:
+                from_date = datetime.strptime(from_, "%Y-%m-%d").date()
+            except ValueError:
+                raise ProductError(422, "stats.invalid_date", f"Invalid from date format (expected YYYY-MM-DD): {from_}")
+        else:
+            from_date = to_date - timedelta(days=6)
+
+        if from_date > to_date:
+            raise ProductError(422, "stats.invalid_range", f"from date {from_date} cannot be after to date {to_date}")
+
+        if (to_date - from_date).days > 400:
+            raise ProductError(422, "stats.range_too_large", f"Date range {(to_date - from_date).days} days exceeds maximum of 400 days")
+
+        thresholds = usage_guard()
+        return db.get_stats(from_date, to_date, tz_name=tz, usage_thresholds=thresholds)
+
     @app.post("/api/bridge/folders")
     async def bridge_folders(payload: FoldersReport, who: Principal = Depends(principal)):
         """Which folders have a `.placet-off` (RF-45), as the bridge found them."""
