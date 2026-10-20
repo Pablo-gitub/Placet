@@ -193,6 +193,17 @@ The interface supports English/Italian, English fallback and a local browser pre
 | 5 | **Session creation and temporary sessions** (RF-50…53). |
 | 6 | **Project graph/editor** (RF-44), `/` skill picker (RF-36). |
 
+### Long-term goal: Placet across machines
+
+Recorded with the maintainer on October 20, 2026 as direction only: not scheduled, no design yet, and it must not displace the open work above. When it is designed it becomes its own RFC.
+
+- **Central hub on an always-on host** (a home NAS): backend, database, PWA and Web Push move off the desktop, so the phone keeps working when a PC is off.
+- **One satellite per machine** (Linux PC, Mac and later others): bridge, hooks and MCP server stay local to the agent sessions and talk to the hub over Tailscale; each machine has its own revocable identity and cannot act for another. Reserved commands stay per machine.
+- **Cross-machine relations:** nodes are tied to a machine, and agents on different machines exchange tasks through the same relations, rules and approvals.
+- **Machine availability:** the hub detects when a machine is off or unreachable and shows its sessions and nodes as unavailable, instead of queueing work silently.
+- **Local models as nodes:** local model servers on each machine (for example image models on the desktop GPU, larger general models on the Mac's unified memory) appear as nodes like any agent.
+- **MCP gateway:** the hub connects to external MCP servers and exposes their tools through Placet, with the user choosing which agents or nodes may see each tool; agents then configure only Placet instead of every MCP server.
+
 After phase 2, acceptance tests cover all provider pairs (Claude, Codex, Antigravity in both directions). Laboratory observations do not establish all those combinations.
 
 ## Reserved-action implementation note (RS-04)
