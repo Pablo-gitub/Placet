@@ -467,3 +467,9 @@ class ProviderUsage(BaseModel):
 
 class UsageReport(BaseModel):
     providers: List[ProviderUsage] = Field(default_factory=list, max_length=10)
+
+
+class NotificationSettings(BaseModel):
+    needs_you: bool = True
+    problems: bool = True
+    turn_end: Literal["all", "placet", "off"] = "placet"
