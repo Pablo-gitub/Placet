@@ -19,6 +19,10 @@ Start with the [project README](../README.md) for what Placet does and a quick s
 
 Some integrations rely on undocumented internals of the provider apps. These pages record what was verified and on which versions; they are not guarantees for future versions.
 
+## Laboratory procedures (not yet executed)
+
+- [Bridge sandbox/chroot probe](experiments/2026-10-20-bridge-sandbox-probe.md): a human-only disposable user-service experiment; no production restart.
+
 ## Experiments (historical records)
 
 - [Provider integration laboratory](experiments/provider-integration.md), October 15–16, 2026.
