@@ -4,7 +4,8 @@ import React, { useEffect, useRef, useState } from "react";
 import { loadDraft, saveDraft } from "./formDrafts";
 import { providerOf, sessionLabels, sessionName, sessionProject, sessionStatus } from "./sessionInfo";
 import { resetClock } from "./usage";
-import { Paperclip, SendHorizontal, X } from "lucide-react";
+import { Clock, Paperclip, SendHorizontal, X } from "lucide-react";
+import { toLocalDatetimeString, toUtcIso } from "./dateUtils";
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
@@ -85,10 +86,18 @@ export default function Composer({ session, sessions = [], onSend, draft, draftK
     setFiles(selected); setFileError("");
   };
   const [mentions, setMentions] = useState(draft?.mentions || saved?.mentions || []);
+  const [scheduledTime, setScheduledTime] = useState(() =>
+    draft?.scheduled_at ? toLocalDatetimeString(draft.scheduled_at) : (saved?.scheduled_at || "")
+  );
   useEffect(() => {
     if (!draftKey) return;
-    saveDraft(draftKey, text ? { text, mentions: mentions.filter((m) => text.includes(m.token)) } : null);
-  }, [draftKey, text, mentions]);
+    saveDraft(
+      draftKey,
+      text || scheduledTime
+        ? { text, mentions: mentions.filter((m) => text.includes(m.token)), scheduled_at: scheduledTime }
+        : null
+    );
+  }, [draftKey, text, mentions, scheduledTime]);
   const [refiles, setRefiles] = useState(draft?.files || []);
   const [query, setQuery] = useState(null);
   const [highlight, setHighlight] = useState(0);
@@ -169,8 +178,11 @@ export default function Composer({ session, sessions = [], onSend, draft, draftK
     try {
       const attachments = await Promise.all(files.map(encodeFile));
       const now = busy && canSteer && mode === "now";
-      if (await onSend(message, activeMentions, attachments, now ? "now" : "queue")) {
-        setText(""); setMentions([]); setQuery(null); setFiles([]); setRefiles([]);
+      const scheduledAt = scheduledTime ? toUtcIso(scheduledTime) : null;
+      const args = [message, activeMentions, attachments, now ? "now" : "queue"];
+      if (scheduledAt) args.push(scheduledAt);
+      if (await onSend(...args)) {
+        setText(""); setMentions([]); setQuery(null); setFiles([]); setRefiles([]); setScheduledTime("");
       }
     } catch (error) {
       setFileError(error?.code === "composer.readError" ? error.code : "composer.transferError");
@@ -288,6 +300,32 @@ export default function Composer({ session, sessions = [], onSend, draft, draftK
       </>}
       <input ref={fileInput} type="file" hidden multiple accept={ALLOWED_TYPES.join(",")}
         aria-label={t("composer.chooseFiles")} disabled={closed || sending} onChange={selectFiles} />
+      <div className="composer-schedule" data-testid="composer-schedule">
+        <label htmlFor="composer-schedule-input">
+          <Clock size={16} />
+          <span>{t("composer.schedule")}</span>
+        </label>
+        <input
+          id="composer-schedule-input"
+          type="datetime-local"
+          data-testid="composer-schedule-input"
+          aria-label={t("composer.schedule")}
+          value={scheduledTime}
+          disabled={closed || sending}
+          onChange={(e) => setScheduledTime(e.target.value)}
+        />
+        {scheduledTime && (
+          <button
+            type="button"
+            className="icon-button"
+            data-testid="composer-schedule-clear"
+            aria-label={t("composer.clearSchedule")}
+            onClick={() => setScheduledTime("")}
+          >
+            <X size={16} />
+          </button>
+        )}
+      </div>
       <div className="composer-row">
         <button type="button" className="icon-button attach-button" aria-label={t("composer.attach")}
           disabled={closed || sending} onClick={() => fileInput.current?.click()}><Paperclip size={18} /></button>

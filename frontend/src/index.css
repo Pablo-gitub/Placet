@@ -942,6 +942,34 @@ body.chat-open { overflow: hidden; }
   padding: 0.6rem 0 0.2rem;
 }
 .composer-note { font-size: 0.72rem; color: var(--text-muted); margin-bottom: 0.4rem; }
+.composer-schedule {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.composer-schedule label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+}
+.composer-schedule input[type="datetime-local"] {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  border-radius: 8px;
+  padding: 0.2rem 0.5rem;
+  font: inherit;
+  font-size: 0.8rem;
+}
+.composer-schedule input[type="datetime-local"]:focus {
+  outline: none;
+  border-color: var(--primary);
+}
 .composer-row { display: flex; align-items: flex-end; gap: 0.5rem; }
 .composer textarea {
   flex: 1;
