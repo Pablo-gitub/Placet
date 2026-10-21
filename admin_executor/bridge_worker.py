@@ -52,7 +52,7 @@ def restart_worker(*, run, record=None):
     if record is not None:
         record('dispatch',None)
     try:
-        command('start',timeout=45)
+        command('start',timeout=75)
     except SpawnFailure:
         return result('worker_start_not_sent')
     except Exception:

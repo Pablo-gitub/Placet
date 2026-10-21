@@ -47,3 +47,16 @@ def test_probe_cleanup_tolerates_collected_runner_and_checks_inactive_before_rem
     p.cleanup()
     assert not stage.exists() and not unit.exists()
     assert all('placet-probe.service' not in argv for argv in calls)
+
+
+def test_probe_uses_exact_worker_barrier_and_consistent_timeouts():
+    from admin_executor import bridge_probe,bridge_restart
+    module=ast.parse(Path(bridge_restart.__file__).read_text())
+    probe=ast.parse(bridge_probe.HELPER)
+    function=lambda tree:next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='notification_barrier')
+    assert ast.dump(function(module))==ast.dump(function(probe))
+    source=Path(bridge_probe.__file__).read_text()
+    assert 'TimeoutStartSec=60' in source
+    assert 'RuntimeMaxSec=100' in source
+    assert 'timeout=75' in bridge_probe.RUNNER
+    assert 'timeout=120' in source

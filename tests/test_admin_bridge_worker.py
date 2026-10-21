@@ -61,7 +61,7 @@ def test_bridge_uses_only_fixed_system_unit_and_records_its_invocation(store):
 
 @pytest.mark.parametrize('error,code,state_name', [
     (SpawnFailure(1), 'worker_start_not_sent', 'failed'),
-    (subprocess.TimeoutExpired('fixed',45), 'worker_dispatch_uncertain', 'outcome_unknown'),
+    (subprocess.TimeoutExpired('fixed',75), 'worker_dispatch_uncertain', 'outcome_unknown'),
     (subprocess.CalledProcessError(1,'fixed',stderr='SECRET'), 'worker_dispatch_uncertain', 'outcome_unknown'),
     (OSError('SECRET'), 'worker_dispatch_uncertain', 'outcome_unknown'),
 ])
@@ -156,6 +156,10 @@ def test_worker_notification_has_only_invocation_and_closed_report(monkeypatch):
         def __exit__(self,*args): pass
         def settimeout(self,n): assert n==2
         def sendto(self,data,address): sent.append((data,address))
+        def sendmsg(self,buffers,ancillary,flags,address):
+            assert len(sent)==1 and sent[0][0].startswith(b'STATUS=')
+            assert buffers==[b'BARRIER=1'] and len(ancillary)==1
+            return len(buffers[0])
     monkeypatch.setenv('INVOCATION_ID',NEW)
     monkeypatch.setenv('NOTIFY_SOCKET','@fixed-notify')
     monkeypatch.setattr(bridge_restart.socket,'socket',lambda *a:Channel())
@@ -175,3 +179,51 @@ def test_unknown_worker_invocation_is_not_reused_for_another_job(store):
     manager=Manager(before=state(NEW,'active'))
     assert Supervisor(store,enabled={'restart-bridge'},handler=handler(manager)).run_once() is None
     assert manager.calls==[]
+
+
+@pytest.mark.parametrize('mode',['ack','timeout','send_error','unexpected_data'])
+def test_notification_barrier_waits_for_manager_and_closes_pipe(monkeypatch,mode):
+    import array
+    import os
+    from admin_executor import bridge_restart as worker
+    events=[]; descriptors=[]; remote=[]
+    class Channel:
+        def sendmsg(self,buffers,ancillary,flags,address):
+            events.append('barrier')
+            assert buffers==[b'BARRIER=1'] and flags==0 and address=='\0notify'
+            level,kind,data=ancillary[0]
+            assert len(ancillary)==1 and level==worker.socket.SOL_SOCKET and kind==worker.socket.SCM_RIGHTS
+            fds=array.array('i');fds.frombytes(bytes(data))
+            assert len(fds)==1
+            descriptors.append(fds[0]);remote.append(os.dup(fds[0]))
+            if mode=='send_error': raise OSError('simulated send failure')
+            return len(b'BARRIER=1')
+    def select(reads,writes,errors,timeout):
+        events.append('wait')
+        assert writes==errors==[] and 0<=timeout<=3
+        descriptors.extend(reads)
+        with pytest.raises(OSError):os.fstat(descriptors[0])
+        if mode=='timeout':return ([],[],[])
+        if mode=='unexpected_data':os.write(remote[0],b'x')
+        os.close(remote.pop())
+        return (reads,[],[])
+    monkeypatch.setattr(worker.select,'select',select)
+    try:
+        if mode=='ack':worker.notification_barrier(Channel(),'\0notify')
+        else:
+            with pytest.raises((TimeoutError,OSError,ValueError)):
+                worker.notification_barrier(Channel(),'\0notify')
+        assert events==(['barrier'] if mode=='send_error' else ['barrier','wait'])
+        for fd in descriptors:
+            with pytest.raises(OSError):os.fstat(fd)
+    finally:
+        for fd in remote:os.close(fd)
+
+
+def test_worker_timeout_leaves_headroom_for_inner_calls_and_barrier():
+    from admin_executor.worker_units import worker_unit
+    manager=Manager()
+    assert handler(manager)('restart-bridge')=='succeeded'
+    start=next(options for argv,options in manager.calls if 'start' in argv)
+    assert 'TimeoutStartSec=60' in worker_unit(uid=1000,gid=1000)
+    assert start['timeout']==75

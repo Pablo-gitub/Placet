@@ -19,7 +19,28 @@ STAGE = Path('/run/placet-admin-bridge-probe')
 UNIT = Path('/run/systemd/system') / WORKER
 ENV = {'PATH': '/usr/bin:/bin', 'LC_ALL': 'C'}
 HELPER = r'''
-import json, os, socket, subprocess, time
+import array, json, os, select, socket, subprocess, time
+def notification_barrier(channel, address):
+    """Wait at most three seconds for PID 1 to process prior notifications."""
+    deadline = time.monotonic() + 3
+    reader, writer = os.pipe2(os.O_CLOEXEC | os.O_NONBLOCK)
+    try:
+        try:
+            channel.sendmsg([b'BARRIER=1'],
+                            [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array('i', [writer]))],
+                            0, address)
+        finally:
+            # Only PID 1 retains the write end after sendmsg. EOF means that
+            # it processed the barrier and all earlier status notifications.
+            os.close(writer)
+        ready, _, _ = select.select([reader], [], [], max(0, deadline - time.monotonic()))
+        if not ready:
+            raise TimeoutError('Worker notification barrier timed out')
+        if os.read(reader, 1) != b'':
+            raise ValueError('Invalid worker notification barrier')
+    finally:
+        os.close(reader)
+
 fields = dict(line.split(':', 1) for line in open('/proc/self/status') if ':' in line)
 expected = EXPECTED_GROUPS
 assert [int(x) for x in fields['Uid'].split()] == [1000] * 4
@@ -46,19 +67,21 @@ report = json.dumps({'invocation':os.environ['INVOCATION_ID'], 'report':{'state'
 address = os.environ['NOTIFY_SOCKET']
 if address.startswith('@'): address = '\0' + address[1:]
 with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as notify:
+    notify.settimeout(2)
     notify.sendto(('STATUS='+report).encode(),address)
+    notification_barrier(notify, address)
 '''
 RUNNER = r'''
 import json, subprocess
 unit = 'placet-admin-bridge-probe-worker.service'
-def fixed(args):
+def fixed(args, timeout=5):
     p = subprocess.run(['/usr/bin/systemctl','--no-ask-password',*args],check=True,
                        stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,
-                       timeout=40,text=True,env={'PATH':'/usr/bin:/bin','LC_ALL':'C'})
+                       timeout=timeout,text=True,env={'PATH':'/usr/bin:/bin','LC_ALL':'C'})
     assert len(p.stdout) < 4096
     return p.stdout
 before = fixed(['show',unit,'--property=InvocationID','--value']).strip()
-fixed(['start',unit])
+fixed(['start',unit], timeout=75)
 raw = fixed(['show',unit,'--property=InvocationID,StatusText,ActiveState,SubState,ExecMainStatus'])
 state = dict(line.split('=',1) for line in raw.splitlines() if '=' in line)
 assert state['InvocationID'] and state['InvocationID'] != before
@@ -70,7 +93,7 @@ print(json.dumps({'worker_invocation':state['InvocationID'],'report':report['rep
 '''
 
 
-def run(argv, timeout=60):
+def run(argv, timeout=120):
     return subprocess.run(argv, check=True, timeout=timeout, env=ENV,
                           stdin=subprocess.DEVNULL)
 
@@ -154,7 +177,7 @@ RestrictAddressFamilies=AF_UNIX
 InaccessiblePaths=-/home -/root -/var/lib/placet -/var/lib/placet-admin -/var/lib/placet-admin-web -/var/lib/placet-admin-tailscale
 NotifyAccess=main
 Restart=no
-TimeoutStartSec=35
+TimeoutStartSec=60
 TimeoutStopSec=5
 KillMode=control-group
 StandardInput=null
@@ -174,7 +197,7 @@ ExecStart=/usr/local/lib/placet-admin-venv/bin/python -I {helper}
                       'RestrictAddressFamilies=AF_UNIX AF_INET','MemoryMax=256M','TasksMax=32',
                       'ReadWritePaths=/var/lib/placet-admin',
                       'InaccessiblePaths=-/home -/root -/var/lib/placet -/var/lib/placet-admin-web -/var/lib/placet-admin-tailscale',
-                      'KillMode=control-group','TimeoutStopSec=10','RuntimeMaxSec=50','Restart=no']
+                      'KillMode=control-group','TimeoutStopSec=10','RuntimeMaxSec=100','Restart=no']
         run(['/usr/bin/systemd-run','--unit='+RUNNER_UNIT,'--collect','--wait','--pipe','--uid=0','--gid=0',
              *['--property='+p for p in properties],'/usr/bin/env','-i','PATH=/usr/bin:/bin',
              '/usr/local/lib/placet-admin-venv/bin/python','-I','-c',RUNNER])

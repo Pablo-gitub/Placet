@@ -586,3 +586,13 @@ backs up enrollment/state and replaces the worker-related bundle plus only its
 fixed unit. It never restores old authorization data or tests a real restart.
 Interrupted mutation leaves admin components stopped for explicit recovery.
 The operator procedure is in the [installation guide](../installation.md).
+
+Worker notification completion is explicit: a separate BARRIER=1 notification
+with one SCM_RIGHTS pipe descriptor follows STATUS; EOF acknowledges processing.
+The barrier has a three-second deadline and closes both local descriptors on
+all paths. A barrier error/timeout exits nonzero and retains uncertain outcome,
+without resending the action. Time budgets: worker start 60 seconds, supervisor
+start command 75 seconds; the disposable probe adds 100-second root-runner and
+120-second outer bounds. `worker_busy` intentionally remains uncertain: this
+job has not dispatched, but an untracked/previous worker might still be acting,
+so allowing further privileged jobs would violate serialization.

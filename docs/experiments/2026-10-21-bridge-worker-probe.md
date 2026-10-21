@@ -65,3 +65,19 @@ After reviewing output, the operator stops/removes only the disposable user
 unit and the reviewed probe copy, then reloads the user manager. No production
 service is stopped, started, restarted or installed by the probe. A successful
 probe does not authorize the maintenance upgrade or any real restart job.
+
+### Notification completion and time budget
+
+The helper sends STATUS first, then a separate BARRIER=1 datagram containing
+exactly one pipe write descriptor through SCM_RIGHTS. It closes its local write
+end and waits up to three seconds for EOF: the manager closes its copy after
+processing preceding notifications. A timeout/error ends the helper nonzero;
+it does not resend STATUS, retry a restart, or claim that the restart failed
+without effect. This leaves production execution uncertain. The probe embeds
+the same barrier function as the worker (AST parity is checked in tests).
+
+Worker TimeoutStartSec is 60 seconds, allowing the inner manager calls, stability
+check and notification handshake to finish. The root runner's start command
+allows 75 seconds; its RuntimeMaxSec is 100 seconds, and the outer systemd-run
+wait allows 120 seconds. These are ceilings, not delays or retries. Neither
+PID 1 nor the user manager is contacted by the mocked socket tests.

@@ -577,3 +577,10 @@ and the result is explicitly user-service evidence. A worker report is not an
 independent root health check. Test `restart-backend` separately for regression.
 If anything is uncertain, the queue remains blocked until terminal inspection
 and reconciliation. Installer success alone never proves a real restart works.
+
+The bridge worker now synchronizes STATUS with an sd_notify barrier (three
+seconds maximum). If it cannot confirm notification processing it exits with
+an error; the job remains uncertain and is never automatically repeated. Its
+60-second service timeout is shorter than the supervisor's 75-second command
+limit. Always use the digest from the current reviewed probe/installer: earlier
+review digests do not authorize the updated script or unit.

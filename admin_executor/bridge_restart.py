@@ -1,11 +1,14 @@
 """Unprivileged fixed system worker. Its result is desktop-user evidence only."""
+import array
 import grp
 import json
 import os
 from pathlib import Path
+import select
 import socket
 import stat
 import sys
+import time
 
 POLICY = Path('/usr/local/lib/placet-admin/bridge-worker.json')
 CAPS = ('CapInh','CapPrm','CapEff','CapBnd','CapAmb')
@@ -45,6 +48,28 @@ def read_policy():
     return json.loads(data)
 
 
+def notification_barrier(channel, address):
+    """Wait at most three seconds for PID 1 to process prior notifications."""
+    deadline = time.monotonic() + 3
+    reader, writer = os.pipe2(os.O_CLOEXEC | os.O_NONBLOCK)
+    try:
+        try:
+            channel.sendmsg([b'BARRIER=1'],
+                            [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array('i', [writer]))],
+                            0, address)
+        finally:
+            # Only PID 1 retains the write end after sendmsg. EOF means that
+            # it processed the barrier and all earlier status notifications.
+            os.close(writer)
+        ready, _, _ = select.select([reader], [], [], max(0, deadline - time.monotonic()))
+        if not ready:
+            raise TimeoutError('Worker notification barrier timed out')
+        if os.read(reader, 1) != b'':
+            raise ValueError('Invalid worker notification barrier')
+    finally:
+        os.close(reader)
+
+
 def notify(report):
     invocation = os.environ.get('INVOCATION_ID','')
     address = os.environ.get('NOTIFY_SOCKET','')
@@ -59,6 +84,7 @@ def notify(report):
     with socket.socket(socket.AF_UNIX,socket.SOCK_DGRAM) as channel:
         channel.settimeout(2)
         channel.sendto(('STATUS='+envelope).encode(),address)
+        notification_barrier(channel, address)
 
 
 def main():
