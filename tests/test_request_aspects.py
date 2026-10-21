@@ -262,6 +262,23 @@ async def test_the_user_moves_the_queue_on(setup):  # noqa: F811
 
 
 @pytest.mark.asyncio
+async def test_a_reply_before_delivery_settled_can_be_released(setup):  # noqa: F811
+    app, db = setup
+    await start(app, "codex", "cx1", "codex")
+    first = (await write(app, "cx1", "uno")).json()["id"]
+    await write(app, "cx1", "due")
+    # Answered (e.g. read through placet_check_status) while still waiting.
+    with db._get_connection() as conn:
+        conn.execute("UPDATE requests SET status = 'COMPLETED', recipient_session_id = 'cx1' WHERE id = ?",
+                     (first,))
+    assert db.request_in_flight("cx1") == first
+    async with human_client(app) as human:
+        resp = await human.post(f"/api/requests/{first}/queue/release", json={"reason": "finished"})
+        assert resp.status_code == 200
+    assert db.request_in_flight("cx1") is None
+
+
+@pytest.mark.asyncio
 async def test_cancelling_a_delivered_message_frees_the_queue_only(setup):  # noqa: F811
     app, db = setup
     await start(app, "codex", "cx1", "codex")
