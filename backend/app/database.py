@@ -1241,6 +1241,29 @@ class Database:
                 self._log(cursor, req_id, "system", "queue_hold_alerted", at=now)
             return rows
 
+    def release_on_observed_turn_end(self, session_id: str) -> List[int]:
+        """
+        A turn end that is not a pause, or a new turn starting, was seen for
+        this session: the answered requests still holding its queue ended
+        with it. Evidence only, never elapsed time; a request without a reply
+        is left to its own signals.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE requests SET queue_released_at = ? WHERE recipient_session_id = ?"
+                " AND queue_released_at IS NULL AND status = ? AND completed_at IS NOT NULL AND completed_at <= ?"
+                " AND COALESCE(execution_state, 'unobserved') IN ('unobserved', 'started')"
+                " AND EXISTS (SELECT 1 FROM responses WHERE responses.request_id = requests.id)"
+                " RETURNING id",
+                (now, session_id, RequestStatus.COMPLETED.value, now),
+            )
+            ids = sorted(r["id"] for r in cursor.fetchall())
+            for req_id in ids:
+                self._log(cursor, req_id, "system", "released_on_observed_turn_end", at=now)
+            return ids
+
     def release_queue(self, request_id: int, actor: str, reason: str) -> bool:
         """
         The user lets the session move on past a delivered request: "finished"

@@ -127,3 +127,77 @@ async def test_the_preference_is_saved_through_the_api(env):
         assert put.json()["queue_held"] is False
         assert (await human.put("/api/settings/notifications",
                                 json={**got, "queue_held": "maybe"})).status_code == 422
+
+
+async def answered_held(app, db):
+    """cx1 answered a message, but no turn end was ever seen; another waits."""
+    held, waiting = await held_with_one_waiting(app, db)
+    async with agent_client(app, "tok-codex") as codex:
+        resp = await codex.post(f"/api/requests/{held}/reply", json={"content": "fatto"})
+        assert resp.status_code == 200, resp.text
+    assert db.get_request(held).status.value == "COMPLETED"
+    assert db.request_in_flight("cx1") == held
+    return held, waiting
+
+
+async def codex_event(app, **body):
+    async with agent_client(app, "tok-codex") as codex:
+        resp = await codex.post("/api/sessions/cx1/events", json={"provider": "codex", **body})
+        assert resp.status_code == 200, resp.text
+
+
+@pytest.mark.asyncio
+async def test_a_turn_end_seen_after_the_reply_releases_the_queue(env):
+    app, db, _ = env
+    held, _ = await answered_held(app, db)
+    await codex_event(app, event="stop", last_message="fine")
+    assert db.get_request(held).queue_released_at is not None
+    assert db.request_in_flight("cx1") is None
+    released = [e for e in db.list_events(held) if e.event == "released_on_observed_turn_end"]
+    assert len(released) == 1 and released[0].actor == "system"
+
+
+@pytest.mark.asyncio
+async def test_the_start_of_a_new_turn_releases_it_too(env):
+    app, db, _ = env
+    held, _ = await answered_held(app, db)
+    await codex_event(app, event="prompt")
+    assert db.get_request(held).queue_released_at is not None
+
+
+@pytest.mark.asyncio
+async def test_a_pause_a_joined_turn_or_time_alone_release_nothing(env):
+    app, db, _ = env
+    held, _ = await answered_held(app, db)
+    age_hold(db, held, 6 * 3600)
+    with db._get_connection() as conn:
+        conn.execute("UPDATE requests SET completed_at = ? WHERE id = ?",
+                     ((datetime.now(timezone.utc) - timedelta(hours=6)).isoformat(), held))
+    await sweep(app)
+    assert db.get_request(held).queue_released_at is None  # time never frees the queue
+    db.set_session_state("cx1", "busy", held)
+    await codex_event(app, event="stop", last_message="in corso", pause="background_task")
+    assert db.get_request(held).queue_released_at is None  # not a turn end
+    db.set_session_state("cx1", "busy", None)
+    await codex_event(app, event="prompt")  # joins the running turn: not a new one
+    assert db.get_request(held).queue_released_at is None
+
+
+@pytest.mark.asyncio
+async def test_a_request_without_a_reply_is_never_released_by_events(env):
+    app, db, _ = env
+    held, _ = await held_with_one_waiting(app, db)
+    await codex_event(app, event="stop", last_message="altro")
+    await codex_event(app, event="prompt")
+    assert db.get_request(held).queue_released_at is None
+    assert db.request_in_flight("cx1") == held
+
+
+@pytest.mark.asyncio
+async def test_another_sessions_turn_end_is_not_evidence(env):
+    app, db, _ = env
+    held, _ = await answered_held(app, db)
+    await start(app, "codex", "cx2", "codex")
+    async with agent_client(app, "tok-codex") as codex:
+        await codex.post("/api/sessions/cx2/events", json={"event": "stop", "last_message": "x"})
+    assert db.get_request(held).queue_released_at is None

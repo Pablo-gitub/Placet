@@ -1379,6 +1379,11 @@ def create_app(
                 # request, but its last answer may not be the reply to it.
                 turn_request_id = session.turn_request_id
                 db.mark_turn_mixed(turn_request_id)
+            if session.state != "busy":
+                # A new turn began: the previous one is over, and any answered
+                # request still holding the queue ended with it.
+                for released in db.release_on_observed_turn_end(session_id):
+                    notify_change(released)
             db.set_session_state(session_id, "busy", turn_request_id)
             result["turn_request_id"] = turn_request_id
         elif payload.event == "stop" and payload.pause and session.turn_request_id is not None \
@@ -1408,6 +1413,11 @@ def create_app(
                 db.set_execution(steered_id, "completed", actor=f"{who.actor}:hook", source=source)
                 implicit_reply(who, steered_id, payload.last_message)
                 notify_change(steered_id)
+            if not payload.pause:
+                # A turn end Placet saw (a pause is not one): answered requests
+                # still holding the queue ended with it.
+                for released in db.release_on_observed_turn_end(session_id):
+                    notify_change(released)
         elif payload.event == "steered" and payload.request_id is not None:
             # A "now" message entered the running turn (RF-35): delivered and
             # being executed; the turn now answers more than one message.
