@@ -399,6 +399,10 @@ def create_app(
         for req_id in db.unconfirmed_starts():
             notify_change(req_id)
             alert(req_id, "start_unconfirmed")
+        # Switched off, nothing is marked: turning it on later still alerts.
+        if db.get_notification_preferences().get("queue_held", True):
+            for req_id, session_id, waiting in db.held_queues_to_alert():
+                alert_held_queue(req_id, session_id, waiting)
         for req_id in db.stall_executing(execution_timeout):
             notify_change(req_id)
             stalled = db.get_request(req_id)
@@ -410,6 +414,17 @@ def create_app(
             elif stalled.question_type != QuestionType.MESSAGE:
                 # The user's own messages need no reply: the answer is in the chat.
                 alert(req_id, "stalled")
+
+    def alert_held_queue(req_id: int, session_id: str, waiting: int) -> None:
+        session = db.get_session(session_id)
+        if session is None:
+            return
+        lang = db.get_background_language()
+        key = "notify.queue_held_title_one" if waiting == 1 else "notify.queue_held_title"
+        web_push_later(text(key, lang, label=session_label(session.provider, session.title, session.cwd),
+                            count=waiting),
+                       text("notify.queue_held_body", lang), f"/#/sessione/{session_id}",
+                       f"queue-held-{req_id}", "high")
 
     async def expiry_sweeper():
         while True:

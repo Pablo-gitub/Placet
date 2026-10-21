@@ -592,6 +592,8 @@
     "notifyNeedsYouHint": "Domande per te, revisione dei prompt prima dell'invio e risposte pronte che attendono l'ok.",
     "notifyProblemsTitle": "Problemi",
     "notifyProblemsHint": "Invio fallito o incerto, lavoro bloccato, code ferme o agenti irraggiungibili.",
+    "notifyQueueHeldTitle": "Code ferme con messaggi in attesa",
+    "notifyQueueHeldHint": "La fine del turno di una sessione non è stata vista e dei messaggi aspettano dietro: una notifica, 10 minuti dopo l'inizio del blocco.",
     "turnEndTitle": "Fine del turno",
     "turnEndAll": "Tutti i turni completati",
     "turnEndPlacet": "Solo lavoro di Placet",

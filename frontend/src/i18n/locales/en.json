@@ -592,6 +592,8 @@
     "notifyNeedsYouHint": "Questions for you, prompt reviews before sending, and completed replies waiting for approval.",
     "notifyProblemsTitle": "Problems",
     "notifyProblemsHint": "Delivery failed or uncertain, stalled work, held queues, or unreachable agents.",
+    "notifyQueueHeldTitle": "Held queues with messages waiting",
+    "notifyQueueHeldHint": "A session's turn end was never seen and messages wait behind it: one notification, 10 minutes after the hold starts.",
     "turnEndTitle": "Turn completion",
     "turnEndAll": "All completed turns",
     "turnEndPlacet": "Only Placet work",

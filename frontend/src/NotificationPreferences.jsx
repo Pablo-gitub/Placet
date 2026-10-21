@@ -78,6 +78,19 @@ export default function NotificationPreferences() {
         />
       </label>
 
+      <label className="settings-row settings-check">
+        <span className="settings-row-text">
+          <strong>{t("settings.notifyQueueHeldTitle")}</strong>
+          <small>{t("settings.notifyQueueHeldHint")}</small>
+        </span>
+        <input
+          type="checkbox"
+          data-testid="notify-pref-queue-held"
+          checked={prefs.queue_held !== false}
+          onChange={(e) => update({ queue_held: e.target.checked })}
+        />
+      </label>
+
       <div className="settings-turn-end">
         <div className="settings-row-text">
           <strong>{t("settings.turnEndTitle")}</strong>

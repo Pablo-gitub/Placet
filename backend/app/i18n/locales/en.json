@@ -57,5 +57,8 @@
   "stats.invalid_range": "From date cannot be after to date.",
   "stats.range_too_large": "Date range exceeds maximum of 400 days.",
   "notify.app_review_title": "{label} is waiting for your approval",
-  "notify.app_review_body": "Approve the plan in the Antigravity app on the PC: the work resumes from there."
+  "notify.app_review_body": "Approve the plan in the Antigravity app on the PC: the work resumes from there.",
+  "notify.queue_held_title": "{label}: {count} messages held, confirm if it finished",
+  "notify.queue_held_title_one": "{label}: 1 message held, confirm if it finished",
+  "notify.queue_held_body": "The session's last turn end was never seen: open it and confirm."
 }

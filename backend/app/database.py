@@ -9,6 +9,7 @@ from pathlib import Path
 from backend.app.models import (
     BRIDGE_PROVIDERS,
     STEER_PROVIDERS,
+    HOLD_ALERT_SECONDS,
     START_UNCONFIRMED_SECONDS,
     OPEN_STATUSES,
     RequestCreate,
@@ -222,6 +223,7 @@ class Database:
         "needs_you": True,
         "problems": True,
         "turn_end": "placet",
+        "queue_held": True,
     }
 
     def get_notification_preferences(self) -> Dict[str, Any]:
@@ -237,6 +239,7 @@ class Database:
                 "needs_you": bool(stored.get("needs_you", True)),
                 "problems": bool(stored.get("problems", True)),
                 "turn_end": stored.get("turn_end") if stored.get("turn_end") in ("all", "placet", "off") else "placet",
+                "queue_held": bool(stored.get("queue_held", True)),
             }
         except Exception:
             return dict(self.DEFAULT_NOTIFICATION_PREFERENCES)
@@ -246,6 +249,7 @@ class Database:
             "needs_you": bool(prefs.get("needs_you", True)),
             "problems": bool(prefs.get("problems", True)),
             "turn_end": prefs.get("turn_end") if prefs.get("turn_end") in ("all", "placet", "off") else "placet",
+            "queue_held": bool(prefs.get("queue_held", True)),
         }
         with self._get_connection() as conn:
             conn.execute(
@@ -567,6 +571,8 @@ class Database:
                     "UPDATE requests SET queue_released_at = COALESCE(updated_at, created_at)"
                     " WHERE status NOT IN ('PENDING', 'APPROVED', 'DELIVERING');"
                 )
+            if "hold_alerted_at" not in cols:
+                cursor.execute("ALTER TABLE requests ADD COLUMN hold_alerted_at TEXT;")
             if "chain_hops" not in cols:
                 # RFC-14: the request whose turn sent this one, and how many
                 # consecutive automatic hops led here.
@@ -775,6 +781,7 @@ class Database:
             execution_source=row["execution_source"],
             reply=row["reply_state"] or "none",
             start_unconfirmed_at=_ts(row["start_unconfirmed_at"]),
+            hold_alerted_at=_ts(row["hold_alerted_at"]),
             queue_released_at=_ts(row["queue_released_at"]),
             delivery_mode=row["delivery_mode"] or "queue",
             allow_auto_return=bool(row["allow_auto_return"]),
@@ -1192,6 +1199,47 @@ class Database:
             for req_id in ids:
                 self._log(cursor, req_id, "system", "start_unconfirmed", at=now)
             return ids
+
+    def held_queues_to_alert(self, seconds: float = HOLD_ALERT_SECONDS) -> List[Tuple[int, str, int]]:
+        """
+        Requests holding a session's queue whose turn end is unseen (stalled,
+        start unconfirmed, or answered) for `seconds`, with at least one
+        approved message waiting behind them: marked once each, as
+        (request id, session id, messages waiting). Mirrors holdsQueueUnseen.
+        """
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
+        cutoff = (now_dt - timedelta(seconds=seconds)).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT r.id, r.recipient_session_id AS sid, (
+                    SELECT COUNT(*) FROM requests w
+                    WHERE w.recipient_session_id = r.recipient_session_id AND w.status = ?
+                ) AS waiting
+                FROM requests r
+                WHERE r.hold_alerted_at IS NULL AND r.queue_released_at IS NULL
+                  AND r.recipient_session_id IS NOT NULL
+                  AND r.status IN (?, ?, ?)
+                  AND COALESCE(r.execution_state, 'unobserved') IN ('unobserved', 'started')
+                  AND COALESCE(
+                        CASE WHEN r.status = ? THEN r.completed_at END,
+                        r.start_unconfirmed_at,
+                        CASE WHEN r.status = ? THEN r.updated_at END
+                      ) <= ?
+                  AND waiting > 0
+                ORDER BY r.id
+                """,
+                (RequestStatus.APPROVED.value, RequestStatus.EXECUTING.value, RequestStatus.STALLED.value,
+                 RequestStatus.COMPLETED.value, RequestStatus.COMPLETED.value, RequestStatus.STALLED.value,
+                 cutoff),
+            )
+            rows = [(r["id"], r["sid"], r["waiting"]) for r in cursor.fetchall()]
+            for req_id, _, _ in rows:
+                cursor.execute("UPDATE requests SET hold_alerted_at = ? WHERE id = ?", (now, req_id))
+                self._log(cursor, req_id, "system", "queue_hold_alerted", at=now)
+            return rows
 
     def release_queue(self, request_id: int, actor: str, reason: str) -> bool:
         """

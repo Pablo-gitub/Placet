@@ -52,6 +52,9 @@ MAX_DELIVERY_ATTEMPTS = 3
 # raises a warning ("start unconfirmed"); the queue moves on with a proof
 # that the turn ended, or when the user says so.
 START_UNCONFIRMED_SECONDS = 120.0
+# A queue held by a turn end Placet never saw, with a message waiting behind
+# it, is worth a push after this long (once per held request).
+HOLD_ALERT_SECONDS = 10 * 60.0
 # An agent that declared itself busy is trusted for at most this long (a
 # crashed CLI never sends "idle").
 AGENT_BUSY_TTL_SECONDS = 30 * 60
@@ -245,6 +248,8 @@ class RequestModel(BaseModel):
     reply: str = "none"
     # The turn was not seen starting in time (a warning, the queue still waits).
     start_unconfirmed_at: Optional[datetime] = None
+    # The user was told once that this request holds the queue with messages waiting.
+    hold_alerted_at: Optional[datetime] = None
     # The user let the session's queue move on past this request.
     queue_released_at: Optional[datetime] = None
     # "queue": at the end of the recipient's turn; "now": inside the running
@@ -479,3 +484,4 @@ class NotificationSettings(BaseModel):
     needs_you: bool = True
     problems: bool = True
     turn_end: Literal["all", "placet", "off"] = "placet"
+    queue_held: bool = True
