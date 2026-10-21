@@ -12,6 +12,10 @@ it: `python3 antigravity.py --agent gemini --event Stop`.
   ("[Placet Request #N"), it is acknowledged.
 - Stop: the turn ended (idle). Its payload has no text, so the last answer
   is read from the conversation file and becomes the implicit reply.
+- Pauses (RFC-16): Antigravity also ends a turn while a background task runs
+  (the app tells the model to report and stop) or after writing a plan for the
+  user to approve in the app. Such a Stop carries `pause`, and the next turn,
+  started by the task's completion message or by the approval, `resumes`.
 
 Hooks are synchronous and Antigravity expects a JSON object on stdout: this
 script always prints "{}" and exits 0, so a Placet problem never blocks
@@ -31,7 +35,7 @@ import spool  # noqa: E402
 
 PLACET_REQUEST = re.compile(r"\[Placet Request #(\d+)\b")
 MAX_MESSAGE_CHARS = 20000
-ADAPTER = "antigravity.py/2"
+ADAPTER = "antigravity.py/3"
 TAIL_BYTES = 4 * 1024 * 1024  # how far back to look for the turn's steps
 # At Stop the last answer may not be in the file yet: look again briefly.
 ANSWER_RETRIES = 5
@@ -72,6 +76,57 @@ def last_steps(path: str):
     return steps
 
 
+BACKGROUND_STARTED = re.compile(r"Tool is running as a background task with task id: (\S+)")
+BACKGROUND_FINISHED = re.compile(r"sender=(\S+) [^\n]*content=Task id \"([^\"]+)\" finished")
+PLAN_CREATED = re.compile(r"Created file file://\S*/implementation_plan\.md\b")
+PLAN_APPROVED = re.compile(r"^Comments on artifact URI: \S*/implementation_plan\.md\b[\s\S]*has approved")
+
+
+def _content(step) -> str:
+    content = step.get("content")
+    return content if isinstance(content, str) else ""
+
+
+def _is_resume_input(step) -> bool:
+    """The input that starts a turn continuing earlier work, not a new request."""
+    text = _content(step)
+    if step.get("type") == "SYSTEM_MESSAGE":
+        return bool(BACKGROUND_FINISHED.search(text))
+    return step.get("type") == "USER_INPUT" and bool(PLAN_APPROVED.search(text.strip()))
+
+
+def turn_pause(path: str):
+    """Why this Stop is a pause and not the end of the work, or None."""
+    steps = last_steps(path)
+    started, finished = set(), set()
+    for step in steps:  # newest first, back to the user message of the task
+        if step.get("type") == "USER_INPUT" and not _is_resume_input(step):
+            break
+        text = _content(step)
+        if step.get("type") == "GENERIC":
+            started.update(BACKGROUND_STARTED.findall(text))
+        elif step.get("type") == "SYSTEM_MESSAGE":
+            finished.update(task for _, task in BACKGROUND_FINISHED.findall(text))
+    if started - finished:
+        return "background_task"
+    # A plan written as the last action of the turn waits for the app's review.
+    for step in steps:
+        if step.get("type") == "PLANNER_RESPONSE":
+            continue
+        if step.get("type") == "GENERIC" and PLAN_CREATED.search(_content(step)):
+            return "app_review"
+        return None
+    return None
+
+
+def resumes(path: str) -> bool:
+    """Whether the turn starting now continues the paused one."""
+    for step in last_steps(path):
+        if step.get("type") in ("USER_INPUT", "SYSTEM_MESSAGE"):
+            return _is_resume_input(step)
+    return False
+
+
 def turn_request_id(path: str):
     """The Placet request in the user message that started the current turn."""
     for step in last_steps(path):
@@ -109,6 +164,9 @@ def build_event(event_name: str, payload: dict):
         if _number(payload.get("invocationNum")) != 0:
             return None  # a later model call of the same turn
         body = {"event": "prompt", **common}
+        if resumes(transcript):
+            body["resumes"] = True
+            return body
         request_id = turn_request_id(transcript)
         if request_id is not None:
             body["request_id"] = request_id
@@ -123,6 +181,9 @@ def build_event(event_name: str, payload: dict):
             answer = last_answer(transcript)
         if answer:
             body["last_message"] = answer
+        pause = turn_pause(transcript)
+        if pause:
+            body["pause"] = pause
         return body
     return None
 

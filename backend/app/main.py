@@ -103,6 +103,10 @@ class SessionEventPayload(BaseModel):
     start_source: Optional[str] = Field(None, max_length=32)
     # RF-29d: UUID of the session being continued
     continues: Optional[str] = None
+    # RFC-16: the turn ended but the work goes on (stop), or this turn
+    # continues it (prompt): an Antigravity background task or plan review.
+    pause: Optional[Literal["background_task", "app_review"]] = None
+    resumes: bool = False
 
 
 class TitlesReport(BaseModel):
@@ -551,6 +555,23 @@ def create_app(
 
     # A followed session's turn ends: at most one quiet notification a minute each.
     turn_end_notified: Dict[str, float] = {}
+
+    def paused_request(session: SessionModel) -> Optional[int]:
+        """The request a busy session's turn belongs to, while it is still running."""
+        if session.state != "busy" or session.turn_request_id is None:
+            return None
+        req = db.get_request(session.turn_request_id)
+        return req.id if req is not None and req.status == RequestStatus.EXECUTING else None
+
+    def notify_app_review(session: SessionModel) -> None:
+        """The agent waits for the user's approval inside its own app (RFC-16)."""
+        if not db.get_notification_preferences().get("needs_you", True):
+            return
+        lang = db.get_background_language()
+        web_push_later(text("notify.app_review_title", lang,
+                            label=session_label(session.provider, session.title, session.cwd)),
+                       text("notify.app_review_body", lang), f"/#/sessione/{session.id}",
+                       f"app-review-{session.id}", "high")
 
     def notify_turn_end(session: SessionModel, last_message: Optional[str], is_placet: bool = False) -> None:
         if not session.pinned or session.excluded:
@@ -1293,7 +1314,13 @@ def create_app(
                         notify_session(old.id)
             db.increment_prompt_count(session_id)
             turn_request_id = None
-            if payload.request_id is not None:
+            paused = paused_request(session)
+            if payload.resumes and paused is not None:
+                # RFC-16: the turn continues the paused work of the same request.
+                turn_request_id = paused
+                db.log_event(paused, f"{who.actor}:hook", "turn_resumed", {})
+                notify_change(paused)
+            elif payload.request_id is not None:
                 try:
                     ack_request(who, payload.request_id, via="hook")
                     turn_request_id = payload.request_id
@@ -1308,6 +1335,16 @@ def create_app(
                 db.mark_turn_mixed(turn_request_id)
             db.set_session_state(session_id, "busy", turn_request_id)
             result["turn_request_id"] = turn_request_id
+        elif payload.event == "stop" and payload.pause and session.turn_request_id is not None \
+                and paused_request(session) is not None:
+            # RFC-16: not the end of the work. The request stays open, the
+            # session busy (nothing else is delivered meanwhile) and no
+            # implicit reply is taken from a progress message.
+            db.log_event(session.turn_request_id, f"{who.actor}:hook", "turn_paused", {"reason": payload.pause})
+            if payload.pause == "app_review":
+                notify_app_review(session)
+            result["paused_for"] = session.turn_request_id
+            notify_change(session.turn_request_id)
         elif payload.event == "stop":
             was_busy = session.state == "busy"
             is_placet = (session.turn_request_id is not None) or bool(db.steered_in_turn(session_id))

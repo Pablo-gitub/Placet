@@ -55,5 +55,7 @@
   "stats.invalid_timezone": "Invalid timezone: {tz}",
   "stats.invalid_date": "Invalid date format: {date}",
   "stats.invalid_range": "From date cannot be after to date.",
-  "stats.range_too_large": "Date range exceeds maximum of 400 days."
+  "stats.range_too_large": "Date range exceeds maximum of 400 days.",
+  "notify.app_review_title": "{label} is waiting for your approval",
+  "notify.app_review_body": "Approve the plan in the Antigravity app on the PC: the work resumes from there."
 }

@@ -55,5 +55,7 @@
   "stats.invalid_timezone": "Fuso orario non valido: {tz}",
   "stats.invalid_date": "Formato data non valido: {date}",
   "stats.invalid_range": "La data di inizio non può essere successiva alla data di fine.",
-  "stats.range_too_large": "L'intervallo di date supera il limite massimo di 400 giorni."
+  "stats.range_too_large": "L'intervallo di date supera il limite massimo di 400 giorni.",
+  "notify.app_review_title": "{label} aspetta la tua approvazione",
+  "notify.app_review_body": "Approva il piano nell'app Antigravity sul PC: il lavoro riprende da lì."
 }
