@@ -587,6 +587,10 @@ class Database:
             if "project_context" not in cols:
                 # RFC-15: composed project and node instructions block
                 cursor.execute("ALTER TABLE requests ADD COLUMN project_context TEXT;")
+            # RFC-16: the latest progress update of a running request.
+            for col in ("progress_text", "progress_at"):
+                if col not in cols:
+                    cursor.execute(f"ALTER TABLE requests ADD COLUMN {col} TEXT;")
             if "relation_type_name" not in cols:
                 # RF-64: historical relation type name on requests
                 cursor.execute("ALTER TABLE requests ADD COLUMN relation_type_name TEXT;")
@@ -785,7 +789,34 @@ class Database:
             project_name=row["project_name"] if "project_name" in keys else None,
             project_context=row["project_context"] if "project_context" in keys else None,
             relation_type_name=row["relation_type_name"] if "relation_type_name" in keys else None,
+            progress_text=row["progress_text"] if "progress_text" in keys else None,
+            progress_at=_ts(row["progress_at"]) if "progress_at" in keys else None,
         )
+
+    def open_request_toward(self, sender_session: str, recipient_id: str,
+                            recipient_session: Optional[str]) -> Optional[int]:
+        """
+        RFC-16: the request that `sender_session` is running for the session
+        (or, without one, the agent) it now wants to write to, if any. Its
+        reply belongs in placet_reply, not in a new request.
+        """
+        sql = ("SELECT id FROM requests WHERE recipient_session_id = ?"
+               " AND status IN ('APPROVED', 'DELIVERING', 'EXECUTING') AND ")
+        if recipient_session:
+            sql += "sender_session_id = ?"
+            params = (sender_session, recipient_session)
+        else:
+            sql += "sender_id = ?"
+            params = (sender_session, recipient_id)
+        with self._get_connection() as conn:
+            row = conn.execute(sql + " ORDER BY id DESC LIMIT 1", params).fetchone()
+            return row["id"] if row else None
+
+    def set_progress(self, request_id: int, text: str) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            conn.execute("UPDATE requests SET progress_text = ?, progress_at = ?, updated_at = ? WHERE id = ?",
+                         (text, now, now, request_id))
 
     def list_requests(
         self,

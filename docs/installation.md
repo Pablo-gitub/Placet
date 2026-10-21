@@ -304,7 +304,8 @@ Add Placet to your client's MCP configuration (e.g. `claude_desktop_config.json`
 4. `placet_ack(request_id)`
    - Acknowledges a request injected into the session (with `ack_mode: mcp`).
 5. `placet_reply(request_id, response)`
-   - Returns the reply once the task is done.
+   - Returns the reply once the task is done. A request is one task with one concluding reply. While a session runs a request, a new request from it back to that request's sender is refused (409 `request.reply_expected`, nothing sent): the answer goes through `placet_reply`, progress through `placet_progress`, decisions through `placet_ask_human`.
+   - `placet_progress(request_id, message)` reports progress ("part 1 of 4 done") without concluding: the latest update is shown in the history and returned by `placet_check_status`.
 6. `placet_share_file(path, title)`
    - Shows an allowed PDF or image on the phone. Files must satisfy the home, hidden-folder, ownership, type, size and exclusion checks in the architecture.
 7. `placet_list_agents()`

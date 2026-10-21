@@ -183,7 +183,8 @@
     "implicitHint": "Final agent message, not sent using placet_reply",
     "created": "Created:",
     "other": "Other: {{text}}",
-    "note": "Note: {{text}}"
+    "note": "Note: {{text}}",
+    "progress": "Progress:"
   },
   "status": {
     "APPROVED": "Approved",

@@ -78,6 +78,11 @@ export default function History({ requests, sessions, focusId, onOpenSession, on
                 <strong>{t("history.answer")}</strong> {answerOf(req)}
               </p>
             )}
+            {!req.response && req.progress_text && (
+              <p className="history-progress" data-testid={`history-progress-${req.id}`}>
+                <strong>{t("history.progress")}</strong> {req.progress_text}
+              </p>
+            )}
             {req.response && (
               <div className="history-response">
                 <strong>{t("history.responder", { agent: req.response.responder_id })}</strong>{" "}

@@ -183,7 +183,8 @@
     "implicitHint": "Ultimo messaggio dell’agente, non inviato con placet_reply",
     "created": "Creato:",
     "other": "Altro: {{text}}",
-    "note": "Nota: {{text}}"
+    "note": "Nota: {{text}}",
+    "progress": "Avanzamento:"
   },
   "status": {
     "APPROVED": "Approvata",

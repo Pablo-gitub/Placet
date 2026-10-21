@@ -352,8 +352,11 @@ async def ping_pong(app, db):
 
 
 async def hop(app, db, agent, session, target, parent):
-    """`session` runs the turn of `parent` and sends on to `target`."""
+    """`session` answers `parent` in its turn, then sends on to `target`.
+    RFC-16: while `parent` is open, a new request back to its sender is
+    refused, so the turn replies first (as placet_reply would)."""
     db.set_session_state(session, "busy", parent)
+    db.record_reply(request_id=parent, responder_id=agent, content="ok", actor=f"agent:{agent}")
     return await send(app, agent=agent, target=target, session=target_session[target])
 
 target_session = {"codex": "cx", "claude": "cl"}
@@ -386,6 +389,7 @@ async def test_a_question_to_the_user_resets_the_chain(env):
     db.set_automation(max_hops=1)
     first = await send(app)
     db.set_session_state("cx", "busy", first["id"])
+    db.record_reply(request_id=first["id"], responder_id="codex", content="ok", actor="agent:codex")
     async with agent_client(app, "tok-codex") as client:
         q = (await client.post("/api/requests", json={"recipient_id": "human", "prompt": "ok?"})).json()
     async with human_client(app) as human:

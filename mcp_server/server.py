@@ -123,6 +123,9 @@ when Placet cannot tell which session is sending; with `target_node`, a
 missing sender or relation is an error and nothing is sent.
     The result says `delivery_policy`: "manual" means the human may edit or
     reject the prompt; "automatic" means it was delivered without review.
+    While you run a request from a session, do not send that session a new
+    request: Placet refuses it (request.reply_expected). Answer with
+    placet_reply, report progress with placet_progress.
     If the result status is RULE_ACKNOWLEDGEMENT_REQUIRED, NOTHING was sent:
     read `rule` now. If it tells you to stop or to ask the human first (with
     placet_ask_human), do that. Only otherwise send the same prompt again with
@@ -205,6 +208,23 @@ def placet_reply(
     try:
         res = client.reply(request_id=request_id, response=response)
         return json.dumps(res, indent=2, ensure_ascii=False)
+    except Exception as e:
+        return _format_error(e)
+
+
+@mcp.tool()
+def placet_progress(request_id: int, message: str) -> str:
+    """
+    Report progress on a Placet request you are running (for example "part 1
+    of 4 done, tests green"), without concluding it. The sender and the user
+    see the latest update; the request stays open until placet_reply. Use it
+    instead of sending a new message to the sender, which Placet refuses while
+    the request runs. One short line per meaningful step, not a running log.
+    """
+    try:
+        res = client.progress(request_id=request_id, message=message)
+        return json.dumps({"status": res.get("status"), "progress_text": res.get("progress_text")},
+                          indent=2, ensure_ascii=False)
     except Exception as e:
         return _format_error(e)
 
