@@ -75,6 +75,22 @@ def run(argv, timeout=60):
                           stdin=subprocess.DEVNULL)
 
 
+def cleanup():
+    # --collect can already have unloaded the transient runner. A nonzero
+    # stop alone is not an error if both fixed laboratory units are inactive.
+    for name in (RUNNER_UNIT,WORKER):
+        subprocess.run(['/usr/bin/systemctl','stop',name],check=False,timeout=20,env=ENV,
+                       stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        status=subprocess.run(['/usr/bin/systemctl','show',name,'--property=ActiveState','--value'],
+                              check=True,capture_output=True,text=True,timeout=10,env=ENV)
+        if status.stdout.strip() not in ('inactive','failed'):
+            raise ValueError('Laboratory unit still active; retain files for operator inspection')
+    UNIT.unlink()
+    (STAGE/'helper.py').unlink()
+    STAGE.rmdir()
+    run(['/usr/bin/systemctl','daemon-reload'])
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--apply', action='store_true')
@@ -164,11 +180,7 @@ ExecStart=/usr/local/lib/placet-admin-venv/bin/python -I {helper}
              '/usr/local/lib/placet-admin-venv/bin/python','-I','-c',RUNNER])
     finally:
         # Only fixed laboratory units are stopped, never production services.
-        run(['/usr/bin/systemctl','stop',RUNNER_UNIT,WORKER])
-        UNIT.unlink()
-        helper.unlink()
-        STAGE.rmdir()
-        run(['/usr/bin/systemctl','daemon-reload'])
+        cleanup()
 
 
 if __name__ == '__main__':

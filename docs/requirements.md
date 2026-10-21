@@ -233,3 +233,12 @@ installed or enabled configuration. Activation and real iPhone acceptance remain
 human operations.
 See the [plan and trust boundaries](plans/reserved-commands.md) and
 [installation guide](installation.md#reserved-administrative-commands).
+
+Administrative bridge restarts use a fixed system worker with NNP, zero
+capabilities, an exact protected supplementary-group policy and a bounded
+InvocationID-bound report. Dispatch correlation is durable; uncertain effects
+are never retried automatically. The operator must review and run the disposable
+[worker probe](experiments/2026-10-21-bridge-worker-probe.md), then use the
+separate pinned maintenance installer described in the
+[installation guide](installation.md). Ordinary application deploys do not
+update protected administrative code or enable a worker.

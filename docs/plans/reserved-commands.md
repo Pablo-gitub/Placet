@@ -578,3 +578,11 @@ operator after review. It is a laboratory gate, not approval for a real restart.
 The separate digest-pinned maintenance installer and installation instructions
 are required before this code can run on the host. Ordinary application deploys
 never update the protected administrative package.
+
+The review branch includes `worker_maintenance.py`: preview only by default,
+four reviewed digests plus explicit groups for root apply from a protected copy.
+It freezes writers under the execution lock, rejects pending/uncertain jobs,
+backs up enrollment/state and replaces the worker-related bundle plus only its
+fixed unit. It never restores old authorization data or tests a real restart.
+Interrupted mutation leaves admin components stopped for explicit recovery.
+The operator procedure is in the [installation guide](../installation.md).

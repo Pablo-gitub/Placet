@@ -497,3 +497,83 @@ sudo /usr/bin/env -i PATH=/usr/bin:/bin PYTHONPATH=/usr/local/lib/placet-admin /
 Choose the outcome you actually established. Repeating the same reconciliation
 is idempotent; changing an already recorded decision is rejected. An agent, PWA,
 bridge or backend cannot invoke this terminal operation through the broker.
+
+### Bridge worker maintenance (separate from application deploy)
+
+This step is **not installed by `deploy/install.sh`**. First review the worker
+PR and run [probe 4](experiments/2026-10-21-bridge-worker-probe.md) against the
+disposable target. Stop on invariant/report failures. Do not use
+`activation_bootstrap.py` to update an already activated host.
+
+The new worker retains NNP and has no capabilities. Its supplementary groups
+are the exact approved NSS group set, not an empty set: systemd cannot remove
+NSS memberships with an empty SupplementaryGroups directive. Review all groups,
+including password-protected sudo as a residual shared-UID risk. The installer
+refuses root-equivalent/unassessed groups and accessible privileged sockets;
+it does not change accounts, sudo rules, Tailscale or production app units.
+
+Preview from the reviewed checkout is unprivileged and read-only:
+
+```bash
+python3 -I admin_executor/worker_maintenance.py
+sha256sum admin_executor/worker_maintenance.py
+```
+
+The protected configuration may be unreadable to the desktop user. After
+reviewing the full installer and recording its digest, the operator copies it
+without executing checkout Python as root:
+
+```bash
+/usr/bin/sudo /usr/bin/install -d -o root -g root -m 0755 /run/placet-reviewed-probes
+/usr/bin/sudo /usr/bin/install -o root -g root -m 0644 admin_executor/worker_maintenance.py /run/placet-reviewed-probes/worker_maintenance.py
+sha256sum /run/placet-reviewed-probes/worker_maintenance.py
+```
+
+Require the copied digest to match the reviewed commit. From a trusted terminal
+independent of agents, preview the protected state with the copied installer:
+
+```bash
+/usr/bin/sudo /usr/bin/python3 -I /run/placet-reviewed-probes/worker_maintenance.py --source /home/paolo/Projects/placet/admin_executor
+```
+
+Review the four full SHA-256 values (installer, new bundle, installed bundle,
+new worker unit), UID/GID, and expected group IDs. Replace each placeholder
+below with that reviewed value; GROUPS is the sorted comma-separated numeric
+list, not a shell variable. Neither preview executes the source bundle: its
+manifest and literal unit template are parsed as data.
+
+```bash
+/usr/bin/sudo /usr/bin/python3 -I /run/placet-reviewed-probes/worker_maintenance.py \
+  --source /home/paolo/Projects/placet/admin_executor \
+  --apply --installer-sha256 INSTALLER_SHA256 \
+  --bundle-sha256 NEW_BUNDLE_SHA256 --installed-sha256 INSTALLED_BUNDLE_SHA256 \
+  --unit-sha256 WORKER_UNIT_SHA256 --expected-groups GROUPS
+```
+
+No restart job may be pending, running, or uncertain. Let authorized work finish
+first; reconcile uncertain outcomes only after inspecting effects. Do not delete
+rows or replay a job to unblock maintenance. The installer takes the execution
+lock, stops the administrative authorization writers and supervisor, rechecks
+for authorizations that arrived during freeze, and refuses an untracked/live
+worker. It preserves the live authorization database, passkeys, jobs, audit,
+catalogue, protected identities and network configuration. It updates only
+allowlisted worker-related package files/locales and the single worker unit;
+control/supervisor/web unit definitions are left unchanged. It does not start
+or enable the worker, nor restart the backend or user bridge as a test.
+
+Backups: `/usr/local/lib/placet-admin/admin_executor.before-worker-<installed_digest>`
+and root-private `/var/lib/placet-admin/worker-maintenance-<installed_digest>/`.
+On a failure after mutation, administrative services stay stopped for explicit
+operator recovery; the record says `frozen` until successful completion. Do not
+rerun blindly or restore an older authorization DB: restoring spent challenges
+or jobs can authorize replays. Inspect backups, unit, policy and installed bundle
+with a reviewer, repair the protected code/configuration deliberately, and keep
+the live database. A no-mutation failure restores the administrative services.
+The exact same installed digest is deliberately not applied twice automatically.
+
+After a successful install, use the PWA to authorize **one** `restart-bridge`
+through Face ID. Check that the bridge InvocationID changes and remains active,
+and the result is explicitly user-service evidence. A worker report is not an
+independent root health check. Test `restart-backend` separately for regression.
+If anything is uncertain, the queue remains blocked until terminal inspection
+and reconciliation. Installer success alone never proves a real restart works.
