@@ -1,8 +1,10 @@
 import { useTranslation } from "react-i18next";
 import React, { useState } from "react";
-import { CheckCircle, ChevronDown, ChevronRight, Circle, MessageCircleQuestion, Plus } from "lucide-react";
+import { CheckCircle, ChevronDown, ChevronRight, Circle, MessageCircleQuestion, PauseCircle, Plus } from "lucide-react";
 import RequestCard from "./RequestCard";
 import { needsReturnApproval } from "./decisions";
+import { queueStuck } from "./aspects";
+import useHoldClock from "./useHoldClock";
 import AddSessionsDialog from "./AddSessionsDialog";
 import UsageBar from "./UsageBar";
 import AutomationBar from "./AutomationBar";
@@ -18,7 +20,7 @@ import {
   timeAgo,
 } from "./sessionInfo";
 
-function SessionRow({ session, label, questions, onOpen, active }) {
+function SessionRow({ session, label, questions, stuck, onOpen, active }) {
   const { t } = useTranslation();
   const status = sessionStatus(session);
   return (
@@ -32,6 +34,11 @@ function SessionRow({ session, label, questions, onOpen, active }) {
       <div className="session-row">
         <span className="provider-chip">{providerOf(session).label}</span>
         <strong className="session-name">{label || sessionName(session)}</strong>
+        {stuck && (
+          <span className="badge-held" title={t("home.queueHeld")} data-testid={`session-held-${session.id}`}>
+            <PauseCircle size={14} aria-label={t("home.queueHeld")} />
+          </span>
+        )}
         {questions > 0 && (
           <span className="badge-count" title={t("home.pendingQuestions", { count: questions })} data-testid={`session-questions-${session.id}`}>
             {questions}
@@ -63,7 +70,7 @@ function loadCollapsed() {
  * The followed sessions of one provider, under a header that opens and
  * closes; providers come in order of their latest activity.
  */
-function ProviderGroup({ provider, sessions, labels, questionsOf, collapsed, onToggle, onOpen, activeId }) {
+function ProviderGroup({ provider, sessions, labels, questionsOf, stuckOf, collapsed, onToggle, onOpen, activeId }) {
   const { t } = useTranslation();
   const busy = sessions.filter((s) => sessionStatus(s).key === "busy").length;
   const questions = sessions.reduce((n, s) => n + questionsOf(s.id), 0);
@@ -92,6 +99,7 @@ function ProviderGroup({ provider, sessions, labels, questionsOf, collapsed, onT
             session={s}
             label={labels?.[s.id]}
             questions={questionsOf(s.id)}
+            stuck={stuckOf(s.id)}
             onOpen={onOpen}
             active={s.id === activeId}
           />
@@ -132,6 +140,8 @@ export default function Home({
   const pinned = sessions.filter((s) => s.pinned).sort(byActivity);
   const labels = sessionLabels(pinned);
   const questionsOf = (id) => pending.filter((r) => r.sender_session_id === id).length;
+  const holdNow = useHoldClock(requests, null);
+  const stuckOf = (id) => queueStuck(requests, id, holdNow);
   // pinned is sorted by activity: a provider's first session is its latest.
   const groups = [];
   for (const s of pinned) {
@@ -183,6 +193,7 @@ export default function Home({
             sessions={g.sessions}
             labels={labels}
             questionsOf={questionsOf}
+            stuckOf={stuckOf}
             collapsed={collapsed.has(g.provider.key)}
             onToggle={toggleProvider}
             onOpen={onOpenSession}

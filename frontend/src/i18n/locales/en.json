@@ -22,7 +22,8 @@
     "busy": "{{count}} working",
     "pendingQuestions_one": "{{count}} question waiting",
     "pendingQuestions_other": "{{count}} questions waiting",
-    "addSessions": "Add / view all"
+    "addSessions": "Add / view all",
+    "queueHeld": "Queue held: messages are waiting for you to confirm the last turn ended"
   },
   "return": {
     "title": "Reply from {{recipient}} to {{sender}} · #{{id}}",

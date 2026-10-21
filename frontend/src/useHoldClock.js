@@ -8,13 +8,14 @@ const pageVisible = () => document.visibilityState !== "hidden";
  * request becomes visible only after a grace period, when no event may arrive
  * (that is the point: the turn end was lost), so re-render at that moment.
  * The timer runs only while the page is visible: hiding the page cancels it,
- * showing it again re-reads the clock and arms the next deadline.
+ * showing it again re-reads the clock and arms the next deadline. Without a
+ * session id it follows every session's requests (the Home list).
  */
 export default function useHoldClock(requests, sessionId) {
   const [now, setNow] = useState(() => Date.now());
   const [visible, setVisible] = useState(pageVisible);
   const pending = requests
-    .filter((r) => r.recipient_session_id === sessionId && !r.queue_released_at && r.status === "COMPLETED"
+    .filter((r) => (sessionId == null || r.recipient_session_id === sessionId) && !r.queue_released_at && r.status === "COMPLETED"
       && ["unobserved", "started"].includes(r.execution) && r.completed_at)
     .map((r) => Date.parse(r.completed_at) + REPLY_TURN_GRACE_MS)
     .filter((at) => at > now);

@@ -689,6 +689,7 @@ fieldset.options-list {
   gap: 0.5rem;
 }
 .session-row .badge-count { background: var(--primary); color: white; }
+.session-row .badge-held { display: inline-flex; align-items: center; color: var(--warning); }
 .provider-chip {
   font-size: 0.68rem;
   font-weight: 700;

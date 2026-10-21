@@ -22,7 +22,8 @@
     "busy": "{{count}} al lavoro",
     "pendingQuestions_one": "{{count}} domanda in attesa",
     "pendingQuestions_other": "{{count}} domande in attesa",
-    "addSessions": "Aggiungi / vedi tutte"
+    "addSessions": "Aggiungi / vedi tutte",
+    "queueHeld": "Coda ferma: dei messaggi aspettano che tu confermi la fine dell'ultimo turno"
   },
   "return": {
     "title": "Risposta di {{recipient}} a {{sender}} · #{{id}}",
