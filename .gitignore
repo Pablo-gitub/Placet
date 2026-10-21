@@ -61,3 +61,6 @@ frontend/dist/
 .idea/
 *.swp
 *.swo
+
+# Agent worktrees (parallel tasks on separate branches)
+.worktrees/

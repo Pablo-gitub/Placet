@@ -44,6 +44,16 @@ GitHub Actions (`.github/workflows/checks.yml`) runs five jobs on every pull req
 
 Please add tests with behavior changes. For provider integrations, also describe what you verified with the real app and on which version: automated tests cannot prove that an undocumented provider interface still behaves the same.
 
+## Parallel work
+
+Agents working in parallel use a separate git worktree and branch each, created inside the repository so they stay within the agent's allowed folder:
+
+```bash
+git fetch && git worktree add .worktrees/<task> -b <branch> origin/main
+```
+
+`.worktrees/` is ignored by git. Never switch branches in the main checkout another agent may be using; remove the worktree (`git worktree remove .worktrees/<task>`) once its PR is merged.
+
 ## Language
 
 - Code, comments, logs, commit messages and developer documentation are in English.
