@@ -24,6 +24,7 @@ import {
   X,
 } from "lucide-react";
 import Markdown from "./Markdown";
+import useHoldClock from "./useHoldClock";
 import RequestCard from "./RequestCard";
 import { actionLabel, groupEntries, timeOf } from "./chatEntries";
 import { providerClass, providerOf, sessionName, sessionPlace, sessionStatus } from "./sessionInfo";
@@ -267,6 +268,7 @@ function QueueHold({ req, waiting, onDelivery }) {
           : t("deliveryUi.acceptedUnseen")}{" "}
         {waiting > 0 ? t("deliveryUi.waitingNext") : t("deliveryUi.willWait")}
       </p>
+      {req.status === "COMPLETED" && <p className="composer-note">{t("deliveryUi.mayStillRun")}</p>}
       <div className="outgoing-actions">
         <button type="button" data-testid={`finished-${req.id}`} onClick={() => onDelivery(req.id, "finished")}>
           {t("deliveryUi.finished")}
@@ -316,7 +318,8 @@ export default function SessionView({
     .filter((r) => r.question_type === "message" && r.recipient_session_id === sessionId
       && r.status in OUTGOING_STATES && notStarted(r))
     .sort((a, b) => a.id - b.id);
-  const held = requests.filter((r) => r.recipient_session_id === sessionId && holdsQueueUnseen(r));
+  const holdNow = useHoldClock(requests, sessionId);
+  const held = requests.filter((r) => r.recipient_session_id === sessionId && holdsQueueUnseen(r, holdNow));
   // Editing withdraws a waiting message and puts it back in the composer.
   const [draft, setDraft] = useState(null);
   const edit = async (req) => {
