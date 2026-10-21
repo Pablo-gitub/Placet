@@ -10,6 +10,7 @@ from backend.app.models import (
     BRIDGE_PROVIDERS,
     STEER_PROVIDERS,
     HOLD_ALERT_SECONDS,
+    PAUSE_UNRESUMED_SECONDS,
     START_UNCONFIRMED_SECONDS,
     OPEN_STATUSES,
     RequestCreate,
@@ -1198,6 +1199,34 @@ class Database:
             ids = sorted(r["id"] for r in cursor.fetchall())
             for req_id in ids:
                 self._log(cursor, req_id, "system", "start_unconfirmed", at=now)
+            return ids
+
+    def long_pauses(self, seconds: float = PAUSE_UNRESUMED_SECONDS) -> List[int]:
+        """
+        Executing requests whose turn paused (turn_paused) and was not resumed
+        for `seconds`: flagged once like an unseen start, so the hold card
+        shows and the held-queue push can fire. The queue stays held.
+        """
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
+        cutoff = (now_dt - timedelta(seconds=seconds)).isoformat()
+        last_event = (
+            "(SELECT {col} FROM request_events e WHERE e.request_id = r.id"
+            " AND e.event IN ('turn_paused', 'turn_resumed') ORDER BY e.id DESC LIMIT 1)"
+        )
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"SELECT r.id FROM requests r WHERE r.status = ? AND r.start_unconfirmed_at IS NULL"
+                f" AND r.queue_released_at IS NULL AND r.recipient_session_id IS NOT NULL"
+                f" AND {last_event.format(col='e.event')} = 'turn_paused'"
+                f" AND {last_event.format(col='e.at')} <= ? ORDER BY r.id",
+                (RequestStatus.EXECUTING.value, cutoff),
+            )
+            ids = [r["id"] for r in cursor.fetchall()]
+            for req_id in ids:
+                cursor.execute("UPDATE requests SET start_unconfirmed_at = ? WHERE id = ?", (now, req_id))
+                self._log(cursor, req_id, "system", "pause_unresumed", at=now)
             return ids
 
     def held_queues_to_alert(self, seconds: float = HOLD_ALERT_SECONDS) -> List[Tuple[int, str, int]]:

@@ -55,6 +55,9 @@ START_UNCONFIRMED_SECONDS = 120.0
 # A queue held by a turn end Placet never saw, with a message waiting behind
 # it, is worth a push after this long (once per held request).
 HOLD_ALERT_SECONDS = 10 * 60.0
+# A turn paused (RFC-16) and not resumed for this long is flagged like an
+# unseen start: the queue stays held, only the user moves it on.
+PAUSE_UNRESUMED_SECONDS = 30 * 60.0
 # An agent that declared itself busy is trusted for at most this long (a
 # crashed CLI never sends "idle").
 AGENT_BUSY_TTL_SECONDS = 30 * 60

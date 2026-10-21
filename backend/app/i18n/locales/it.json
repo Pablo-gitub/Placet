@@ -11,6 +11,7 @@
   "alerts.unreachable": "sessione non raggiungibile: il messaggio parte al suo prossimo turno, o scrivi qualcosa nella sessione dal PC",
   "alerts.start_unconfirmed": "avvio non confermato: i messaggi successivi restano in attesa",
   "alerts.queue_held": "da verificare: la sessione non riceve altro finché non decidi",
+  "alerts.paused_long": "in pausa da molto: i messaggi successivi restano in attesa",
   "alerts.stalled": "nessuna risposta, richiesta bloccata",
   "envelope.failed": "Il prompt non è stato confermato dall’agente destinatario dopo più tentativi.",
   "envelope.stalled": "L’agente destinatario ha ricevuto il prompt ma non ha risposto entro il tempo massimo.",

@@ -399,6 +399,9 @@ def create_app(
         for req_id in db.unconfirmed_starts():
             notify_change(req_id)
             alert(req_id, "start_unconfirmed")
+        for req_id in db.long_pauses():
+            notify_change(req_id)
+            alert(req_id, "paused_long")
         # Switched off, nothing is marked: turning it on later still alerts.
         if db.get_notification_preferences().get("queue_held", True):
             for req_id, session_id, waiting in db.held_queues_to_alert():

@@ -1,5 +1,7 @@
 """RFC-16: a paused turn (Antigravity background task or plan review) does not
 conclude the Placet request; the resumed turn belongs to the same request."""
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from backend.app.config import AgentSpec, PlacetConfig
@@ -75,3 +77,40 @@ async def test_resume_without_a_paused_request_is_an_ordinary_turn(setup):
         assert resumed["turn_request_id"] is None
         stop = await event(gemini, "g1", event="stop", last_message="ok")
     assert "implicit_reply_for" not in stop
+
+
+def age_pause(db, req_id, seconds):
+    then = (datetime.now(timezone.utc) - timedelta(seconds=seconds)).isoformat()
+    with db._get_connection() as conn:
+        conn.execute("UPDATE request_events SET at = ? WHERE request_id = ? AND event = 'turn_paused'",
+                     (then, req_id))
+
+
+@pytest.mark.asyncio
+async def test_a_pause_that_lasts_is_flagged_and_keeps_holding_the_queue(setup):
+    app, db = setup
+    async with agent_client(app, "tok-gemini") as gemini:
+        req = await executing(app, db, gemini)
+        await event(gemini, "g1", event="stop", last_message="Ecco il piano.", pause="app_review")
+    age_pause(db, req.id, 29 * 60)
+    assert db.long_pauses() == []
+    age_pause(db, req.id, 31 * 60)
+    assert db.long_pauses() == [req.id]
+    assert db.long_pauses() == []  # once
+    flagged = db.get_request(req.id)
+    assert flagged.start_unconfirmed_at is not None  # the hold card shows, the push can fire
+    assert flagged.status == RequestStatus.EXECUTING and flagged.queue_released_at is None
+    assert db.request_in_flight("g1") == req.id  # never released on time
+    assert "pause_unresumed" in [e.event for e in db.list_events(req.id)]
+
+
+@pytest.mark.asyncio
+async def test_a_resumed_pause_is_not_flagged(setup):
+    app, db = setup
+    async with agent_client(app, "tok-gemini") as gemini:
+        req = await executing(app, db, gemini)
+        await event(gemini, "g1", event="stop", last_message="In corso.", pause="background_task")
+        await event(gemini, "g1", event="prompt", resumes=True)
+    age_pause(db, req.id, 3 * 3600)
+    assert db.long_pauses() == []
+    assert db.get_request(req.id).start_unconfirmed_at is None
