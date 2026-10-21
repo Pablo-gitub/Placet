@@ -544,3 +544,55 @@ blocked until a human reconciliation; an already-authorized queued job must not
 be silently lost or reauthorized. Partial failure remains fail-closed for review.
 The enrollment-only activation_bootstrap must not be reused. No maintenance
 installer or isolated terminal launcher is implemented by this change.
+
+### Fixed bridge worker (review branch; not installed)
+
+`restart-bridge` now uses a fixed system one-shot unit rather than a Python
+subprocess credential drop. The supervisor retains NNP and invokes only
+`placet-admin-bridge-worker.service`, with no requester-provided argv, target or
+environment. The existing supervisor capabilities are not broadened; removing
+its now-unused SETUID/SETGID is deferred because this maintenance operation
+replaces only the worker unit, not other administrative unit definitions.
+
+The worker runs as the desktop UID/GID, NNP enabled, every capability set empty,
+with no home or administrative state access and no writable result file. Its
+public, root-owned policy pins the exact supplementary groups; systemd's empty
+SupplementaryGroups assignment does **not** remove NSS memberships. Group drift
+or root-equivalent groups fail before the user-manager request. The same desktop
+UID can interfere with its own manager/processes: the result remains
+`user_service_report`, not independent root evidence.
+
+A bounded `sd_notify STATUS` envelope includes the worker InvocationID and a
+closed restart report. The root adapter reads only fixed system-manager fields,
+requires a new completed worker invocation, correlates it durably with the
+claimed job, and never treats a user report as proof of no effect after dispatch.
+No worker retries occur. Crash, lost response, nonzero exit or invalid report
+preserve `outcome_unknown` and block later jobs. Only a worker invocation already
+linked to a finished/reconciled job may be stopped before another authorized
+start; an untracked worker requires terminal inspection. The execution lock
+covers these steps. A small additive `execution_workers` table retains dispatch
+and invocation correlation; no passkey or authorization data moves to the worker.
+
+First run [probe 4](../experiments/2026-10-21-bridge-worker-probe.md) as the
+operator after review. It is a laboratory gate, not approval for a real restart.
+The separate digest-pinned maintenance installer and installation instructions
+are required before this code can run on the host. Ordinary application deploys
+never update the protected administrative package.
+
+The review branch includes `worker_maintenance.py`: preview only by default,
+four reviewed digests plus explicit groups for root apply from a protected copy.
+It freezes writers under the execution lock, rejects pending/uncertain jobs,
+backs up enrollment/state and replaces the worker-related bundle plus only its
+fixed unit. It never restores old authorization data or tests a real restart.
+Interrupted mutation leaves admin components stopped for explicit recovery.
+The operator procedure is in the [installation guide](../installation.md).
+
+Worker notification completion is explicit: a separate BARRIER=1 notification
+with one SCM_RIGHTS pipe descriptor follows STATUS; EOF acknowledges processing.
+The barrier has a three-second deadline and closes both local descriptors on
+all paths. A barrier error/timeout exits nonzero and retains uncertain outcome,
+without resending the action. Time budgets: worker start 60 seconds, supervisor
+start command 75 seconds; the disposable probe adds 100-second root-runner and
+120-second outer bounds. `worker_busy` intentionally remains uncertain: this
+job has not dispatched, but an untracked/previous worker might still be acting,
+so allowing further privileged jobs would violate serialization.

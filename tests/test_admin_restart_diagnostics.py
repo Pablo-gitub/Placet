@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from admin_executor.restart import RestartHandlers, restart_service, BRIDGE, run_fixed, SpawnFailure
+from admin_executor.restart import RestartHandlers, restart_service, BRIDGE, run_fixed, SpawnFailure, decode_report
 from admin_executor.execution import Supervisor
 from tests.test_admin_execution import store, authorize
 
@@ -16,12 +16,12 @@ def handler(run):
 
 
 @pytest.mark.parametrize('error,state,code', [
-    (SpawnFailure(1), 'failed', 'helper_spawn_failed'),
-    (OSError(5, 'SECRET read failure'), 'outcome_unknown', 'helper_io_failed'),
-    (subprocess.CalledProcessError(2, ['fixed'], stderr=b'SECRET'), 'outcome_unknown', 'helper_exit_nonzero'),
-    (subprocess.TimeoutExpired(['fixed'], 40, stderr=b'SECRET'), 'outcome_unknown', 'helper_timeout'),
+    (SpawnFailure(1), 'failed', 'worker_manager_unreachable'),
+    (OSError(5, 'SECRET read failure'), 'failed', 'worker_manager_unreachable'),
+    (subprocess.CalledProcessError(2, ['fixed'], stderr=b'SECRET'), 'failed', 'worker_manager_unreachable'),
+    (subprocess.TimeoutExpired(['fixed'], 40, stderr=b'SECRET'), 'failed', 'worker_manager_unreachable'),
 ])
-def test_helper_launch_failures_preserve_safe_phase(error, state, code):
+def test_worker_preflight_failures_preserve_safe_phase(error, state, code):
     def run(*a, **kw):
         raise error
     result = handler(run)('restart-bridge')
@@ -34,10 +34,9 @@ def test_helper_protocol_is_closed_and_rejects_raw_output():
     for output in ('succeeded\n', 'SECRET', '{"state":"failed","code":"SECRET"}',
                    '{"state":"succeeded","code":"helper_spawn_failed"}',
                    '{"state":"failed","code":"manager_unreachable","stderr":"SECRET"}'):
-        result = handler(lambda *a, **kw: output)('restart-bridge')
-        assert str(result) == 'outcome_unknown'
-        assert result.code == 'helper_response_invalid'
-    result = handler(lambda *a, **kw: json.dumps({'state':'failed','code':'manager_unreachable'}))('restart-bridge')
+        with pytest.raises(ValueError):
+            decode_report(output)
+    result = decode_report(json.dumps({'state':'failed','code':'manager_unreachable'}))
     assert str(result) == 'failed' and result.code == 'manager_unreachable'
 
 
@@ -84,15 +83,18 @@ def test_user_manager_effect_and_phase_are_distinct(scenario, state, code):
 def test_durable_job_stores_only_phase_code_and_never_retries_uncertainty(store):
     authorize(store, 'd' * 32, action='restart-bridge')
     calls = []
-    def run(*a, **kw):
-        calls.append(a)
+    from tests.test_admin_bridge_worker import state
+    def run(argv, **kw):
+        calls.append(argv)
+        if 'show' in argv:
+            return state()
         raise subprocess.CalledProcessError(2, ['fixed'], stderr=b'SECRET ASSERTION')
     worker = Supervisor(store, enabled={'restart-bridge'}, handler=handler(run))
     result = worker.run_once()
     assert result['state'] == 'outcome_unknown'
-    assert result['result_code'] == 'helper_exit_nonzero'
-    assert result['events'][-1]['code'] == 'helper_exit_nonzero'
-    assert worker.run_once() is None and len(calls) == 1
+    assert result['result_code'] == 'worker_dispatch_uncertain'
+    assert result['events'][-1]['code'] == 'worker_dispatch_uncertain'
+    assert worker.run_once() is None and len(calls) == 2
     assert 'SECRET' not in json.dumps(result)
 
 
@@ -113,6 +115,9 @@ def test_helper_import_failure_emits_only_a_closed_report(monkeypatch, capsys):
             raise ImportError('SECRET IMPORT ERROR')
         return original(name, *a, **kw)
     monkeypatch.setattr(bridge_restart.os, 'geteuid', lambda: 1000)
+    monkeypatch.setattr(bridge_restart, 'read_policy', lambda: {})
+    monkeypatch.setattr(bridge_restart, 'verify_identity', lambda *a: None)
+    monkeypatch.setattr(bridge_restart, 'notify', print)
     monkeypatch.setattr(sys, 'argv', ['bridge_restart.py'])
     monkeypatch.setattr(sys, 'path', sys.path[:])
     monkeypatch.setattr(builtins, '__import__', fail)
@@ -167,7 +172,7 @@ def test_popen_failure_is_typed_and_has_no_exception_text(monkeypatch):
         raise PermissionError(1, 'SECRET preexec')
     monkeypatch.setattr(restart.subprocess, 'Popen', denied)
     outcome = handler(restart.run_fixed)('restart-bridge')
-    assert str(outcome) == 'failed' and outcome.code == 'helper_spawn_failed'
+    assert str(outcome) == 'failed' and outcome.code == 'worker_manager_unreachable'
 
 
 def test_io_error_after_dispatch_is_never_a_certain_failure():

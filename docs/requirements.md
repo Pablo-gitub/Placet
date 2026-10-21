@@ -157,6 +157,9 @@ Problems addressed:
 | RF-63 | Model switching is not planned: rereading context consumes usage. | [Decided] |
 | RF-64 | **Statistics in Settings:** requests per day, week, month or custom range; by relation type, project, node and provider; automatic versus manual; approved, edited or rejected; mean time to reply. Computed by the backend in one call from existing requests, so history is available backwards. Each request stores its relation type name, so statistics survive a deleted relation. | [Implemented] October 20, 2026: `GET /api/stats` (human only, local-day buckets, at most 400 days) and Settings → Statistics (`#/statistiche`). The response shape is documented in the architecture. |
 | RF-64b | **Usage history:** the backend records each provider usage reading over time (today it keeps only the latest), so Statistics can show daily peaks per window, usage-guard threshold crossings and how long automatic relations were held back. History starts when recording ships; nothing earlier can be recovered, so recording comes before the charts. | [Implemented] October 20, 2026: `usage_samples` records a reading when a bucket moved by at least one point, its reset changed or 10 minutes passed, with canonical UTC timestamps and 400-day retention. Recording starts with this version. |
+| RF-65 | **Scheduled message:** in the composer the user can pick a date and time; the message is stored with `scheduled_at` and enters the session queue (or is delivered, if the queue is free) only from that moment. Until then it can be edited, rescheduled or cancelled, and the session shows it as scheduled. Times are entered in the user's local time zone and stored in UTC. | [Planned] |
+| RF-66 | **Deliver at reset (Settings):** a provider's window "resets" for Placet when its account window is used up (100%) or when it crosses the user's 5h/7d usage-guard thresholds. With the option on, a message (manual or automatic) whose recipient is over either limit is not sent: it gets `scheduled_at` = the recipient's latest `resets_at` among the windows over the limit and follows RF-65. Each party is handled on its own: the reply is delivered back to the sender at the sender's own reset if the sender is over its limit. The user can still send at once. With the option off, a message to a recipient over its limit is not sent either (it could be lost): it stays in manual approval even on an automatic relation, until the user decides. A reset time that is unknown or stale falls back to that manual approval. | [Planned] |
+| RF-67 | **Routines:** recurring scheduled messages (e.g. every morning a prompt to a node). To be studied: recurrence format, missed runs while the PC is off, usage windows, and interaction with relations and approvals. | [Later] |
 
 ### Later implementation: collaboration return approval and localization
 
@@ -235,3 +238,12 @@ installed or enabled configuration. Activation and real iPhone acceptance remain
 human operations.
 See the [plan and trust boundaries](plans/reserved-commands.md) and
 [installation guide](installation.md#reserved-administrative-commands).
+
+Administrative bridge restarts use a fixed system worker with NNP, zero
+capabilities, an exact protected supplementary-group policy and a bounded
+InvocationID-bound report. Dispatch correlation is durable; uncertain effects
+are never retried automatically. The operator must review and run the disposable
+[worker probe](experiments/2026-10-21-bridge-worker-probe.md), then use the
+separate pinned maintenance installer described in the
+[installation guide](installation.md). Ordinary application deploys do not
+update protected administrative code or enable a worker.

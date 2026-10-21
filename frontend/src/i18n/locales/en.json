@@ -668,7 +668,15 @@
       "operation_rejected": "The operation was refused before execution.",
       "interrupted": "Execution was interrupted; its effect must be checked.",
       "operator_reconciled_succeeded": "The operator recorded a successful outcome without repeating the action.",
-      "operator_reconciled_failed": "The operator recorded a failed outcome without repeating the action."
+      "operator_reconciled_failed": "The operator recorded a failed outcome without repeating the action.",
+      "worker_manager_unreachable": "The system worker manager could not be read; no worker was started.",
+      "worker_not_installed": "The protected bridge worker is not installed.",
+      "worker_start_not_sent": "The worker start command could not be launched.",
+      "worker_busy": "A previous or untracked worker needs terminal verification.",
+      "worker_dispatch_uncertain": "Worker dispatch may have occurred; do not retry automatically.",
+      "worker_invocation_invalid": "No new correlated worker invocation was observed.",
+      "worker_execution_uncertain": "The worker ran, but the restart outcome needs verification.",
+      "worker_report_invalid": "The worker result could not be correlated or verified."
     }
   },
   "stats": {

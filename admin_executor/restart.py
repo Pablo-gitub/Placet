@@ -24,6 +24,10 @@ RESULT_CODES = {
     'invocation_unchanged': 'outcome_unknown', 'restart_confirmed': 'succeeded',
     'backend_unhealthy': 'failed', 'handler_failed': 'outcome_unknown',
     'invalid_result': 'outcome_unknown',
+    'worker_manager_unreachable': 'failed', 'worker_not_installed': 'failed',
+    'worker_start_not_sent': 'failed', 'worker_busy': 'outcome_unknown',
+    'worker_dispatch_uncertain': 'outcome_unknown', 'worker_invocation_invalid': 'outcome_unknown',
+    'worker_execution_uncertain': 'outcome_unknown', 'worker_report_invalid': 'outcome_unknown',
 }
 
 
@@ -220,24 +224,12 @@ class RestartHandlers:
             return restart_service(BACKEND, run=self.run, pause=self.pause, health=self.health)
         if action != 'restart-bridge':
             raise ValueError('Unknown reserved action')
-        env = {**ENV, 'XDG_RUNTIME_DIR': f'/run/user/{self.uid}',
-               'DBUS_SESSION_BUS_ADDRESS': f'unix:path=/run/user/{self.uid}/bus'}
-        try:
-            # Drop all supplemental groups/GID/UID before exec, never as root.
-            raw = self.run(['/usr/bin/python3', '-I',
-                            '/usr/local/lib/placet-admin/admin_executor/bridge_restart.py'],
-                           timeout=40, env=env, user=self.uid, group=self.gid, extra_groups=[])
-        except subprocess.TimeoutExpired:
-            return result('helper_timeout')
-        except subprocess.CalledProcessError:
-            return result('helper_exit_nonzero')
-        except SpawnFailure:
-            return result('helper_spawn_failed')
-        except OSError:
-            return result('helper_io_failed')
-        except Exception:
-            return result('helper_response_invalid')
-        try:
-            return decode_report(raw)
-        except (ValueError, TypeError):
-            return result('helper_response_invalid')
+        from .bridge_worker import restart_worker
+        return restart_worker(run=self.run)
+
+    def run_job(self, action, job_id, record):
+        """Production dispatch with a root-private durable attempt recorder."""
+        if action != 'restart-bridge':
+            return self(action)
+        from .bridge_worker import restart_worker
+        return restart_worker(run=self.run, record=lambda phase, invocation: record(job_id,phase,invocation))

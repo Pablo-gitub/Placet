@@ -143,20 +143,12 @@ def test_backend_unchanged_invocation_is_not_success():
     assert handler('restart-backend') == 'outcome_unknown'
 
 
-def test_bridge_worker_drops_privileges_and_cannot_take_free_arguments():
-    calls = []
-    def run(argv, **kwargs):
-        calls.append((argv, kwargs))
-        return '{"state":"succeeded","code":"restart_confirmed"}\n'
-    handler = RestartHandlers(health_port=8123, desktop_uid=1000, desktop_gid=1000, run=run)
+def test_bridge_system_worker_cannot_take_free_arguments():
+    from tests.test_admin_bridge_worker import Manager
+    manager = Manager()
+    handler = RestartHandlers(health_port=8123, desktop_uid=1000, desktop_gid=1000, run=manager)
     assert handler('restart-bridge') == 'succeeded'
-    argv, options = calls[0]
-    assert argv == ['/usr/bin/python3', '-I', '/usr/local/lib/placet-admin/admin_executor/bridge_restart.py']
-    assert options['user'] == options['group'] == 1000
-    assert options['extra_groups'] == []
-    assert options['env'] == {'PATH': '/usr/bin:/bin', 'LC_ALL': 'C',
-                               'XDG_RUNTIME_DIR': '/run/user/1000',
-                               'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/run/user/1000/bus'}
+    assert all(not {'user','group','extra_groups'} & opts.keys() for _,opts in manager.calls)
     with pytest.raises(ValueError):
         handler('some-shell-command')
     with pytest.raises(ValueError):

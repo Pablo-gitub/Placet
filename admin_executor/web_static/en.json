@@ -57,5 +57,13 @@
   "result_interrupted": "Execution was interrupted; its effect must be checked.",
   "result_operator_reconciled_succeeded": "The operator recorded a successful outcome without repeating the action.",
   "result_operator_reconciled_failed": "The operator recorded a failed outcome without repeating the action.",
-  "result_helper_io_failed": "The bridge helper connection failed after launch; its effect is unconfirmed."
+  "result_helper_io_failed": "The bridge helper connection failed after launch; its effect is unconfirmed.",
+  "result_worker_manager_unreachable": "The system worker manager could not be read; no worker was started.",
+  "result_worker_not_installed": "The protected bridge worker is not installed.",
+  "result_worker_start_not_sent": "The worker start command could not be launched.",
+  "result_worker_busy": "A previous or untracked worker needs terminal verification.",
+  "result_worker_dispatch_uncertain": "Worker dispatch may have occurred; do not retry automatically.",
+  "result_worker_invocation_invalid": "No new correlated worker invocation was observed.",
+  "result_worker_execution_uncertain": "The worker ran, but the restart outcome needs verification.",
+  "result_worker_report_invalid": "The worker result could not be correlated or verified."
 }
