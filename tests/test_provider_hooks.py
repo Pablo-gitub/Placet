@@ -58,7 +58,7 @@ def test_antigravity_turn_lifecycle(tmp_path):
     ])
     assert agy_event("SessionStart", payload(path)) == {
         "event": "start", "provider": "antigravity", "entrypoint": "antigravity", "cwd": "/home/p/lab",
-        "adapter": "antigravity.py/2", "model": "gemini-x"}
+        "adapter": "antigravity.py/3", "model": "gemini-x"}
     first = agy_event("PreInvocation", payload(path, invocationNum=0))
     assert first["event"] == "prompt" and first["request_id"] == 12
     assert agy_event("PreInvocation", payload(path, invocationNum="1")) is None
@@ -172,3 +172,63 @@ def test_sessions_take_part_unless_the_project_is_excluded(tmp_path):
     assert active(str(project)) and active(None)
     (project / ".placet-off").touch()
     assert not active(str(project)) and not active(str(project / "src" / "deep"))
+
+
+# RFC-16: Antigravity ends a turn while a background task runs, or after
+# writing a plan for the user to approve in the app; the task continues in
+# the next turn, started by the task's completion message or the approval.
+BG_START = ("Created At: 2026-10-20T18:01:11+02:00\nTool is running as a background task with task id: "
+            "conv-1/task-7\nTask Description: pytest\nYOU MUST TAKE ONE OF THE FOLLOWING TWO ACTIONS")
+BG_DONE = ("The following is a <SYSTEM_MESSAGE> not actually sent by the user.\n<SYSTEM_MESSAGE>\n"
+           "[Message] timestamp=2026-10-20T16:02:09Z sender=conv-1/task-7 priority=MESSAGE_PRIORITY_HIGH "
+           "content=Task id \"conv-1/task-7\" finished with result:\n\nThe command exited with code 0.")
+PLACET_INPUT = {"type": "USER_INPUT", "content": "<USER_REQUEST>\n[Placet Request #184 from claude]: fai\n</USER_REQUEST>"}
+
+
+def test_antigravity_stop_with_a_running_background_task_is_a_pause(tmp_path):
+    path = transcript(tmp_path, [
+        PLACET_INPUT,
+        {"type": "GENERIC", "status": "RUNNING", "content": BG_START},
+        {"type": "PLANNER_RESPONSE", "content": "In corso la verifica dei test."},
+    ])
+    stop = agy_event("Stop", payload(path))
+    assert stop["pause"] == "background_task"
+    # The task's completion starts the next turn: it resumes the same task.
+    path = transcript(tmp_path, [
+        PLACET_INPUT,
+        {"type": "GENERIC", "status": "RUNNING", "content": BG_START},
+        {"type": "PLANNER_RESPONSE", "content": "In corso la verifica dei test."},
+        {"type": "SYSTEM_MESSAGE", "content": BG_DONE},
+    ])
+    prompt = agy_event("PreInvocation", payload(path, invocationNum=0))
+    assert prompt["resumes"] is True and "request_id" not in prompt
+    path = transcript(tmp_path, [
+        PLACET_INPUT,
+        {"type": "GENERIC", "status": "RUNNING", "content": BG_START},
+        {"type": "PLANNER_RESPONSE", "content": "In corso."},
+        {"type": "SYSTEM_MESSAGE", "content": BG_DONE},
+        {"type": "PLANNER_RESPONSE", "content": "Fatto tutto."},
+    ])
+    stop = agy_event("Stop", payload(path))
+    assert "pause" not in stop and stop["last_message"] == "Fatto tutto."
+
+
+def test_antigravity_plan_waiting_for_approval_is_a_pause(tmp_path):
+    plan = {"type": "GENERIC", "status": "DONE", "content": (
+        "Created file file:///home/u/.gemini/antigravity/brain/conv-1/implementation_plan.md with requested content.")}
+    path = transcript(tmp_path, [PLACET_INPUT, plan, {"type": "PLANNER_RESPONSE", "content": "Ecco il piano."}])
+    assert agy_event("Stop", payload(path))["pause"] == "app_review"
+    approval = {"type": "USER_INPUT", "content": (
+        "Comments on artifact URI: file:///home/u/.gemini/antigravity/brain/conv-1/implementation_plan.md\n\n"
+        "The user has approved this document.\n\n<USER_REQUEST>\n\n</USER_REQUEST>")}
+    path = transcript(tmp_path, [PLACET_INPUT, plan, {"type": "PLANNER_RESPONSE", "content": "Piano."}, approval])
+    assert agy_event("PreInvocation", payload(path, invocationNum=0))["resumes"] is True
+
+
+def test_antigravity_ordinary_turns_are_neither_paused_nor_resumed(tmp_path):
+    path = transcript(tmp_path, [
+        {"type": "USER_INPUT", "content": "<USER_REQUEST>\nciao\n</USER_REQUEST>"},
+        {"type": "PLANNER_RESPONSE", "content": "Ciao!"},
+    ])
+    assert "resumes" not in agy_event("PreInvocation", payload(path, invocationNum=0))
+    assert "pause" not in agy_event("Stop", payload(path))
