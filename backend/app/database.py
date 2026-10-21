@@ -1202,10 +1202,13 @@ class Database:
         now = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
             cursor = conn.cursor()
+            # Exactly what request_in_flight holds on, delivery aside: a request
+            # answered before its delivery settled holds the queue as well.
             cursor.execute(
                 "UPDATE requests SET queue_released_at = ? WHERE id = ? AND queue_released_at IS NULL"
-                " AND delivery_state = 'accepted'",
-                (now, request_id),
+                " AND status IN (?, ?, ?) AND COALESCE(execution_state, 'unobserved') IN ('unobserved', 'started')",
+                (now, request_id, RequestStatus.EXECUTING.value, RequestStatus.STALLED.value,
+                 RequestStatus.COMPLETED.value),
             )
             if cursor.rowcount == 0:
                 return False
