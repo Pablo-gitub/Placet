@@ -350,7 +350,8 @@ class Database:
                 prompt_source TEXT,
                 project_id INTEGER,
                 project_context TEXT,
-                relation_type_name TEXT
+                relation_type_name TEXT,
+                scheduled_at TEXT
             );
             """)
             cursor.execute("""
@@ -601,6 +602,9 @@ class Database:
             if "relation_type_name" not in cols:
                 # RF-64: historical relation type name on requests
                 cursor.execute("ALTER TABLE requests ADD COLUMN relation_type_name TEXT;")
+            if "scheduled_at" not in cols:
+                # RF-65: scheduled delivery timestamp in UTC ISO format
+                cursor.execute("ALTER TABLE requests ADD COLUMN scheduled_at TEXT;")
             # RFC-16: each relation has its own reply policy, initially equal to
             # its outbound policy; replies no longer depend on the reverse relation.
             rel_cols = [row["name"] for row in cursor.execute("PRAGMA table_info(relations);").fetchall()]
@@ -679,6 +683,7 @@ class Database:
     def create_request(self, req: RequestCreate, actor: Optional[str] = None) -> RequestModel:
         now = datetime.now(timezone.utc)
         expires_at = now + timedelta(seconds=req.expires_in_seconds)
+        scheduled_at = _normalize_utc_iso(getattr(req, "scheduled_at", None))
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -686,8 +691,9 @@ class Database:
                 INSERT INTO requests (
                     sender_id, recipient_id, question_type, prompt, context,
                     options, status, created_at, expires_at, updated_at, priority,
-                    recipient_session_id, prompt_source, project_id, project_context
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    recipient_session_id, prompt_source, project_id, project_context,
+                    scheduled_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     req.sender_id,
@@ -705,6 +711,7 @@ class Database:
                     req.prompt_source,
                     req.project_id,
                     req.project_context,
+                    scheduled_at,
                 ),
             )
             req_id = cursor.lastrowid
@@ -799,6 +806,7 @@ class Database:
             relation_type_name=row["relation_type_name"] if "relation_type_name" in keys else None,
             progress_text=row["progress_text"] if "progress_text" in keys else None,
             progress_at=_ts(row["progress_at"]) if "progress_at" in keys else None,
+            scheduled_at=_ts(row["scheduled_at"]) if "scheduled_at" in keys else None,
         )
 
     def open_request_toward(self, sender_session: str, recipient_id: str,
@@ -1486,8 +1494,11 @@ class Database:
         """
         in_flight = set(self.recipients_with_delivery_in_flight())
         ready = []
+        now = datetime.now(timezone.utc)
         for r in self.list_requests(status=RequestStatus.APPROVED, oldest_first=True, limit=200):
             if r.recipient_id == "human" or r.recipient_id in in_flight:
+                continue
+            if r.scheduled_at is not None and r.scheduled_at > now:
                 continue
             ready.append(r)
             in_flight.add(r.recipient_id)
@@ -2712,6 +2723,8 @@ class Database:
           AND (recipient_session_id = ? OR (recipient_session_id IS NULL AND ? = 0))
           -- a session never receives its own request (agent -> same agent)
           AND (sender_session_id IS NULL OR sender_session_id != ?)
+          -- RF-65: scheduled messages are only delivered when scheduled_at arrives
+          AND (scheduled_at IS NULL OR datetime(scheduled_at) <= datetime(?))
         ORDER BY (recipient_session_id IS NULL) ASC, id ASC
     """
 
@@ -2799,9 +2812,10 @@ class Database:
             cursor = conn.cursor()
             cursor.execute(self._OUTCOMES_SQL, (session.id, RequestStatus.PENDING.value))
             outcome_ids = [r["id"] for r in cursor.fetchall()]
+            now = datetime.now(timezone.utc).isoformat()
             cursor.execute(
                 self._INJECTIONS_SQL,
-                (RequestStatus.APPROVED.value, session.agent_id, session.id, int(explicit_only), session.id),
+                (RequestStatus.APPROVED.value, session.agent_id, session.id, int(explicit_only), session.id, now),
             )
             if cursor.fetchone() is not None and self.request_in_flight(session.id) is None:
                 return True
@@ -2864,7 +2878,7 @@ class Database:
             cursor = conn.cursor()
             cursor.execute(
                 self._INJECTIONS_SQL,
-                (RequestStatus.APPROVED.value, session.agent_id, session.id, 0, session.id),
+                (RequestStatus.APPROVED.value, session.agent_id, session.id, 0, session.id, now),
             )
             candidates = [r["id"] for r in cursor.fetchall()]
             for req_id in candidates:

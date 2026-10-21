@@ -136,6 +136,8 @@ class RequestCreate(BaseModel):
     expires_in_seconds: int = Field(
         DEFAULT_EXPIRES_IN_SECONDS, ge=10, le=MAX_EXPIRES_IN_SECONDS
     )
+    # RF-65: scheduled delivery time in UTC.
+    scheduled_at: Optional[datetime] = None
 
     @field_validator("options")
     @classmethod
@@ -207,6 +209,8 @@ class RequestModel(BaseModel):
     project_id: Optional[int] = None
     project_name: Optional[str] = None
     project_context: Optional[str] = None
+    # RF-65: scheduled delivery time in UTC.
+    scheduled_at: Optional[datetime] = None
     id: int
     sender_id: str
     recipient_id: str
