@@ -297,12 +297,19 @@ class SessionMessage(BaseModel):
     mentions: List[SessionMention] = Field(default_factory=list, max_length=20)
     # RFC-15: optional project context when sending message from PWA
     project_id: Optional[int] = None
+    # RF-65: scheduled delivery timestamp in UTC
+    scheduled_at: Optional[datetime] = None
 
     @model_validator(mode="after")
     def has_content(self):
         if not self.text.strip() and not self.attachments:
             raise ValueError("Write a message or select an attachment.")
         return self
+
+
+class RequestSchedule(BaseModel):
+    """Payload to schedule or clear scheduled delivery of a request (RF-65)."""
+    scheduled_at: Optional[datetime] = None
 
 
 class SessionModel(BaseModel):

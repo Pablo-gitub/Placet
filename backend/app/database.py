@@ -720,6 +720,12 @@ class Database:
                 {"question_type": req.question_type.value, "expires_at": expires_at.isoformat()},
                 at=now.isoformat(),
             )
+            if scheduled_at:
+                self._log(
+                    cursor, req_id, actor or f"agent:{req.sender_id}", "scheduled",
+                    {"scheduled_at": scheduled_at},
+                    at=now.isoformat(),
+                )
         return self.get_request(req_id)
 
     def get_request(self, request_id: int) -> Optional[RequestModel]:
@@ -1329,6 +1335,46 @@ class Database:
     def set_delivery_mode(self, request_id: int, mode: str) -> None:
         with self._get_connection() as conn:
             conn.execute("UPDATE requests SET delivery_mode = ? WHERE id = ?", (mode, request_id))
+
+    def schedule_request(
+        self, request_id: int, scheduled_at: Optional[Union[str, datetime]], actor: str
+    ) -> Optional[RequestModel]:
+        """
+        Schedules or clears the scheduled delivery time of a request (RF-65).
+        Allowed only while the request is not yet delivered:
+        status in (PENDING, APPROVED), delivered_at IS NULL, and delivery_state == 'waiting'.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT status, delivered_at, delivery_state FROM requests WHERE id = ?",
+                (request_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            if (
+                row["status"] not in (RequestStatus.PENDING.value, RequestStatus.APPROVED.value)
+                or row["delivered_at"] is not None
+                or (row["delivery_state"] and row["delivery_state"] != "waiting")
+            ):
+                return None
+
+            if scheduled_at is None:
+                cursor.execute(
+                    "UPDATE requests SET scheduled_at = NULL, updated_at = ? WHERE id = ?",
+                    (now, request_id),
+                )
+                self._log(cursor, request_id, actor, "schedule_cleared", at=now)
+            else:
+                scheduled_at_iso = _normalize_utc_iso(scheduled_at)
+                cursor.execute(
+                    "UPDATE requests SET scheduled_at = ?, updated_at = ? WHERE id = ?",
+                    (scheduled_at_iso, now, request_id),
+                )
+                self._log(cursor, request_id, actor, "scheduled", {"scheduled_at": scheduled_at_iso}, at=now)
+        return self.get_request(request_id)
 
     def steer_candidates(self) -> List[Tuple[RequestModel, SessionModel]]:
         """'Now' messages for sessions in the middle of a turn that can take them."""

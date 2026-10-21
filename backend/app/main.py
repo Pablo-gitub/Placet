@@ -46,6 +46,7 @@ from backend.app.models import (
     RequestDecision,
     OutcomeDecision,
     SessionMessage,
+    RequestSchedule,
     NodeModel,
     ProjectModel,
     ProjectSummaryModel,
@@ -127,6 +128,20 @@ class FoldersReport(BaseModel):
 
 
 EXCLUDED_DETAIL = "This project is excluded from Placet (.placet-off)."
+
+
+def validate_scheduled_time(dt: Optional[datetime]) -> None:
+    if dt is None:
+        return
+    now = datetime.now(timezone.utc)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    if dt < now - timedelta(minutes=1):
+        raise ProductError(422, "schedule.time_in_past", "Scheduled time cannot be in the past.")
+    if dt > now + timedelta(days=30):
+        raise ProductError(422, "schedule.too_far_ahead", "Scheduled time cannot be more than 30 days in the future.")
 
 
 class BackgroundLanguage(BaseModel):
@@ -1068,6 +1083,32 @@ def create_app(
         notify_change(request_id)
         return updated
 
+    @app.post("/api/requests/{request_id}/schedule", response_model=RequestModel)
+    async def schedule_request(
+        request_id: int, body: RequestSchedule, who: Principal = Depends(principal)
+    ):
+        """
+        Schedules or clears the scheduled delivery time of a request (RF-65).
+        Allowed only for the human supervisor, while the request is PENDING or APPROVED
+        with delivery waiting.
+        """
+        require_human(who)
+        validate_scheduled_time(body.scheduled_at)
+        req = db.get_request(request_id)
+        if req is None:
+            raise ProductError(404, "request.not_found", "Request not found")
+        if (
+            req.status not in (RequestStatus.PENDING, RequestStatus.APPROVED)
+            or req.delivered_at is not None
+            or req.delivery != "waiting"
+        ):
+            raise ProductError(409, "schedule.not_allowed", "This request can no longer be scheduled.")
+        updated = db.schedule_request(request_id, body.scheduled_at, actor=who.actor)
+        if updated is None:
+            raise ProductError(409, "schedule.not_allowed", "This request can no longer be scheduled.")
+        notify_change(request_id)
+        return updated
+
     def forward_reply(req: RequestModel, payload: OutcomeDecision, who: Principal) -> RequestModel:
         """
         The user sends an agent's reply to another session instead of the
@@ -1594,11 +1635,14 @@ def create_app(
             block = compose_project_instructions(project.name, project.instructions, node_inst, outgoing)
             if block:
                 project_context = block
+        if body.scheduled_at is not None:
+            validate_scheduled_time(body.scheduled_at)
         created = db.create_request(
             RequestCreate(
                 sender_id="human", recipient_id=session.agent_id, question_type=QuestionType.MESSAGE,
                 prompt=prompt, context=mention_context, recipient_session_id=session.id, priority=Priority.NORMAL,
                 project_id=body.project_id, project_context=project_context,
+                scheduled_at=body.scheduled_at,
             ),
             actor=who.actor,
         )

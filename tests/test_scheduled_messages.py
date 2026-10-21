@@ -158,3 +158,167 @@ def test_take_inbox_message_delivers_when_scheduled_at_is_none(db):
     kind, delivered_req = result
     assert kind == "injection"
     assert delivered_req.id == req.id
+
+
+# --- Part 2: API and Composer scheduling tests ---
+
+from backend.app.config import AgentSpec, PlacetConfig
+from backend.app.main import create_app
+from tests.helpers import agent_client, human_client
+
+CONFIG = PlacetConfig(agents={
+    "claude": AgentSpec(tmux_session="agent-claude", token="tok-claude", allowed_targets=["human"]),
+    "gemini": AgentSpec(tmux_session="agent-gemini", token="tok-gemini", allowed_targets=["human"]),
+})
+
+
+@pytest.fixture
+def app_and_db(tmp_path):
+    database = Database(str(tmp_path / "placet.db"))
+    database.init_db()
+    app = create_app(db=database, config=CONFIG, bridge_token="tok-bridge")
+    return app, database
+
+
+@pytest.mark.asyncio
+async def test_schedule_api_human_only(app_and_db):
+    app, db = app_and_db
+    req = db.create_request(
+        RequestCreate(sender_id="human", recipient_id="gemini", prompt="Test")
+    )
+    future = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+
+    # Agent cannot schedule requests (human only)
+    async with agent_client(app, "tok-gemini") as client:
+        resp = await client.post(f"/api/requests/{req.id}/schedule", json={"scheduled_at": future})
+        assert resp.status_code == 403
+
+    # Human can schedule
+    async with human_client(app) as human:
+        resp = await human.post(f"/api/requests/{req.id}/schedule", json={"scheduled_at": future})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["scheduled_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_schedule_api_only_while_not_yet_delivered(app_and_db):
+    app, db = app_and_db
+    future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+
+    # 1. PENDING request
+    req_pending = db.create_request(RequestCreate(sender_id="human", recipient_id="gemini", prompt="Pending"))
+    async with human_client(app) as human:
+        resp = await human.post(f"/api/requests/{req_pending.id}/schedule", json={"scheduled_at": future})
+        assert resp.status_code == 200
+
+    # 2. APPROVED with delivery waiting
+    req_approved = db.create_request(RequestCreate(sender_id="human", recipient_id="gemini", prompt="Approved"))
+    db.update_request_decision(req_approved.id, RequestStatus.APPROVED, actor="human")
+    async with human_client(app) as human:
+        resp = await human.post(f"/api/requests/{req_approved.id}/schedule", json={"scheduled_at": future})
+        assert resp.status_code == 200
+
+    # 3. DELIVERING (delivery in progress / already delivered) -> 409
+    session = _create_idle_session(db, agent_id="gemini", session_id="sess-deliv")
+    req_delivering = db.create_request(RequestCreate(sender_id="human", recipient_id="gemini", prompt="Delivering"))
+    db.update_request_decision(req_delivering.id, RequestStatus.APPROVED, actor="human")
+    taken = db.take_inbox_message(session)
+    assert taken is not None
+    async with human_client(app) as human:
+        resp = await human.post(f"/api/requests/{req_delivering.id}/schedule", json={"scheduled_at": future})
+        assert resp.status_code == 409
+
+    # 4. COMPLETED -> 409
+    req_completed = db.create_request(RequestCreate(sender_id="human", recipient_id="gemini", prompt="Completed"))
+    db.update_request_decision(req_completed.id, RequestStatus.REJECTED, actor="human")
+    async with human_client(app) as human:
+        resp = await human.post(f"/api/requests/{req_completed.id}/schedule", json={"scheduled_at": future})
+        assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_schedule_api_rejects_past_and_too_far(app_and_db):
+    app, db = app_and_db
+    req = db.create_request(RequestCreate(sender_id="human", recipient_id="gemini", prompt="Timing"))
+
+    async with human_client(app) as human:
+        # > 1 min in the past -> 422
+        past_2m = (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()
+        resp = await human.post(f"/api/requests/{req.id}/schedule", json={"scheduled_at": past_2m})
+        assert resp.status_code == 422
+
+        # <= 1 min in the past -> allowed
+        past_20s = (datetime.now(timezone.utc) - timedelta(seconds=20)).isoformat()
+        resp = await human.post(f"/api/requests/{req.id}/schedule", json={"scheduled_at": past_20s})
+        assert resp.status_code == 200
+
+        # > 30 days ahead -> 422
+        far_future = (datetime.now(timezone.utc) + timedelta(days=31)).isoformat()
+        resp = await human.post(f"/api/requests/{req.id}/schedule", json={"scheduled_at": far_future})
+        assert resp.status_code == 422
+
+        # 20 days ahead -> allowed
+        ok_future = (datetime.now(timezone.utc) + timedelta(days=20)).isoformat()
+        resp = await human.post(f"/api/requests/{req.id}/schedule", json={"scheduled_at": ok_future})
+        assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_schedule_api_clear_schedule_and_events(app_and_db):
+    app, db = app_and_db
+    req = db.create_request(RequestCreate(sender_id="human", recipient_id="gemini", prompt="Clear me"))
+    future = (datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
+
+    async with human_client(app) as human:
+        # Schedule it
+        resp = await human.post(f"/api/requests/{req.id}/schedule", json={"scheduled_at": future})
+        assert resp.status_code == 200
+        events = db.list_events(req.id)
+        assert any(e.event == "scheduled" for e in events)
+
+        # Clear it
+        resp = await human.post(f"/api/requests/{req.id}/schedule", json={"scheduled_at": None})
+        assert resp.status_code == 200
+        assert resp.json()["scheduled_at"] is None
+        events = db.list_events(req.id)
+        assert any(e.event == "schedule_cleared" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_write_to_session_with_scheduled_at(app_and_db):
+    app, db = app_and_db
+    session = _create_idle_session(db, agent_id="gemini", session_id="sess-write")
+    future = (datetime.now(timezone.utc) + timedelta(hours=5)).isoformat()
+
+    async with human_client(app) as human:
+        # 1. Invalid time in past -> 422
+        past = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        resp = await human.post(
+            f"/api/sessions/{session.id}/messages",
+            json={"text": "Hello past", "scheduled_at": past},
+        )
+        assert resp.status_code == 422
+
+        # 2. Invalid time > 30 days -> 422
+        too_far = (datetime.now(timezone.utc) + timedelta(days=32)).isoformat()
+        resp = await human.post(
+            f"/api/sessions/{session.id}/messages",
+            json={"text": "Hello far", "scheduled_at": too_far},
+        )
+        assert resp.status_code == 422
+
+        # 3. Valid future time -> 201
+        resp = await human.post(
+            f"/api/sessions/{session.id}/messages",
+            json={"text": "Hello future", "scheduled_at": future},
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["scheduled_at"] is not None
+        req_id = data["id"]
+        events = db.list_events(req_id)
+        assert any(e.event == "scheduled" for e in events)
+
+        # Verify it is not handed out yet because it is in the future
+        assert db.inbox_has_message(session) is False
