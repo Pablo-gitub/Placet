@@ -999,6 +999,42 @@ class Database:
             if implicit:
                 details["implicit"] = True
             self._log(cursor, request_id, actor or f"agent:{responder_id}", "replied", details, at=now)
+
+            req = self.get_request(request_id)
+            if req and req.sender_session_id and req.sender_id != "human":
+                sender_session = self.get_session(req.sender_session_id)
+                sender_provider = sender_session.provider if sender_session else None
+                cfg_enabled = self.get_setting("usage_guard_enabled") == "true"
+                deliver_at_reset = (
+                    self.get_setting("deliver_at_reset") == "true"
+                    or self.get_setting("deliver_at_reset_enabled") == "true"
+                )
+                def percent(k: str, default: int) -> int:
+                    try:
+                        return int(self.get_setting(k) or default)
+                    except ValueError:
+                        return default
+                five_hour = percent("usage_guard_5h", 90)
+                seven_day = percent("usage_guard_7d", 95)
+                if self.is_provider_over_limit(sender_provider, five_hour, seven_day, check_near_limit=cfg_enabled):
+                    if deliver_at_reset:
+                        reset_time = self.provider_reset_time(sender_provider, five_hour, seven_day, check_near_limit=cfg_enabled)
+                        if reset_time is not None:
+                            scheduled_at_iso = _normalize_utc_iso(reset_time)
+                            cursor.execute("UPDATE requests SET scheduled_at = ?, updated_at = ? WHERE id = ?",
+                                           (scheduled_at_iso, now, request_id))
+                            self._log(cursor, request_id, "system:limits", "scheduled",
+                                      {"scheduled_at": scheduled_at_iso, "reason": "usage"}, at=now)
+                        else:
+                            cursor.execute("UPDATE requests SET allow_auto_return = 0, updated_at = ? WHERE id = ?",
+                                           (now, request_id))
+                            self._log(cursor, request_id, "system:limits", "automation_limited",
+                                      {"reason": "usage", "provider": sender_provider}, at=now)
+                    else:
+                        cursor.execute("UPDATE requests SET allow_auto_return = 0, updated_at = ? WHERE id = ?",
+                                       (now, request_id))
+                        self._log(cursor, request_id, "system:limits", "automation_limited",
+                                  {"reason": "usage", "provider": sender_provider}, at=now)
         return self.get_request(request_id)
 
     # --- Injection delivery (agent-to-agent prompts) -------------------------
@@ -1355,9 +1391,9 @@ class Database:
             if not row:
                 return None
             if (
-                row["status"] not in (RequestStatus.PENDING.value, RequestStatus.APPROVED.value)
+                row["status"] not in (RequestStatus.PENDING.value, RequestStatus.APPROVED.value, RequestStatus.COMPLETED.value)
                 or row["delivered_at"] is not None
-                or (row["delivery_state"] and row["delivery_state"] != "waiting")
+                or (row["delivery_state"] and row["delivery_state"] != "waiting" and row["status"] != RequestStatus.COMPLETED.value)
             ):
                 return None
 
@@ -2295,6 +2331,11 @@ class Database:
         with self._get_connection() as conn:
             return [r["data"] for r in conn.execute("SELECT data FROM provider_usage ORDER BY provider")]
 
+    def get_usage(self, provider: str) -> Optional[str]:
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT data FROM provider_usage WHERE provider = ?", (provider,)).fetchone()
+            return row["data"] if row else None
+
     def record_usage_samples(
         self,
         provider: str,
@@ -2470,6 +2511,79 @@ class Database:
                    for b in usage.buckets):
                 near.add(usage.provider)
         return near
+
+    def is_provider_over_limit(
+        self,
+        provider: Optional[str],
+        five_hour: float,
+        seven_day: float,
+        check_near_limit: bool = True,
+        now: Optional[datetime] = None,
+    ) -> bool:
+        """RF-66: True if provider has used up account window (100%) or exceeded thresholds."""
+        if not provider:
+            return False
+        now = now or datetime.now(timezone.utc)
+        if provider in self.limited_providers(now=now):
+            return True
+        if check_near_limit and provider in self.near_limit_providers(five_hour, seven_day, now=now):
+            return True
+        return False
+
+    def provider_reset_time(
+        self,
+        provider: Optional[str],
+        five_hour: float,
+        seven_day: float,
+        check_near_limit: bool = True,
+        now: Optional[datetime] = None,
+    ) -> Optional[datetime]:
+        """
+        RF-66: Latest resets_at among the over-limit windows of provider.
+        Returns None if reset time is unknown or stale (e.g. missing resets_at,
+        resets_at <= now, or polled provider older than USAGE_STALE_AFTER).
+        """
+        if not provider:
+            return None
+        from backend.app.models import ProviderUsage
+        now = now or datetime.now(timezone.utc)
+        data = self.get_usage(provider)
+        if not data:
+            return None
+        usage = ProviderUsage.model_validate_json(data)
+        observed = usage.observed_at
+        if observed is not None and observed.tzinfo is None:
+            observed = observed.replace(tzinfo=timezone.utc)
+        if (
+            usage.provider in USAGE_POLLED
+            and observed is not None
+            and now - observed > USAGE_STALE_AFTER
+        ):
+            return None
+
+        threshold = {"5h": five_hour, "7d": seven_day}
+        over_limit_buckets = []
+        for b in usage.buckets:
+            if b.group is None and b.used_percent >= 100:
+                over_limit_buckets.append(b)
+            elif check_near_limit and b.used_percent >= threshold.get(b.window, 100):
+                over_limit_buckets.append(b)
+
+        if not over_limit_buckets:
+            return None
+
+        reset_times = []
+        for b in over_limit_buckets:
+            if b.resets_at is None:
+                return None
+            rt = b.resets_at
+            if rt.tzinfo is None:
+                rt = rt.replace(tzinfo=timezone.utc)
+            if rt <= now:
+                return None
+            reset_times.append(rt)
+
+        return max(reset_times)
 
     def get_stats(
         self,
@@ -2760,6 +2874,8 @@ class Database:
     _OUTCOMES_SQL = """
         SELECT id FROM requests
         WHERE sender_session_id = ? AND delivered_at IS NULL AND status != ? AND (sender_id = 'human' OR recipient_id = 'human' OR status != 'COMPLETED' OR allow_auto_return = 1 OR return_decision IN ('approved', 'forwarded'))
+          -- RF-66: scheduled outcomes wait until scheduled_at arrives
+          AND (scheduled_at IS NULL OR datetime(scheduled_at) <= datetime(?))
         ORDER BY updated_at ASC
     """
     _INJECTIONS_SQL = """
@@ -2856,9 +2972,9 @@ class Database:
             return False
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(self._OUTCOMES_SQL, (session.id, RequestStatus.PENDING.value))
-            outcome_ids = [r["id"] for r in cursor.fetchall()]
             now = datetime.now(timezone.utc).isoformat()
+            cursor.execute(self._OUTCOMES_SQL, (session.id, RequestStatus.PENDING.value, now))
+            outcome_ids = [r["id"] for r in cursor.fetchall()]
             cursor.execute(
                 self._INJECTIONS_SQL,
                 (RequestStatus.APPROVED.value, session.agent_id, session.id, int(explicit_only), session.id, now),
@@ -2908,9 +3024,10 @@ class Database:
         if session.provider in self.limited_providers():
             return None
         actor = actor or f"agent:{session.agent_id}"
+        now = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(self._OUTCOMES_SQL, (session.id, RequestStatus.PENDING.value))
+            cursor.execute(self._OUTCOMES_SQL, (session.id, RequestStatus.PENDING.value, now))
             outcome_ids = [r["id"] for r in cursor.fetchall()]
         for req_id in outcome_ids:
             req = self.get_request(req_id)

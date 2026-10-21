@@ -182,6 +182,7 @@ export default function Composer({ session, sessions = [], onSend, draft, draftK
       const args = [message, activeMentions, attachments, now ? "now" : "queue"];
       if (scheduledAt) args.push(scheduledAt);
       if (await onSend(...args)) {
+        if (draftKey) saveDraft(draftKey, null);
         setText(""); setMentions([]); setQuery(null); setFiles([]); setRefiles([]); setScheduledTime("");
       }
     } catch (error) {

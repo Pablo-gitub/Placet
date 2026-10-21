@@ -21,11 +21,13 @@ export default function UsageGuard() {
   const [saved, setSaved] = useState(null);
   const [form, setForm] = useState(null);
   const [renew, setRenew] = useState(null);
+  const [deliverAtReset, setDeliverAtReset] = useState(null);
   const [error, setError] = useState(false);
 
   useEffect(() => {
     call("/api/settings/usage-guard").then((g) => { setSaved(g); setForm(g); }).catch(() => setError(true));
     call("/api/settings/claude-renew").then((r) => setRenew(r.enabled)).catch(() => {});
+    call("/api/settings/deliver-at-reset").then((d) => setDeliverAtReset(d.enabled)).catch(() => {});
   }, []);
 
   if (!form) return error ? <p className="composer-note" role="alert">{t("settings.loadError")}</p> : null;
@@ -45,6 +47,12 @@ export default function UsageGuard() {
     setRenew(next);
     try { setRenew((await call("/api/settings/claude-renew", "PUT", { enabled: next })).enabled); }
     catch { setRenew(!next); }
+  };
+  const toggleDeliverAtReset = async () => {
+    const next = !deliverAtReset;
+    setDeliverAtReset(next);
+    try { setDeliverAtReset((await call("/api/settings/deliver-at-reset", "PUT", { enabled: next })).enabled); }
+    catch { setDeliverAtReset(!next); }
   };
   const percent = (key) => (e) => setForm({ ...form, [key]: e.target.value === "" ? "" : Number(e.target.value) });
 
@@ -95,6 +103,14 @@ export default function UsageGuard() {
         </span>
         <input type="checkbox" data-testid="toggle-claude-auto-renew" checked={!!renew} disabled={renew === null}
           onChange={toggleRenew} />
+      </label>
+      <label className="settings-row settings-check">
+        <span className="settings-row-text">
+          <strong>{t("settings.deliverAtResetTitle")}</strong>
+          <small>{t("settings.deliverAtResetHint")}</small>
+        </span>
+        <input type="checkbox" data-testid="deliver-at-reset-toggle" checked={!!deliverAtReset} disabled={deliverAtReset === null}
+          onChange={toggleDeliverAtReset} />
       </label>
     </div>
   );

@@ -596,6 +596,8 @@
     "guardActive": "Ora in revisione per i consumi: {{providers}}.",
     "guardClaudeWarning": "Per Claude serve il rinnovo automatico dell'accesso: senza, dopo circa 8 ore Placet non legge più i suoi consumi e il controllo non vale per Claude.",
     "renewHint": "Rinnova l'accesso di Claude Code quando scade, senza usare il modello, così i suoi consumi restano aggiornati.",
+    "deliverAtResetTitle": "Recapita al refresh",
+    "deliverAtResetHint": "Se il destinatario o il mittente supera la soglia, programma la consegna per il reset successivo anziché bloccare in revisione manuale.",
     "save": "Salva",
     "saveError": "Salvataggio non riuscito.",
     "loadError": "Impostazioni non disponibili.",

@@ -322,3 +322,277 @@ async def test_write_to_session_with_scheduled_at(app_and_db):
 
         # Verify it is not handed out yet because it is in the future
         assert db.inbox_has_message(session) is False
+
+
+# --- Part 4: Deliver at reset (RF-66) tests ---
+
+from backend.app.models import ProviderUsage
+from tests.test_relations import two_nodes, post, event
+
+
+_DEFAULT_RESET = object()
+
+
+def set_provider_usage(db: Database, provider: str, five: float = None, seven: float = None, resets_at = _DEFAULT_RESET, observed = None, group = None):
+    soon = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat() if resets_at is _DEFAULT_RESET else resets_at
+    buckets = []
+    if five is not None:
+        buckets.append({"id": "5h", "group": group, "window": "5h", "used_percent": five, "resets_at": soon})
+    if seven is not None:
+        buckets.append({"id": "7d", "group": group, "window": "7d", "used_percent": seven, "resets_at": soon})
+    row = ProviderUsage(provider=provider, observed_at=observed or datetime.now(timezone.utc), buckets=buckets)
+    db.set_usage(provider, row.model_dump_json())
+
+
+RELATION_CONFIG = PlacetConfig(agents={
+    "claude": AgentSpec(tmux_session="agent-claude", token="tok-claude", allowed_targets=["human", "codex"]),
+    "codex": AgentSpec(tmux_session="agent-codex", token="tok-codex", allowed_targets=["human", "claude"]),
+})
+
+
+@pytest.fixture
+def rel_app_and_db(tmp_path):
+    database = Database(str(tmp_path / "placet.db"))
+    database.init_db()
+    app = create_app(db=database, config=RELATION_CONFIG, bridge_token="tok-bridge")
+    return app, database
+
+
+@pytest.mark.asyncio
+async def test_deliver_at_reset_settings_api(rel_app_and_db):
+    app, db = rel_app_and_db
+    # Default is false
+    async with human_client(app) as human:
+        resp = await human.get("/api/settings/deliver-at-reset")
+        assert resp.status_code == 200
+        assert resp.json() == {"enabled": False}
+
+        # Toggle to true
+        resp = await human.put("/api/settings/deliver-at-reset", json={"enabled": True})
+        assert resp.status_code == 200
+        assert resp.json() == {"enabled": True}
+
+        # Verify persisted
+        assert db.get_setting("deliver_at_reset") == "true"
+
+        # Toggle back to false
+        resp = await human.put("/api/settings/deliver-at-reset", json={"enabled": False})
+        assert resp.status_code == 200
+        assert resp.json() == {"enabled": False}
+
+    # Agent cannot access
+    async with agent_client(app, "tok-claude") as client:
+        assert (await client.get("/api/settings/deliver-at-reset")).status_code == 403
+        assert (await client.put("/api/settings/deliver-at-reset", json={"enabled": True})).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_deliver_at_reset_recipient_option_on_schedules_at_reset(rel_app_and_db):
+    app, db = rel_app_and_db
+    a, b = await two_nodes(app, db)
+    review = db.create_relation_type("review", "")
+    db.create_relation(a.id, b.id, review.id, "automatic")
+
+    # Turn on usage guard and deliver at reset
+    async with human_client(app) as human:
+        await human.put("/api/settings/usage-guard", json={"enabled": True, "five_hour": 90, "seven_day": 95})
+        await human.put("/api/settings/deliver-at-reset", json={"enabled": True})
+
+    # Recipient (codex) is over 5h limit (92%), reset in 2 hours
+    reset_target = (datetime.now(timezone.utc) + timedelta(hours=2))
+    set_provider_usage(db, "codex", five=92, resets_at=reset_target.isoformat())
+
+    # Send from claude to codex
+    resp = await post(app, {"target_node": "builder"})
+    out = resp.json()
+    assert resp.status_code == 201
+    assert out["status"] == "APPROVED"
+    assert out["delivery_policy"] == "automatic"
+    assert out["scheduled_at"] is not None
+    # scheduled_at matches recipient's reset time
+    sched = datetime.fromisoformat(out["scheduled_at"].replace("Z", "+00:00"))
+    assert abs((sched - reset_target).total_seconds()) < 5
+
+    # Recipient session does not have message in inbox yet because it is scheduled
+    b_session = db.get_session("cx")
+    assert db.inbox_has_message(b_session) is False
+
+    # User can "send now" (clear schedule via schedule API)
+    async with human_client(app) as human:
+        clear_resp = await human.post(f"/api/requests/{out['id']}/schedule", json={"scheduled_at": None})
+        assert clear_resp.status_code == 200
+        assert clear_resp.json()["scheduled_at"] is None
+
+    # Now it is available in inbox!
+    assert db.inbox_has_message(b_session) is True
+
+
+@pytest.mark.asyncio
+async def test_deliver_at_reset_recipient_option_off_falls_back_to_manual(rel_app_and_db):
+    app, db = rel_app_and_db
+    a, b = await two_nodes(app, db)
+    review = db.create_relation_type("review", "")
+    db.create_relation(a.id, b.id, review.id, "automatic")
+
+    # Turn on usage guard, but keep deliver at reset OFF
+    async with human_client(app) as human:
+        await human.put("/api/settings/usage-guard", json={"enabled": True, "five_hour": 90, "seven_day": 95})
+        await human.put("/api/settings/deliver-at-reset", json={"enabled": False})
+
+    # Recipient (codex) is over 5h limit (92%)
+    reset_target = (datetime.now(timezone.utc) + timedelta(hours=2))
+    set_provider_usage(db, "codex", five=92, resets_at=reset_target.isoformat())
+
+    resp = await post(app, {"target_node": "builder"})
+    out = resp.json()
+    assert resp.status_code == 201
+    assert out["status"] == "PENDING"
+    assert out["delivery_policy"] == "manual"
+    assert out["automation_limit"] == "usage"
+    assert out["scheduled_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_deliver_at_reset_unknown_or_stale_falls_back_to_manual(rel_app_and_db):
+    app, db = rel_app_and_db
+    a, b = await two_nodes(app, db)
+    review = db.create_relation_type("review", "")
+    db.create_relation(a.id, b.id, review.id, "automatic")
+
+    # Turn on usage guard and deliver at reset
+    async with human_client(app) as human:
+        await human.put("/api/settings/usage-guard", json={"enabled": True, "five_hour": 90, "seven_day": 95})
+        await human.put("/api/settings/deliver-at-reset", json={"enabled": True})
+
+    # 1. Unknown reset time (resets_at is None)
+    set_provider_usage(db, "codex", five=95, resets_at=None)
+    resp = await post(app, {"target_node": "builder"})
+    out = resp.json()
+    assert out["status"] == "PENDING"
+    assert out["delivery_policy"] == "manual"
+    assert out["automation_limit"] == "usage"
+
+    # 2. Multiple over-limit windows where one has unknown reset time
+    soon = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+    row = ProviderUsage(
+        provider="codex",
+        observed_at=datetime.now(timezone.utc),
+        buckets=[
+            {"id": "5h", "window": "5h", "used_percent": 95, "resets_at": None},
+            {"id": "7d", "window": "7d", "used_percent": 98, "resets_at": soon},
+        ],
+    )
+    db.set_usage("codex", row.model_dump_json())
+    resp = await post(app, {"target_node": "builder"})
+    out = resp.json()
+    assert out["status"] == "PENDING"
+    assert out["delivery_policy"] == "manual"
+    assert out["automation_limit"] == "usage"
+
+
+@pytest.mark.asyncio
+async def test_deliver_at_reset_outcome_sender_over_limit(rel_app_and_db):
+    app, db = rel_app_and_db
+    a, b = await two_nodes(app, db)
+    review = db.create_relation_type("review", "")
+    # Automatic both directions
+    db.create_relation(a.id, b.id, review.id, "automatic", reply_approval="automatic")
+
+    # Turn on usage guard and deliver at reset
+    async with human_client(app) as human:
+        await human.put("/api/settings/usage-guard", json={"enabled": True, "five_hour": 90, "seven_day": 95})
+        await human.put("/api/settings/deliver-at-reset", json={"enabled": True})
+
+    # Claude (sender) is over limit (96%), reset in 3 hours; Codex (recipient) is fine
+    sender_reset = (datetime.now(timezone.utc) + timedelta(hours=3))
+    set_provider_usage(db, "claude-code", five=96, resets_at=sender_reset.isoformat())
+
+    # Send prompt to Codex: prompt itself is NOT held because recipient is not over limit
+    resp = await post(app, {"target_node": "builder"})
+    req_data = resp.json()
+    assert req_data["delivery_policy"] == "automatic"
+    req_id = req_data["id"]
+
+    # Prompt delivered to Codex
+    codex_session = db.get_session("cx")
+    taken = db.take_inbox_message(codex_session)
+    assert taken is not None and taken[1].id == req_id
+
+    # Codex replies
+    async with agent_client(app, "tok-codex") as codex_client:
+        reply_resp = await codex_client.post(f"/api/requests/{req_id}/reply", json={"content": "Done!"})
+        assert reply_resp.status_code == 200
+
+    # Because sender (claude-code) is over limit and deliver_at_reset is ON:
+    # Outcome is scheduled at sender's reset time!
+    completed_req = db.get_request(req_id)
+    assert completed_req.status == RequestStatus.COMPLETED
+    assert completed_req.scheduled_at is not None
+    sched = completed_req.scheduled_at
+    assert abs((sched - sender_reset).total_seconds()) < 5
+
+    # Sender session (cl) is idle now
+    await event(app, "claude", "cl", {"event": "stop", "provider": "claude-code"})
+    cl_session = db.get_session("cl")
+
+    # Outcome is NOT handed out to sender yet because it is scheduled
+    assert db.inbox_has_message(cl_session) is False
+    assert db.take_inbox_message(cl_session) is None
+
+    # User can "send now" (clear schedule on outcome)
+    async with human_client(app) as human:
+        clear_resp = await human.post(f"/api/requests/{req_id}/schedule", json={"scheduled_at": None})
+        assert clear_resp.status_code == 200
+
+    # Now outcome is handed out to sender!
+    assert db.inbox_has_message(cl_session) is True
+    outcome_result = db.take_inbox_message(cl_session)
+    assert outcome_result is not None
+    kind, out_req = outcome_result
+    assert kind == "outcome"
+    assert out_req.id == req_id
+
+
+@pytest.mark.asyncio
+async def test_write_to_session_deliver_at_reset(rel_app_and_db):
+    app, db = rel_app_and_db
+    session = _create_idle_session(db, agent_id="codex", provider="codex", session_id="sess-cx")
+
+    # Usage guard ON
+    async with human_client(app) as human:
+        await human.put("/api/settings/usage-guard", json={"enabled": True, "five_hour": 90, "seven_day": 95})
+
+    # Provider over limit: codex 100% account limit
+    soon = (datetime.now(timezone.utc) + timedelta(hours=1))
+    set_provider_usage(db, "codex", five=100, resets_at=soon.isoformat())
+
+    # 1. With deliver_at_reset OFF -> stays PENDING (manual approval)
+    async with human_client(app) as human:
+        await human.put("/api/settings/deliver-at-reset", json={"enabled": False})
+        resp = await human.post(f"/api/sessions/{session.id}/messages", json={"text": "Message 1"})
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["status"] == "PENDING"
+        assert data["scheduled_at"] is None
+        events = db.list_events(data["id"])
+        assert any(e.event == "automation_limited" for e in events)
+
+    # 2. With deliver_at_reset ON -> gets scheduled at reset time and APPROVED
+    async with human_client(app) as human:
+        await human.put("/api/settings/deliver-at-reset", json={"enabled": True})
+        resp = await human.post(f"/api/sessions/{session.id}/messages", json={"text": "Message 2"})
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["status"] == "APPROVED"
+        assert data["scheduled_at"] is not None
+        sched = datetime.fromisoformat(data["scheduled_at"].replace("Z", "+00:00"))
+        assert abs((sched - soon).total_seconds()) < 5
+
+    # 3. Mode "now" sends at once even if over limit
+    async with human_client(app) as human:
+        resp = await human.post(f"/api/sessions/{session.id}/messages", json={"text": "Message 3", "mode": "now"})
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["status"] == "APPROVED"
+        assert data["scheduled_at"] is None
+
