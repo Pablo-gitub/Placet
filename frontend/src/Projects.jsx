@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { loadDraft, saveDraft } from "./formDrafts";
+import { ReplySelect, ReplyToggle } from "./ReplyPolicy";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -534,6 +535,7 @@ function CreateProjectRelationDialog({ projectId, nodes, types, onDone, onCancel
   const [toNode, setToNode] = useState("");
   const [typeId, setTypeId] = useState("");
   const [approval, setApproval] = useState("manual");
+  const [reply, setReply] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
@@ -552,6 +554,7 @@ function CreateProjectRelationDialog({ projectId, nodes, types, onDone, onCancel
           to_node: Number(toNode),
           type_id: Number(typeId),
           approval,
+          reply_approval: reply ?? approval,
         });
         createdRelId = res.id;
       } catch (err) {
@@ -674,6 +677,7 @@ function CreateProjectRelationDialog({ projectId, nodes, types, onDone, onCancel
             />
             <span>{t("relations.automatic")}</span>
           </label>
+          <ReplyToggle approval={approval} reply={reply} onChange={setReply} name="project-rel-reply" />
 
           <div className="dialog-actions">
             <button
@@ -838,8 +842,12 @@ export function ProjectDetailView({ projectId, sessions: propSessions, requests 
   };
 
   const handleUpdateRelationApproval = async (relId, approval) => {
+    await handleUpdateRelation(relId, { approval });
+  };
+
+  const handleUpdateRelation = async (relId, body) => {
     try {
-      await api("PATCH", `/api/relations/${relId}`, { approval });
+      await api("PATCH", `/api/relations/${relId}`, body);
       load();
     } catch (err) {
       setError(err.display || { key: "errors.operation", params: { status: err.status || 500 } });
@@ -1120,6 +1128,7 @@ export function ProjectDetailView({ projectId, sessions: propSessions, requests 
                     <option value="manual">{t("relations.manualShort")}</option>
                     <option value="automatic">{t("relations.automaticShort")}</option>
                   </select>
+                  <ReplySelect rel={rel} onChange={(value) => handleUpdateRelation(rel.id, { reply_approval: value })} />
                   <button
                     type="button"
                     className="icon-button"

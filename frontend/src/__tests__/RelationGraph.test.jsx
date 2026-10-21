@@ -135,3 +135,12 @@ describe("live activity (RF-44)", () => {
     }
   });
 });
+
+it("marks the relations whose replies need approval (RFC-16)", () => {
+  const rels = [{ ...relations[0], reply_approval: "automatic" }, { ...relations[1], reply_approval: "manual" }];
+  const { container } = render(<RelationGraph nodes={nodes} relations={rels} />);
+  const [auto, manual] = container.querySelectorAll("path.rg-edge");
+  expect(auto.getAttribute("marker-start")).toBeNull();
+  expect(manual.getAttribute("marker-start")).toBe("url(#rg-reply-manual)");
+  expect(screen.getByTestId("graph-legend-reply")).toBeInTheDocument();
+});

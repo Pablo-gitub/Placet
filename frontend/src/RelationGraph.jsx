@@ -96,14 +96,20 @@ export default function RelationGraph({ nodes = [], relations = [], sessions = [
           <marker id="rg-arrow-manual" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M 0 0 L 10 5 L 0 10 z" className="rg-arrow-manual" />
           </marker>
+          {/* RFC-16: a hollow ring at the sender's end when replies need review. */}
+          <marker id="rg-reply-manual" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7">
+            <circle cx="5" cy="5" r="3.5" className="rg-reply-ring" />
+          </marker>
         </defs>
         {edges.map(({ rel, d, label }) => {
           const now = activity[rel.id];
           const ball = now && now !== "executing";
           return (
           <g key={rel.id} data-testid={`graph-edge-${rel.id}`} className={now ? `rg-${now}` : undefined}>
-            <path d={d} className={`rg-edge rg-${rel.approval}`} markerEnd={`url(#rg-arrow-${rel.approval})`}>
-              <title>{`${rel.from_name} → ${rel.to_name} · ${rel.type_name} · ${t(rel.approval === "automatic" ? "relations.automaticShort" : "relations.manualShort")}`}</title>
+            <path d={d} className={`rg-edge rg-${rel.approval}`} markerEnd={`url(#rg-arrow-${rel.approval})`}
+              markerStart={rel.reply_approval === "manual" ? "url(#rg-reply-manual)" : undefined}
+              data-reply={rel.reply_approval || "manual"}>
+              <title>{`${rel.from_name} → ${rel.to_name} · ${rel.type_name} · ${t(rel.approval === "automatic" ? "relations.automaticShort" : "relations.manualShort")} · ${t(rel.reply_approval === "automatic" ? "relations.replyAutomaticShort" : "relations.replyManualShort")}`}</title>
             </path>
             <text x={label.x} y={ball && (now === "waiting" || still) ? label.y - 9 : label.y}
               className="rg-edge-label" textAnchor="middle" dominantBaseline="middle">
@@ -155,6 +161,9 @@ export default function RelationGraph({ nodes = [], relations = [], sessions = [
       <figcaption className="relation-graph-legend">
         <span><i className="rg-swatch rg-automatic" /> {t("relations.automaticShort")}</span>
         <span><i className="rg-swatch rg-manual" /> {t("relations.manualShort")}</span>
+        {relations.some((r) => r.reply_approval === "manual") && (
+          <span data-testid="graph-legend-reply"><i className="rg-ring" /> {t("relations.replyManualShort")}</span>
+        )}
         {Object.values(activity).includes("waiting") && (
           <span data-testid="graph-legend-waiting"><i className="rg-dot rg-ball-waiting" /> {t("projects.graphWaiting")}</span>
         )}

@@ -58,7 +58,8 @@ async def test_automatic_relation_skips_review_manual_does_not(env):
     rel = db.create_relation(a.id, b.id, review.id, "automatic")
     req = await send(app)
     assert req["status"] == "APPROVED" and req["relation_id"] == rel.id
-    assert not req["allow_auto_return"]
+    # RFC-16: the reply policy defaults to the outbound one.
+    assert req["allow_auto_return"]
     events = db.list_events(req["id"])
     assert any(e.actor == f"system:relation#{rel.id}" for e in events)
     db.set_relation_approval(rel.id, "manual")
@@ -81,20 +82,83 @@ async def test_several_types_need_the_type(env):
 
 
 @pytest.mark.asyncio
-async def test_reply_follows_the_reverse_relation(env):
+async def test_reply_policy_is_the_relation_own_setting(env):
+    """RFC-16: the reply follows the relation's reply setting, not the reverse relation."""
     app, db = env
     a, b = await two_nodes(app, db)
     review = db.create_relation_type("review", "")
-    db.create_relation(a.id, b.id, review.id, "automatic")
-    db.create_relation(b.id, a.id, review.id, "automatic")
+    report = db.create_relation_type("report", "")
+    rel = db.create_relation(a.id, b.id, review.id, "automatic")
+    # The reply default follows the outbound setting.
+    assert rel.reply_approval == "automatic"
+    # A reverse relation of another type no longer matters.
+    db.create_relation(b.id, a.id, report.id, "manual")
     assert (await send(app))["allow_auto_return"] is True
-    # A manual relation approved by the user: the reverse one still applies.
-    rel = db.find_relation(a.id, b.id)
+    db.set_relation_reply_approval(rel.id, "manual")
+    assert (await send(app))["allow_auto_return"] is False
+    # A manual outbound relation keeps its own reply setting after approval.
     db.set_relation_approval(rel.id, "manual")
+    db.set_relation_reply_approval(rel.id, "automatic")
     req = await send(app)
     async with human_client(app) as human:
         resp = await human.post(f"/api/requests/{req['id']}/decision", json={"status": "APPROVED"})
         assert resp.status_code == 200 and resp.json()["allow_auto_return"] is True
+
+
+@pytest.mark.asyncio
+async def test_manual_relation_replies_with_approval_by_default(env):
+    app, db = env
+    a, b = await two_nodes(app, db)
+    review = db.create_relation_type("review", "")
+    rel = db.create_relation(a.id, b.id, review.id, "manual")
+    assert rel.reply_approval == "manual"
+    # An automatic reverse relation of the same type does not change it either.
+    db.create_relation(b.id, a.id, review.id, "automatic")
+    req = await send(app)
+    async with human_client(app) as human:
+        resp = await human.post(f"/api/requests/{req['id']}/decision", json={"status": "APPROVED"})
+        assert resp.status_code == 200 and resp.json()["allow_auto_return"] is False
+
+
+@pytest.mark.asyncio
+async def test_reply_policy_api_and_listing(env):
+    app, db = env
+    a, b = await two_nodes(app, db)
+    review = db.create_relation_type("review", "")
+    async with human_client(app) as human:
+        body = {"from_node": a.id, "to_node": b.id, "type_id": review.id, "approval": "automatic",
+                "reply_approval": "manual"}
+        resp = await human.post("/api/relations", json=body)
+        assert resp.status_code == 201 and resp.json()["reply_approval"] == "manual"
+        rel_id = resp.json()["id"]
+        resp = await human.patch(f"/api/relations/{rel_id}", json={"reply_approval": "automatic"})
+        assert resp.status_code == 200
+        assert (resp.json()["approval"], resp.json()["reply_approval"]) == ("automatic", "automatic")
+        resp = await human.patch(f"/api/relations/{rel_id}", json={})
+        assert resp.status_code == 422
+        resp = await human.patch(f"/api/relations/{rel_id}", json={"reply_approval": "maybe"})
+        assert resp.status_code == 422
+    async with agent_client(app, "tok-claude") as client:
+        listed = (await client.get("/api/agents/me/relations", params={"session_id": "cl"})).json()
+    assert listed["relations"][0]["reply_policy"] == "automatic"
+
+
+@pytest.mark.asyncio
+async def test_existing_relations_migrate_with_reply_equal_to_outbound(env):
+    import sqlite3
+    app, db = env
+    path = db.db_path
+    a, b = await two_nodes(app, db)
+    t = db.create_relation_type("review", "")
+    auto = db.create_relation(a.id, b.id, t.id, "automatic")
+    manual = db.create_relation(b.id, a.id, t.id, "manual")
+    # Simulate a database created before RFC-16.
+    with sqlite3.connect(path) as conn:
+        conn.execute("DELETE FROM schema_migrations WHERE name = 'relation_reply_approval_v1'")
+        conn.execute("UPDATE relations SET reply_approval = 'manual'")
+    db.init_db()
+    assert db.get_relation(auto.id).reply_approval == "automatic"
+    assert db.get_relation(manual.id).reply_approval == "manual"
 
 
 @pytest.mark.asyncio
@@ -256,7 +320,7 @@ async def test_agents_list_their_relations(env):
         out = (await client.get("/api/agents/me/relations")).json()
     assert out["node"] == "planner" and out["rule"] == "Ask first."
     [rel] = out["relations"]
-    assert (rel["to"], rel["type"], rel["approval"], rel["reply_policy"]) == ("builder", "review", "automatic", "manual")
+    assert (rel["to"], rel["type"], rel["approval"], rel["reply_policy"]) == ("builder", "review", "automatic", "automatic")
     assert rel["description"] == "Ask for a code review" and rel["target_agent"] == "codex"
     # Another agent's session is never read.
     async with agent_client(app, "tok-codex") as client:

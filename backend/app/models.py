@@ -352,6 +352,8 @@ class RelationModel(BaseModel):
     to_node: int
     type_id: int
     approval: Literal["manual", "automatic"]
+    # RFC-16: whether the reply returns to the sender without review.
+    reply_approval: Literal["manual", "automatic"] = "manual"
     created_at: datetime
     from_name: str
     to_name: str

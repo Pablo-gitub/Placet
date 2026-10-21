@@ -443,7 +443,7 @@
     "automatic": "Automatic: delivered without my review",
     "manualShort": "Manual",
     "automaticShort": "Automatic",
-    "automaticHint": "Prompts on this relation reach the other session directly. Replies come back without review only if the reverse relation is automatic too.",
+    "automaticHint": "Prompts on this relation go straight to the other session.",
     "create": "Create relation",
     "cancel": "Cancel",
     "delete": "Delete relation",
@@ -456,7 +456,11 @@
     "rulePlaceholder": "E.g. Before starting processes, if you have important doubts, ask the user through Placet's tools.",
     "ruleSave": "Save rule",
     "ruleActive": "Rule active: agents read it before each automatic send.",
-    "ruleEmpty": "No rule: automatic relations deliver at once."
+    "ruleEmpty": "No rule: automatic relations deliver at once.",
+    "replyPolicy": "Reply",
+    "replyAutomatic": "Automatic replies: they return to the sender without my review",
+    "replyAutomaticShort": "Automatic reply",
+    "replyManualShort": "Reply needs approval"
   },
   "automation": {
     "active_one": "{{count}} automatic relation · max {{hops}} hops, {{perHour}}/h",
