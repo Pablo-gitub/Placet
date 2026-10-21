@@ -179,3 +179,70 @@ def test_new_authorization_during_freeze_aborts_and_restores_original_services(i
         m.apply(files,args,'fixed',identity,[1000])
     assert calls[-1]==('/usr/bin/systemctl','start',*m.SERVICES)
     assert not m.POLICY.exists()
+
+
+@pytest.fixture
+def activation_69330af(tmp_path):
+    """Reconstruct the exact public activation bundle without Git in CI.
+
+    Unchanged files reuse current bytes only when their pinned hashes match;
+    reviewed historical overrides retain the actual installed bytes. Thus this
+    also works with GitHub Actions' shallow checkout, not just a local history.
+    """
+    import hashlib
+    from admin_executor import worker_maintenance as m
+    fixture=json.loads(Path('tests/fixtures/admin_activation_69330af.json').read_text())
+    source=Path('admin_executor')
+    installed=tmp_path/'activation-69330af';installed.mkdir()
+    for name in fixture['modules']:
+        data=fixture['overrides'][name].encode() if name in fixture['overrides'] else (source/name).read_bytes()
+        assert hashlib.sha256(data).hexdigest()==fixture['sha256'][name],name
+        target=installed/name;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(data)
+    old,digest=m.snapshot(installed)
+    assert digest==fixture['bundle_sha256']=='580f9b4d63ab971b7059e1f5bc96e4d0bb78d196cf93579521ba8c04044324cb'
+    return old
+
+
+def test_activation_bundle_upgrades_with_closed_diagnostics_ui(activation_69330af):
+    from admin_executor import worker_maintenance as m
+    new,_=m.snapshot(Path('admin_executor'))
+    old=activation_69330af
+    assert old['web_static/app.js']!=new['web_static/app.js']
+    assert old['web_static/index.html']!=new['web_static/index.html']
+    m.validate_changes(old,new)
+
+
+@pytest.mark.parametrize('name',['authorization.py','control.py','serve.py'])
+def test_activation_upgrade_still_rejects_unrelated_changes(activation_69330af,name):
+    from admin_executor import worker_maintenance as m
+    new,_=m.snapshot(Path('admin_executor'))
+    with pytest.raises(ValueError,match='outside the worker maintenance scope'):
+        m.validate_changes(activation_69330af,new|{name:new[name]+b'\n# unrelated mutation\n'})
+
+
+def test_operator_probe_is_not_part_of_the_installed_bundle():
+    from admin_executor import worker_maintenance as m
+    from admin_executor.bootstrap import MODULES
+    files,_=m.snapshot(Path('admin_executor'))
+    assert 'bridge_probe.py' not in files and 'bridge_probe.py' not in MODULES
+    assert 'bridge_probe.py' not in m.CHANGES
+
+
+def test_apply_from_exact_activation_snapshot_installs_diagnostics_without_changing_enrollment(installation,activation_69330af):
+    import shutil
+    m,new,args,identity,calls=installation
+    shutil.rmtree(m.PACKAGE);m.PACKAGE.mkdir()
+    for name,data in activation_69330af.items():
+        target=m.PACKAGE/name;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(data)
+    old,digest=m.snapshot(m.PACKAGE)
+    args.installed_sha256=digest
+    assert old==activation_69330af
+    assert 'bridge_probe.py' not in old and 'bridge_probe.py' not in new
+    m.apply(new,args,m.render_unit(new['worker_units.py'],1000,1000),identity,[27,1000])
+    for name in ('web_static/app.js','web_static/index.html'):
+        assert (m.PACKAGE/name).read_bytes()==new[name]
+        assert (m.PREFIX/('admin_executor.before-worker-'+digest)/name).read_bytes()==old[name]
+    with sqlite3.connect(m.STATE/'authorization.sqlite') as db:
+        assert db.execute('SELECT secret FROM credentials').fetchone()==('preserved-passkey',)
+        assert db.execute('SELECT COUNT(*) FROM authorized_jobs').fetchone()==(0,)
+    assert not any('start' in c and m.WORKER in c for c in calls)
