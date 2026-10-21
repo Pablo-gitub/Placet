@@ -36,11 +36,11 @@ def env(tmp_path):
 @pytest.mark.asyncio
 async def test_notification_settings_defaults_and_permissions(env):
     app, db, _ = env
-    # Default values: needs_you=True, problems=True, turn_end="placet"
+    # Default values: needs_you=True, problems=True, turn_end="placet", queue_held=True
     async with human_client(app) as human:
         res = await human.get("/api/settings/notifications")
         assert res.status_code == 200
-        assert res.json() == {"needs_you": True, "problems": True, "turn_end": "placet"}
+        assert res.json() == {"needs_you": True, "problems": True, "turn_end": "placet", "queue_held": True}
 
         # Validation: 422 on invalid turn_end
         bad = await human.put("/api/settings/notifications", json={"turn_end": "invalid"})
@@ -57,11 +57,11 @@ async def test_notification_settings_defaults_and_permissions(env):
             "turn_end": "off",
         })
         assert update.status_code == 200
-        assert update.json() == {"needs_you": False, "problems": False, "turn_end": "off"}
+        assert update.json() == {"needs_you": False, "problems": False, "turn_end": "off", "queue_held": True}
 
         # Read back persisted values
         get_res = await human.get("/api/settings/notifications")
-        assert get_res.json() == {"needs_you": False, "problems": False, "turn_end": "off"}
+        assert get_res.json() == {"needs_you": False, "problems": False, "turn_end": "off", "queue_held": True}
 
     # Agents receive 403 on both GET and PUT
     async with agent_client(app, "tok-claude") as agent:

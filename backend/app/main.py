@@ -399,6 +399,13 @@ def create_app(
         for req_id in db.unconfirmed_starts():
             notify_change(req_id)
             alert(req_id, "start_unconfirmed")
+        for req_id in db.long_pauses():
+            notify_change(req_id)
+            alert(req_id, "paused_long")
+        # Switched off, nothing is marked: turning it on later still alerts.
+        if db.get_notification_preferences().get("queue_held", True):
+            for req_id, session_id, waiting in db.held_queues_to_alert():
+                alert_held_queue(req_id, session_id, waiting)
         for req_id in db.stall_executing(execution_timeout):
             notify_change(req_id)
             stalled = db.get_request(req_id)
@@ -410,6 +417,17 @@ def create_app(
             elif stalled.question_type != QuestionType.MESSAGE:
                 # The user's own messages need no reply: the answer is in the chat.
                 alert(req_id, "stalled")
+
+    def alert_held_queue(req_id: int, session_id: str, waiting: int) -> None:
+        session = db.get_session(session_id)
+        if session is None:
+            return
+        lang = db.get_background_language()
+        key = "notify.queue_held_title_one" if waiting == 1 else "notify.queue_held_title"
+        web_push_later(text(key, lang, label=session_label(session.provider, session.title, session.cwd),
+                            count=waiting),
+                       text("notify.queue_held_body", lang), f"/#/sessione/{session_id}",
+                       f"queue-held-{req_id}", "high")
 
     async def expiry_sweeper():
         while True:
@@ -1364,6 +1382,11 @@ def create_app(
                 # request, but its last answer may not be the reply to it.
                 turn_request_id = session.turn_request_id
                 db.mark_turn_mixed(turn_request_id)
+            if session.state != "busy":
+                # A new turn began: the previous one is over, and any answered
+                # request still holding the queue ended with it.
+                for released in db.release_on_observed_turn_end(session_id):
+                    notify_change(released)
             db.set_session_state(session_id, "busy", turn_request_id)
             result["turn_request_id"] = turn_request_id
         elif payload.event == "stop" and payload.pause and session.turn_request_id is not None \
@@ -1393,6 +1416,11 @@ def create_app(
                 db.set_execution(steered_id, "completed", actor=f"{who.actor}:hook", source=source)
                 implicit_reply(who, steered_id, payload.last_message)
                 notify_change(steered_id)
+            if not payload.pause:
+                # A turn end Placet saw (a pause is not one): answered requests
+                # still holding the queue ended with it.
+                for released in db.release_on_observed_turn_end(session_id):
+                    notify_change(released)
         elif payload.event == "steered" and payload.request_id is not None:
             # A "now" message entered the running turn (RF-35): delivered and
             # being executed; the turn now answers more than one message.

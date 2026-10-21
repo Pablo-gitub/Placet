@@ -22,7 +22,8 @@
     "busy": "{{count}} working",
     "pendingQuestions_one": "{{count}} question waiting",
     "pendingQuestions_other": "{{count}} questions waiting",
-    "addSessions": "Add / view all"
+    "addSessions": "Add / view all",
+    "queueHeld": "Queue held: messages are waiting for you to confirm the last turn ended"
   },
   "return": {
     "title": "Reply from {{recipient}} to {{sender}} · #{{id}}",
@@ -592,6 +593,8 @@
     "notifyNeedsYouHint": "Questions for you, prompt reviews before sending, and completed replies waiting for approval.",
     "notifyProblemsTitle": "Problems",
     "notifyProblemsHint": "Delivery failed or uncertain, stalled work, held queues, or unreachable agents.",
+    "notifyQueueHeldTitle": "Held queues with messages waiting",
+    "notifyQueueHeldHint": "A session's turn end was never seen and messages wait behind it: one notification, 10 minutes after the hold starts.",
     "turnEndTitle": "Turn completion",
     "turnEndAll": "All completed turns",
     "turnEndPlacet": "Only Placet work",

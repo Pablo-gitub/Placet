@@ -11,6 +11,7 @@
   "alerts.unreachable": "sessione non raggiungibile: il messaggio parte al suo prossimo turno, o scrivi qualcosa nella sessione dal PC",
   "alerts.start_unconfirmed": "avvio non confermato: i messaggi successivi restano in attesa",
   "alerts.queue_held": "da verificare: la sessione non riceve altro finché non decidi",
+  "alerts.paused_long": "in pausa da molto: i messaggi successivi restano in attesa",
   "alerts.stalled": "nessuna risposta, richiesta bloccata",
   "envelope.failed": "Il prompt non è stato confermato dall’agente destinatario dopo più tentativi.",
   "envelope.stalled": "L’agente destinatario ha ricevuto il prompt ma non ha risposto entro il tempo massimo.",
@@ -57,5 +58,8 @@
   "stats.invalid_range": "La data di inizio non può essere successiva alla data di fine.",
   "stats.range_too_large": "L'intervallo di date supera il limite massimo di 400 giorni.",
   "notify.app_review_title": "{label} aspetta la tua approvazione",
-  "notify.app_review_body": "Approva il piano nell'app Antigravity sul PC: il lavoro riprende da lì."
+  "notify.app_review_body": "Approva il piano nell'app Antigravity sul PC: il lavoro riprende da lì.",
+  "notify.queue_held_title": "{label}: {count} messaggi fermi, conferma se ha finito",
+  "notify.queue_held_title_one": "{label}: 1 messaggio fermo, conferma se ha finito",
+  "notify.queue_held_body": "La fine dell'ultimo turno della sessione non è stata vista: aprila e conferma."
 }

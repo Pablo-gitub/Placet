@@ -19,3 +19,11 @@ export const holdsQueueUnseen = (req, now = Date.now()) =>
   (Boolean(req.start_unconfirmed_at) || req.status === "STALLED" ||
     (req.status === "COMPLETED" && Boolean(req.completed_at) &&
       now - Date.parse(req.completed_at) >= REPLY_TURN_GRACE_MS));
+
+/**
+ * A session whose queue is held (see above) with an approved message waiting
+ * behind it: what the Home list flags and the held-queue push is about.
+ */
+export const queueStuck = (requests, sessionId, now = Date.now()) =>
+  requests.some((r) => r.recipient_session_id === sessionId && holdsQueueUnseen(r, now)) &&
+  requests.some((r) => r.recipient_session_id === sessionId && r.status === "APPROVED");

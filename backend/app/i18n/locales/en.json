@@ -11,6 +11,7 @@
   "alerts.unreachable": "session unreachable: the message waits for its next turn, or type in the session on the PC",
   "alerts.start_unconfirmed": "turn start unconfirmed: subsequent messages stay queued",
   "alerts.queue_held": "needs review: the session receives nothing else until you decide",
+  "alerts.paused_long": "paused for a long time: subsequent messages stay queued",
   "alerts.stalled": "no reply, request stalled",
   "envelope.failed": "The recipient did not acknowledge the prompt after multiple attempts.",
   "envelope.stalled": "The recipient received the prompt but did not reply within the time limit.",
@@ -57,5 +58,8 @@
   "stats.invalid_range": "From date cannot be after to date.",
   "stats.range_too_large": "Date range exceeds maximum of 400 days.",
   "notify.app_review_title": "{label} is waiting for your approval",
-  "notify.app_review_body": "Approve the plan in the Antigravity app on the PC: the work resumes from there."
+  "notify.app_review_body": "Approve the plan in the Antigravity app on the PC: the work resumes from there.",
+  "notify.queue_held_title": "{label}: {count} messages held, confirm if it finished",
+  "notify.queue_held_title_one": "{label}: 1 message held, confirm if it finished",
+  "notify.queue_held_body": "The session's last turn end was never seen: open it and confirm."
 }
