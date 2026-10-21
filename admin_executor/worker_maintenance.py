@@ -28,7 +28,8 @@ POLICY=PREFIX/'bridge-worker.json'
 SERVICES=('placet-admin-web.service','placet-admin-control.service','placet-admin-supervisor.service')
 ENV={'PATH':'/usr/bin:/bin','LC_ALL':'C'}
 CHANGES=frozenset({'bootstrap.py','restart.py','execution.py','bridge_restart.py','bridge_worker.py',
-                   'worker_units.py','worker_maintenance.py','web_static/en.json','web_static/it.json'})
+                   'worker_units.py','worker_maintenance.py','web_static/en.json','web_static/it.json',
+                   'web_static/app.js','web_static/index.html'})
 FORBIDDEN=frozenset({'root','docker','lxd','lxc','disk','libvirt','libvirt-qemu','incus','incus-admin'})
 
 
