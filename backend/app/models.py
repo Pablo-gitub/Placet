@@ -194,6 +194,9 @@ class RequestModel(BaseModel):
     # RFC-04: the relation the request travelled on, if any.
     relation_id: Optional[int] = None
     relation_type_name: Optional[str] = None
+    # RFC-16: the latest progress update; it never concludes the request.
+    progress_text: Optional[str] = None
+    progress_at: Optional[datetime] = None
     # RFC-15: project context and ID for project-associated requests
     project_id: Optional[int] = None
     project_name: Optional[str] = None

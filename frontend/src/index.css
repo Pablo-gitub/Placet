@@ -2132,3 +2132,6 @@ body.chat-open { overflow: hidden; }
 /* RFC-16: replies that need review are marked at the sender's end. */
 .rg-reply-ring { fill: var(--bg-secondary); stroke: var(--warning); stroke-width: 1.5; }
 .rg-ring { display: inline-block; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--warning); vertical-align: middle; }
+
+/* RFC-16: the latest progress update of a running request. */
+.history-progress { font-size: 0.85rem; margin-bottom: 0.6rem; color: var(--text-muted); }

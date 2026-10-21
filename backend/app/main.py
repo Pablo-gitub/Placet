@@ -179,6 +179,10 @@ class RelationTypeUpdate(BaseModel):
     description: Optional[str] = Field(None, max_length=500)
 
 
+class ProgressPayload(BaseModel):
+    content: str = Field(min_length=1, max_length=2000)
+
+
 class RelationCreate(BaseModel):
     from_node: int
     to_node: int
@@ -760,6 +764,16 @@ def create_app(
                                f"No relation from your node to {req.target_node!r}"
                                + (f" of type {req.relation_type!r}" if req.relation_type else "")
                                + ". Nothing was sent; see placet_list_relations.")
+        if req.recipient_id != "human" and sender_session is not None:
+            # RFC-16: while this session runs a request from the recipient,
+            # its answer is that request's reply, not a new request.
+            running = db.open_request_toward(sender_session, req.recipient_id, req.recipient_session_id)
+            if running is not None:
+                raise ProductError(409, "request.reply_expected",
+                                   f"You are running request #{running} from this recipient: answer it with "
+                                   f"placet_reply(request_id={running}); send progress with placet_progress. "
+                                   "Ask the human with placet_ask_human if you need a decision. Nothing was sent.",
+                                   {"request_id": running})
         rule = (db.get_relation_effective_policy(relation.id)["rule"]
                 if relation is not None else db.get_relation_rule().strip())
         if relation is not None and relation.approval == "automatic" and rule and not req.rule_acknowledged:
@@ -1076,6 +1090,23 @@ def create_app(
             raise ProductError(409, "return.unavailable", "The reply has already been decided, forwarded, or is no longer available.")
         notify_change(request_id)
         return updated
+
+    @app.post("/api/requests/{request_id}/progress", response_model=RequestModel)
+    async def progress_request(request_id: int, payload: ProgressPayload, who: Principal = Depends(principal)):
+        """RFC-16: a progress update from the recipient; the request stays open."""
+        require_agent(who)
+        req = get_or_404(request_id)
+        if who.id != req.recipient_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                                detail=f"Only {req.recipient_id} can report progress on request {request_id}.")
+        if req.status not in (RequestStatus.DELIVERING, RequestStatus.EXECUTING):
+            raise ProductError(409, "request.not_running",
+                               f"Request {request_id} is {req.status.value}: progress applies only while it runs.")
+        text_ = payload.content.strip()
+        db.set_progress(request_id, text_)
+        db.log_event(request_id, who.actor, "progress", {"content": text_})
+        notify_change(request_id)
+        return db.get_request(request_id)
 
     @app.post("/api/requests/{request_id}/reply", response_model=RequestModel)
     async def reply_request(
