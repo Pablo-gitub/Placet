@@ -382,7 +382,8 @@
     "cancelled": "Message cancelled.",
     "markedFinished": "Marked finished: the session can receive the next message.",
     "queuedNext": "The next message will be sent without waiting.",
-    "limited": "Waiting: {{provider}} reached its usage limit, sent after the reset at {{time}}"
+    "limited": "Waiting: {{provider}} reached its usage limit, sent after the reset at {{time}}",
+    "mayStillRun": "It has replied, but it may still be working: releasing the queue does not interrupt it."
   },
   "backgroundLanguage": {
     "title": "Notification and message language",

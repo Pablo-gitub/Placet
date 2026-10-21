@@ -382,7 +382,8 @@
     "cancelled": "Messaggio annullato.",
     "markedFinished": "Segnata come terminata: la sessione riceve il prossimo messaggio.",
     "queuedNext": "Il prossimo messaggio parte senza aspettare.",
-    "limited": "In attesa: {{provider}} ha raggiunto il limite d'uso, parte dopo il reset delle {{time}}"
+    "limited": "In attesa: {{provider}} ha raggiunto il limite d'uso, parte dopo il reset delle {{time}}",
+    "mayStillRun": "Ha già risposto, ma potrebbe essere ancora al lavoro: sbloccare la coda non lo interrompe."
   },
   "backgroundLanguage": {
     "title": "Lingua di notifiche e messaggi",
