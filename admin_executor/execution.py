@@ -37,7 +37,28 @@ class ExecutionStore:
                     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
                     job_id TEXT NOT NULL REFERENCES execution_jobs(job_id),
                     timestamp REAL NOT NULL, code TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS execution_workers (
+                    job_id TEXT PRIMARY KEY REFERENCES execution_jobs(job_id),
+                    invocation TEXT UNIQUE, dispatched_at REAL NOT NULL);
             ''')
+
+    def worker_attempt(self, job_id, phase, invocation):
+        """Called under the execution lock, never from a worker or socket."""
+        with closing(sqlite3.connect(self.path)) as db, db:
+            if phase == 'previous':
+                return db.execute('''SELECT 1 FROM execution_workers w JOIN execution_jobs e ON e.job_id=w.job_id
+                    WHERE w.invocation=? AND e.state IN ('succeeded','failed')''', (invocation,)).fetchone() is not None
+            if db.execute('SELECT state FROM execution_jobs WHERE job_id=?', (job_id,)).fetchone() != ('running',):
+                raise ValueError('A running authorized job is required')
+            if phase == 'dispatch' and invocation is None:
+                db.execute('INSERT INTO execution_workers VALUES (?,NULL,?)', (job_id,time.time()))
+            elif (phase == 'invocation' and isinstance(invocation,str) and len(invocation)==32
+                    and all(c in '0123456789abcdef' for c in invocation)):
+                if db.execute('UPDATE execution_workers SET invocation=? WHERE job_id=? AND invocation IS NULL',
+                              (invocation,job_id)).rowcount != 1:
+                    raise ValueError('Worker invocation already assigned')
+            else:
+                raise ValueError('Unsupported worker phase')
 
     def status(self, job_id):
         """Return only public result codes, never assertions or credentials."""
@@ -48,7 +69,10 @@ class ExecutionStore:
                 return None
             events = db.execute('SELECT sequence,timestamp,code FROM execution_events WHERE job_id=? ORDER BY sequence',
                                 (job_id,)).fetchall()
-        return dict(job_id=job_id, state=row[0], claimed_at=row[1], finished_at=row[2], result_code=row[3],
+        with closing(sqlite3.connect(self.path)) as db:
+            worker = db.execute('SELECT invocation FROM execution_workers WHERE job_id=?', (job_id,)).fetchone()
+        return dict(worker_invocation=worker[0] if worker else None,
+                    job_id=job_id, state=row[0], claimed_at=row[1], finished_at=row[2], result_code=row[3],
                     events=[dict(sequence=e[0], timestamp=e[1], code=e[2]) for e in events])
 
     def reconcile(self, job_id, outcome):
@@ -158,7 +182,10 @@ class Supervisor:
             except (ValueError, KeyError, TypeError):
                 return self.store._finish(job_id, 'failed', 'operation_rejected')
             try:
-                outcome = self.handler(action)
+                if hasattr(self.handler, 'run_job'):
+                    outcome = self.handler.run_job(action, job_id, self.store.worker_attempt)
+                else:
+                    outcome = self.handler(action)
             except Exception:
                 # No exception text or subprocess output crosses the boundary.
                 outcome = RestartResult('outcome_unknown', 'handler_failed')

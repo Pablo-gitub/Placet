@@ -57,5 +57,13 @@
   "result_interrupted": "Esecuzione interrotta; occorre verificarne l’effetto.",
   "result_operator_reconciled_succeeded": "L’operatore ha registrato un esito positivo senza ripetere l’azione.",
   "result_operator_reconciled_failed": "L’operatore ha registrato un esito negativo senza ripetere l’azione.",
-  "result_helper_io_failed": "La comunicazione con il processo di supporto è fallita dopo l’avvio; effetto non confermato."
+  "result_helper_io_failed": "La comunicazione con il processo di supporto è fallita dopo l’avvio; effetto non confermato.",
+  "result_worker_manager_unreachable": "Impossibile leggere il gestore del worker; nessun worker avviato.",
+  "result_worker_not_installed": "Il worker protetto del bridge non è installato.",
+  "result_worker_start_not_sent": "Impossibile lanciare il comando di avvio del worker.",
+  "result_worker_busy": "Un worker precedente o non riconosciuto richiede verifica dal terminale.",
+  "result_worker_dispatch_uncertain": "Il worker potrebbe essere partito; non riprovare automaticamente.",
+  "result_worker_invocation_invalid": "Non è stata osservata una nuova esecuzione correlata del worker.",
+  "result_worker_execution_uncertain": "Il worker è partito, ma l’esito del riavvio richiede verifica.",
+  "result_worker_report_invalid": "Impossibile correlare o verificare il risultato del worker."
 }

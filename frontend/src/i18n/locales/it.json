@@ -665,7 +665,15 @@
       "operation_rejected": "Operazione rifiutata prima dell’esecuzione.",
       "interrupted": "Esecuzione interrotta; occorre verificarne l’effetto.",
       "operator_reconciled_succeeded": "L’operatore ha registrato un esito positivo senza ripetere l’azione.",
-      "operator_reconciled_failed": "L’operatore ha registrato un esito negativo senza ripetere l’azione."
+      "operator_reconciled_failed": "L’operatore ha registrato un esito negativo senza ripetere l’azione.",
+      "worker_manager_unreachable": "Impossibile leggere il gestore del worker; nessun worker avviato.",
+      "worker_not_installed": "Il worker protetto del bridge non è installato.",
+      "worker_start_not_sent": "Impossibile lanciare il comando di avvio del worker.",
+      "worker_busy": "Un worker precedente o non riconosciuto richiede verifica dal terminale.",
+      "worker_dispatch_uncertain": "Il worker potrebbe essere partito; non riprovare automaticamente.",
+      "worker_invocation_invalid": "Non è stata osservata una nuova esecuzione correlata del worker.",
+      "worker_execution_uncertain": "Il worker è partito, ma l’esito del riavvio richiede verifica.",
+      "worker_report_invalid": "Impossibile correlare o verificare il risultato del worker."
     }
   },
   "stats": {
