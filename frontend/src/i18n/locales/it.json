@@ -443,7 +443,7 @@
     "automatic": "Automatica: consegnato senza la mia revisione",
     "manualShort": "Manuale",
     "automaticShort": "Automatica",
-    "automaticHint": "I prompt su questa relazione arrivano direttamente all'altra sessione. Le risposte tornano senza revisione solo se anche la relazione inversa è automatica.",
+    "automaticHint": "I prompt su questa relazione arrivano direttamente all'altra sessione.",
     "create": "Crea relazione",
     "cancel": "Annulla",
     "delete": "Elimina relazione",
@@ -456,7 +456,11 @@
     "rulePlaceholder": "Es. Prima di lanciare processi, se hai dubbi importanti, esponi le tue domande all'utente con gli strumenti di Placet.",
     "ruleSave": "Salva regola",
     "ruleActive": "Regola attiva: gli agenti la leggono prima di ogni invio automatico.",
-    "ruleEmpty": "Nessuna regola: le relazioni automatiche consegnano subito."
+    "ruleEmpty": "Nessuna regola: le relazioni automatiche consegnano subito.",
+    "replyPolicy": "Risposta",
+    "replyAutomatic": "Risposte automatiche: tornano al mittente senza la mia revisione",
+    "replyAutomaticShort": "Risposta automatica",
+    "replyManualShort": "Risposta da approvare"
   },
   "automation": {
     "active_one": "{{count}} relazione automatica · max {{hops}} passaggi, {{perHour}}/h",

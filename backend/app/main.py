@@ -13,7 +13,7 @@ from fastapi import Path as FastAPIPath
 from fastapi.middleware.cors import CORSMiddleware
 
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from backend.app.errors import ProductError, product_error_response
 from backend.app.i18n import text
 from backend.app.pwa import mount_pwa
@@ -180,10 +180,19 @@ class RelationCreate(BaseModel):
     to_node: int
     type_id: int
     approval: Literal["manual", "automatic"] = "manual"
+    # RFC-16: defaults to the outbound policy.
+    reply_approval: Optional[Literal["manual", "automatic"]] = None
 
 
 class RelationUpdate(BaseModel):
-    approval: Literal["manual", "automatic"]
+    approval: Optional[Literal["manual", "automatic"]] = None
+    reply_approval: Optional[Literal["manual", "automatic"]] = None
+
+    @model_validator(mode="after")
+    def _one_policy_given(self):
+        if self.approval is None and self.reply_approval is None:
+            raise ValueError("approval or reply_approval is required")
+        return self
 
 
 class AutomationLimits(BaseModel):
@@ -520,12 +529,11 @@ def create_app(
                 "type": relation.type_name, "description": relation.type_description,
                 "approval": relation.approval}
 
-    def reverse_is_automatic(relation) -> bool:
-        """RFC-13: a reply goes back on its own only if B -> A of the same type is automatic."""
+    def reply_is_automatic(relation) -> bool:
+        """RFC-16: the relation's own reply policy, held back by the usage guard."""
         if relation is None or relation_guarded(relation):
             return False
-        back = db.find_relation(relation.to_node, relation.from_node, relation.type_id)
-        return back is not None and back.approval == "automatic"
+        return relation.reply_approval == "automatic"
 
     def created_sender_session(who: Principal) -> Optional[str]:
         """The session about to create a request: the only busy one of the agent."""
@@ -852,7 +860,7 @@ def create_app(
                 request_id=created.id,
                 status=RequestStatus.APPROVED,
                 actor=f"system:relation#{relation.id}" if by_relation else "system:auto-routing",
-                allow_auto_return=reverse_is_automatic(relation),
+                allow_auto_return=reply_is_automatic(relation),
             )
         else:
             # Send mobile notification
@@ -992,7 +1000,7 @@ def create_app(
             selected_options=decision.selected_options,
             custom_text=decision.custom_text,
             actor=who.actor,
-            allow_auto_return=decision.allow_auto_return or reverse_is_automatic(relation),
+            allow_auto_return=decision.allow_auto_return or reply_is_automatic(relation),
             delivery_mode=decision.delivery_mode if decision.status == RequestStatus.APPROVED and req.recipient_id != "human" else None,
             recipient_session_id=decision.recipient_session_id,
         )
@@ -1716,7 +1724,7 @@ def create_app(
                     "target_agent": target.agent_id if target else None,
                     "target_session": target.id if target else None,
                     "target_reachable": bool(target and target.reachable),
-                    "reply_policy": "automatic" if reverse_is_automatic(rel) else "manual",
+                    "reply_policy": "automatic" if reply_is_automatic(rel) else "manual",
                     "projects": policy["projects"],
                     "rule": policy["rule"],
                 })
@@ -1731,7 +1739,7 @@ def create_app(
     async def create_relation(body: RelationCreate, who: Principal = Depends(principal)):
         """A relation A -> B of a type; `automatic` delivers without review (RFC-05)."""
         require_human(who)
-        outcome = db.create_relation(body.from_node, body.to_node, body.type_id, body.approval)
+        outcome = db.create_relation(body.from_node, body.to_node, body.type_id, body.approval, body.reply_approval)
         if outcome == "nodes":
             raise ProductError(404, "node.not_found", "Node not found")
         if outcome == "type":
@@ -1745,8 +1753,12 @@ def create_app(
     @app.patch("/api/relations/{relation_id}", response_model=RelationModel)
     async def update_relation(relation_id: int, body: RelationUpdate, who: Principal = Depends(principal)):
         require_human(who)
-        if not db.set_relation_approval(relation_id, body.approval):
+        if db.get_relation(relation_id) is None:
             raise ProductError(404, "relation.not_found", "Relation not found")
+        if body.approval is not None:
+            db.set_relation_approval(relation_id, body.approval)
+        if body.reply_approval is not None:
+            db.set_relation_reply_approval(relation_id, body.reply_approval)
         return db.get_relation(relation_id)
 
     @app.delete("/api/relations/{relation_id}", status_code=204)

@@ -590,6 +590,16 @@ class Database:
             if "relation_type_name" not in cols:
                 # RF-64: historical relation type name on requests
                 cursor.execute("ALTER TABLE requests ADD COLUMN relation_type_name TEXT;")
+            # RFC-16: each relation has its own reply policy, initially equal to
+            # its outbound policy; replies no longer depend on the reverse relation.
+            rel_cols = [row["name"] for row in cursor.execute("PRAGMA table_info(relations);").fetchall()]
+            if rel_cols and "reply_approval" not in rel_cols:
+                cursor.execute("ALTER TABLE relations ADD COLUMN reply_approval TEXT NOT NULL DEFAULT 'manual'"
+                               " CHECK (reply_approval IN ('manual', 'automatic'));")
+            if cursor.execute("SELECT 1 FROM schema_migrations WHERE name = 'relation_reply_approval_v1'").fetchone() is None:
+                if "approval" in rel_cols:
+                    cursor.execute("UPDATE relations SET reply_approval = approval;")
+                cursor.execute("INSERT INTO schema_migrations (name) VALUES ('relation_reply_approval_v1')")
             migration_rtn = 'request_relation_type_name_v1'
             if cursor.execute("SELECT 1 FROM schema_migrations WHERE name = ?", (migration_rtn,)).fetchone() is None:
                 cursor.execute("PRAGMA table_info(requests);")
@@ -1939,7 +1949,8 @@ class Database:
     def _row_to_relation(row: sqlite3.Row) -> RelationModel:
         return RelationModel(
             id=row["id"], from_node=row["from_node"], to_node=row["to_node"], type_id=row["type_id"],
-            approval=row["approval"], created_at=datetime.fromisoformat(row["created_at"]),
+            approval=row["approval"], reply_approval=row["reply_approval"],
+            created_at=datetime.fromisoformat(row["created_at"]),
             from_name=row["from_name"], to_name=row["to_name"], type_name=row["type_name"],
             type_description=row["type_description"],
         )
@@ -1958,8 +1969,10 @@ class Database:
             row = conn.execute(f"{self._RELATIONS_SQL} WHERE r.id = ?", (relation_id,)).fetchone()
             return self._row_to_relation(row) if row else None
 
-    def create_relation(self, from_node: int, to_node: int, type_id: int, approval: str) -> str | RelationModel:
-        """The new relation, or "nodes" / "type" (not found), "self", "exists"."""
+    def create_relation(self, from_node: int, to_node: int, type_id: int, approval: str,
+                        reply_approval: Optional[str] = None) -> str | RelationModel:
+        """The new relation, or "nodes" / "type" (not found), "self", "exists".
+        The reply policy defaults to the outbound one (RFC-16)."""
         if from_node == to_node:
             return "self"
         now = datetime.now(timezone.utc).isoformat()
@@ -1972,8 +1985,8 @@ class Database:
                 return "type"
             try:
                 cur = conn.execute(
-                    "INSERT INTO relations (from_node, to_node, type_id, approval, created_at)"
-                    " VALUES (?, ?, ?, ?, ?)", (from_node, to_node, type_id, approval, now))
+                    "INSERT INTO relations (from_node, to_node, type_id, approval, reply_approval, created_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?)", (from_node, to_node, type_id, approval, reply_approval or approval, now))
             except sqlite3.IntegrityError:
                 return "exists"
             relation_id = cur.lastrowid
@@ -1982,6 +1995,11 @@ class Database:
     def set_relation_approval(self, relation_id: int, approval: str) -> bool:
         with self._get_connection() as conn:
             cur = conn.execute("UPDATE relations SET approval = ? WHERE id = ?", (approval, relation_id))
+            return cur.rowcount > 0
+
+    def set_relation_reply_approval(self, relation_id: int, reply_approval: str) -> bool:
+        with self._get_connection() as conn:
+            cur = conn.execute("UPDATE relations SET reply_approval = ? WHERE id = ?", (reply_approval, relation_id))
             return cur.rowcount > 0
 
     def delete_relation(self, relation_id: int) -> bool:

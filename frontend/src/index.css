@@ -2128,3 +2128,7 @@ body.chat-open { overflow: hidden; }
   font-size: 0.85rem;
   margin: 0.25rem 0;
 }
+
+/* RFC-16: replies that need review are marked at the sender's end. */
+.rg-reply-ring { fill: var(--bg-secondary); stroke: var(--warning); stroke-width: 1.5; }
+.rg-ring { display: inline-block; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--warning); vertical-align: middle; }

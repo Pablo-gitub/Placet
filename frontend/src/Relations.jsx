@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { ReplySelect, ReplyToggle } from "./ReplyPolicy";
 import { ArrowRight, Link2, Trash2, X } from "lucide-react";
 import { apiErrorDescriptor } from "./i18n/errors";
 import { sessionName } from "./sessionInfo";
@@ -55,6 +56,7 @@ export function RelationForm({ from, to, onDone, onCancel }) {
   const [newType, setNewType] = useState("");
   const [description, setDescription] = useState("");
   const [approval, setApproval] = useState("manual");
+  const [reply, setReply] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
@@ -71,7 +73,7 @@ export function RelationForm({ from, to, onDone, onCancel }) {
       const type = creatingType
         ? (await api("POST", "/api/relation-types", { name: newType.trim(), description: description.trim() })).id
         : Number(typeId);
-      await api("POST", "/api/relations", { from_node: fromNode, to_node: toNode, type_id: type, approval });
+      await api("POST", "/api/relations", { from_node: fromNode, to_node: toNode, type_id: type, approval, reply_approval: reply ?? approval });
       onDone();
     } catch (e) {
       setError(e.display || { key: "errors.relationSave" });
@@ -110,6 +112,7 @@ export function RelationForm({ from, to, onDone, onCancel }) {
         <span>{t("relations.automatic")}</span>
       </label>
       {approval === "automatic" && <p className="composer-note">{t("relations.automaticHint")}</p>}
+      <ReplyToggle approval={approval} reply={reply} onChange={setReply} name="relation-reply" />
       <div className="dialog-actions">
         <button type="button" className="btn btn-primary" data-testid="relation-save" disabled={!valid} onClick={save}>
           {t("relations.create")}
@@ -140,6 +143,7 @@ function RelationRow({ rel, onChanged }) {
         <option value="manual">{t("relations.manualShort")}</option>
         <option value="automatic">{t("relations.automaticShort")}</option>
       </select>
+      <ReplySelect rel={rel} onChange={(value) => run("PATCH", { reply_approval: value })} />
       <button type="button" className="icon-button" aria-label={t("relations.delete")} title={t("relations.delete")}
         onClick={() => window.confirm(t("relations.deleteConfirm")) && run("DELETE")}>
         <Trash2 size={14} />
