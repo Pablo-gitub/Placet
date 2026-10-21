@@ -147,7 +147,7 @@ def test_bridge_worker_drops_privileges_and_cannot_take_free_arguments():
     calls = []
     def run(argv, **kwargs):
         calls.append((argv, kwargs))
-        return 'succeeded\n'
+        return '{"state":"succeeded","code":"restart_confirmed"}\n'
     handler = RestartHandlers(health_port=8123, desktop_uid=1000, desktop_gid=1000, run=run)
     assert handler('restart-bridge') == 'succeeded'
     argv, options = calls[0]

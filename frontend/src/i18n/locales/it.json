@@ -616,7 +616,7 @@
     "confirmationHost": "Host di conferma:",
     "recent": "Ultimi esiti",
     "reference": "Riferimento {{id}}",
-    "bridgeEvidence": "Riavvio richiesto; esito riportato dal servizio utente desktop. Non è una verifica indipendente della salute del servizio.",
+    "bridgeEvidence": "Esito riportato dal servizio utente desktop; non è una verifica indipendente della salute del servizio.",
     "actions": {
       "restart-backend": {
         "title": "Riavvia backend",
@@ -635,6 +635,31 @@
       "succeeded": "Completata.",
       "failed": "Fallita.",
       "outcome_unknown": "Esito da verificare dal terminale amministrativo."
+    },
+    "noDiagnostic": "Non è disponibile una diagnostica dettagliata per questo esito.",
+    "results": {
+      "helper_io_failed": "La comunicazione con il processo di supporto è fallita dopo l’avvio; effetto non confermato.",
+      "helper_spawn_failed": "Impossibile avviare il processo di supporto del bridge; nessun riavvio inviato.",
+      "helper_import_failed": "Il processo di supporto non ha caricato il codice protetto; nessun riavvio inviato.",
+      "helper_exit_nonzero": "Il processo di supporto del bridge è terminato senza un esito confermato.",
+      "helper_timeout": "Il processo di supporto del bridge ha superato il tempo limite; il riavvio potrebbe essere avvenuto.",
+      "helper_response_invalid": "Il processo di supporto ha restituito una risposta non valida; esito non confermato.",
+      "manager_unreachable": "Gestore dei servizi non raggiungibile prima dell’invio; nessun riavvio inviato.",
+      "manager_response_invalid": "Lo stato iniziale del servizio non era valido; nessun riavvio inviato.",
+      "restart_not_sent": "Impossibile avviare il comando; nessun riavvio inviato.",
+      "restart_rejected": "Il comando di riavvio ha restituito un errore; effetto non confermato.",
+      "restart_timeout": "Il comando di riavvio ha superato il tempo limite; effetto non confermato.",
+      "restart_unconfirmed": "Il tentativo di riavvio non è confermato.",
+      "verification_failed": "Lo stato del servizio non ha confermato un riavvio stabile.",
+      "invocation_unchanged": "Non è stata osservata una nuova esecuzione del servizio.",
+      "restart_confirmed": "È stata osservata una nuova esecuzione attiva del servizio.",
+      "backend_unhealthy": "Il backend non è rimasto stabile e operativo.",
+      "handler_failed": "Il gestore dell’azione si è fermato senza un esito confermato.",
+      "invalid_result": "Il risultato dell’azione non era valido; verificarlo dal terminale amministrativo.",
+      "operation_rejected": "Operazione rifiutata prima dell’esecuzione.",
+      "interrupted": "Esecuzione interrotta; occorre verificarne l’effetto.",
+      "operator_reconciled_succeeded": "L’operatore ha registrato un esito positivo senza ripetere l’azione.",
+      "operator_reconciled_failed": "L’operatore ha registrato un esito negativo senza ripetere l’azione."
     }
   },
   "stats": {

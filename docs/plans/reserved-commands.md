@@ -500,3 +500,47 @@ Placet app manually; a secondary link opens Placet in a browser. Both command
 pages suspend polling while hidden. Real Face ID and both restart actions still
 require the acceptance steps in the [installation guide](../installation.md#activating-the-two-fixed-restart-commands)
 after review and human activation. Deploy/build execution remains out of scope.
+
+## Restart phase diagnostics (repository only, October 21, 2026)
+
+The first disposable probe did not reproduce a chroot skip; no environment
+bypass or sandbox relaxation is justified by that result. The
+[root-to-user probe](../experiments/2026-10-21-bridge-drop-probe.md) reproduces the
+missing subprocess credential-drop/import stage. Its procedure has not been
+executed by an agent and never targets a production service.
+
+Restart handlers now return a closed terminal-state/phase-code pair. The
+unprivileged bridge helper emits a small JSON report; the root parent accepts
+only the helper's allowed code/state combinations and rejects extra fields or
+legacy unstructured output. Parent spawn failures, helper import failure,
+nonzero exit, timeout and invalid report are distinct. Stdout is bounded during
+collection, stderr is discarded, and exception output is never stored or logged.
+Only an allowlisted code enters the existing job result/event fields, with no
+schema change or authorization capability added. The PWA and protected page
+translate known codes in English/Italian and do not display unknown raw codes.
+Historical jobs with no detailed code keep their state and a neutral explanation.
+
+For the bridge, failures before possible dispatch are failed; a nonzero restart
+command is `restart_rejected` with **outcome_unknown**, because it may be a job
+failure after side effects. Timeout, unchanged invocation, missing response or
+post-restart instability remain uncertain. Success requires a new nonempty
+InvocationID, active/running, then a stable check two seconds later with the same
+ID and unchanged NRestarts. This is still evidence reported by the user service,
+not an independent health check. Backend timing/health/state semantics remain
+unchanged; its existing unhealthy/unstable failure still reports failed, now
+with a diagnostic code. No uncertain job is automatically retried or released.
+
+The code and UI changes are not an installed administrative upgrade. A future
+maintenance design must be reviewed separately: pin source/bundle/installed
+hashes, freeze new admissions, hold the execution lock after the active handler
+finishes (or stop on timeout), and stop only the administrative writer services
+before replacing protected code. Preserve live passkeys, authorization/execution
+rows, audit, catalogue, identity and transport configuration. Take a consistent
+private backup, retain previous code, validate the new report protocol and resume
+only after protected configuration checks; never restore stale authorization
+state as an automatic rollback or replay a running/uncertain job. Account for
+requests signed while maintenance is starting. An unresolved uncertain job stays
+blocked until a human reconciliation; an already-authorized queued job must not
+be silently lost or reauthorized. Partial failure remains fail-closed for review.
+The enrollment-only activation_bootstrap must not be reused. No maintenance
+installer or isolated terminal launcher is implemented by this change.

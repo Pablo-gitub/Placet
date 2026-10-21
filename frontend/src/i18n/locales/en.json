@@ -616,7 +616,7 @@
     "confirmationHost": "Confirmation host:",
     "recent": "Recent outcomes",
     "reference": "Reference {{id}}",
-    "bridgeEvidence": "Restart requested; the outcome is reported by the desktop user service. It is not independent proof of service health.",
+    "bridgeEvidence": "Outcome reported by the desktop user service; this is not an independent health check.",
     "actions": {
       "restart-backend": {
         "title": "Restart backend",
@@ -635,6 +635,31 @@
       "succeeded": "Completed.",
       "failed": "Failed.",
       "outcome_unknown": "Outcome to be checked from the administrator terminal."
+    },
+    "noDiagnostic": "No detailed diagnostic is available for this result.",
+    "results": {
+      "helper_io_failed": "The bridge helper connection failed after launch; its effect is unconfirmed.",
+      "helper_spawn_failed": "The bridge helper could not be started; no restart was sent.",
+      "helper_import_failed": "The bridge helper could not import its protected code; no restart was sent.",
+      "helper_exit_nonzero": "The bridge helper exited without a confirmed result.",
+      "helper_timeout": "The bridge helper timed out; a restart may still have taken effect.",
+      "helper_response_invalid": "The bridge helper returned an invalid response; the outcome is unconfirmed.",
+      "manager_unreachable": "The service manager was unavailable before dispatch; no restart was sent.",
+      "manager_response_invalid": "The initial service state was invalid; no restart was sent.",
+      "restart_not_sent": "The restart command could not be started; no restart was sent.",
+      "restart_rejected": "The restart command returned an error; its effect is unconfirmed.",
+      "restart_timeout": "The restart command timed out; its effect is unconfirmed.",
+      "restart_unconfirmed": "The restart attempt could not be confirmed.",
+      "verification_failed": "The service state could not confirm a stable restart.",
+      "invocation_unchanged": "No new service invocation was observed.",
+      "restart_confirmed": "A new active service invocation was observed.",
+      "backend_unhealthy": "The backend did not remain stable and healthy.",
+      "handler_failed": "The execution handler stopped without a confirmed result.",
+      "invalid_result": "The execution result was invalid; check it from the administrator terminal.",
+      "operation_rejected": "The operation was refused before execution.",
+      "interrupted": "Execution was interrupted; its effect must be checked.",
+      "operator_reconciled_succeeded": "The operator recorded a successful outcome without repeating the action.",
+      "operator_reconciled_failed": "The operator recorded a failed outcome without repeating the action."
     }
   },
   "stats": {

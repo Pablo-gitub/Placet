@@ -213,3 +213,25 @@ it("does not poll while the installed app is hidden and refreshes on return", as
     else delete document.visibilityState;
   }
 });
+
+it.each([
+  ["en", "The bridge helper exited without a confirmed result."],
+  ["it", "Il processo di supporto del bridge è terminato senza un esito confermato."],
+])("shows a sanitized diagnostic in %s without claiming a restart was requested", async (language, message) => {
+  await i18n.changeLanguage(language);
+  const row = { ...view(firstId, "outcome_unknown"), action: "restart-bridge",
+    result_code: "helper_exit_nonzero", evidence: "user_service_report" };
+  vi.stubGlobal("fetch", vi.fn(() => json({ status: "available", execution_enabled: true,
+    actions: [{ ...action, id: "restart-bridge" }], recent: [row], blocked_job_id: jobId })));
+  render(<Commands />);
+  await waitFor(() => expect(screen.getAllByText(message).length).toBeGreaterThan(0));
+  expect(screen.queryByText(/Restart requested|Riavvio richiesto/)).toBeNull();
+});
+
+it("never displays an unknown private result code as text", async () => {
+  const row = { ...view(firstId, "outcome_unknown"), result_code: "private_secret" };
+  records.existing = row;
+  render(<Commands />);
+  await waitFor(() => expect(screen.getAllByText(i18n.t("commands.noDiagnostic")).length).toBeGreaterThan(0));
+  expect(document.body.textContent).not.toContain("private_secret");
+});
