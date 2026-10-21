@@ -584,3 +584,15 @@ an error; the job remains uncertain and is never automatically repeated. Its
 60-second service timeout is shorter than the supervisor's 75-second command
 limit. Always use the digest from the current reviewed probe/installer: earlier
 review digests do not authorize the updated script or unit.
+
+The worker maintenance scope includes the two administrative confirmation-page
+files (`web_static/app.js`, `web_static/index.html`) needed to display the closed
+restart diagnostics, as well as their locale catalogs. This permits upgrading
+from the activation bundle at commit `69330af`, whose installed digest remains
+`580f9b4d63ab971b7059e1f5bc96e4d0bb78d196cf93579521ba8c04044324cb`.
+The regression fixture reconstructs that exact public bundle without requiring
+Git history in CI. `bridge_probe.py` is operator-only and is not in the installed
+manifest; a Git diff of the entire directory does not describe bundle contents.
+Changes to unrelated modules, removals, ownership, pins and job-state guards
+remain rejected. A new installer/bundle digest is required for this scope fix;
+the worker unit and installed bundle digests are not changed by a refused apply.
