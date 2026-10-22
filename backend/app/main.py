@@ -1132,13 +1132,28 @@ def create_app(
         expire_and_notify()
         return db.list_requests(status=status, limit=limit, hide_excluded=True)
 
+    def mark_mcp_seen_by(who: Principal, req: RequestModel) -> None:
+        """
+        RF-27: an agent reading a request (placet_check_status) used the MCP; the session it
+        did so from is its own end of the request. Neither a human, nor an agent that is both
+        ends (which of its sessions is unknown).
+        """
+        if who.is_human:
+            return
+        if who.id == req.sender_id and who.id != req.recipient_id:
+            db.mark_mcp_seen(req.sender_session_id)
+        elif who.id == req.recipient_id and who.id != req.sender_id:
+            db.mark_mcp_seen(req.recipient_session_id)
+
     @app.get("/api/requests/{request_id}", response_model=RequestModel)
     async def get_request(
         request_id: int,
         wait_seconds: int = Query(0, ge=0, le=600),
         who: Principal = Depends(principal),
     ):
-        require_party(who, get_or_404(request_id))
+        found = get_or_404(request_id)
+        require_party(who, found)
+        mark_mcp_seen_by(who, found)
         if wait_seconds > 0:
             req = await wait_until_settled(request_id, float(wait_seconds))
         else:
@@ -1197,7 +1212,8 @@ def create_app(
                 relation = relation_of(req.sender_session_id, decision.recipient_session_id)
                 redirect = (redirect_to, relation.id if relation else None)
         if decision.status == RequestStatus.APPROVED and decision.delivery_mode == "now":
-            if req.scheduled_at is not None:
+            # Only a delivery still ahead conflicts with "now": a schedule that has passed is just due.
+            if req.scheduled_at is not None and req.scheduled_at.astimezone(timezone.utc) > datetime.now(timezone.utc):
                 raise ProductError(422, "schedule.steer_conflict", "A message in 'now' mode cannot be scheduled.")
             target_id = decision.recipient_session_id or req.recipient_session_id
             target = db.get_session(target_id) if target_id else None
@@ -2188,6 +2204,8 @@ def create_app(
         session = db.get_session(sid) if sid else None
         if session is not None and session.agent_id != who.id:
             session = None
+        if session is not None:
+            db.mark_mcp_seen(session.id)  # RF-27: placet_list_relations carried this session
         out: Dict[str, object] = {"session_id": session.id if session else None,
                                   "node": session.node_name if session else None,
                                   "rule": db.get_relation_rule(), "relations": []}
