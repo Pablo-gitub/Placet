@@ -11,7 +11,7 @@ from backend.app.main import create_app
 from tests.helpers import agent_client
 
 CONFIG = PlacetConfig(agents={
-    "claude": AgentSpec(tmux_session="agent-claude", token="tok-claude", allowed_targets=["human", "codex"]),
+    "claude": AgentSpec(tmux_session="agent-claude", token="tok-claude", allowed_targets=["human", "codex", "claude"]),
     "codex": AgentSpec(tmux_session="agent-codex", token="tok-codex", allowed_targets=["human", "claude"]),
 })
 
@@ -134,3 +134,30 @@ def test_the_mcp_tool_tells_the_agent_to_pass_a_target_session():
     assert out["product_code"] == "request.target_session_ambiguous"
     assert [c["id"] for c in out["params"]["candidates"]] == ["a", "b"]
     assert "target_session" in out["detail"]
+
+
+async def send_as_claude(app, **body):
+    async with agent_client(app, "tok-claude") as client:
+        return await client.post("/api/requests", json={"recipient_id": "claude", "prompt": "do it", **body})
+
+
+@pytest.mark.asyncio
+async def test_the_sender_is_never_its_own_candidate(env):
+    app, db = env
+    await start(app, "claude", "me", "claude-code", "/home/p/placet")
+    await start(app, "claude", "other", "claude-code", "/home/p/placet")
+    db.touch_waiter("me")  # Claude sessions are reachable while their waiter listens
+    db.touch_waiter("other")
+    resp = await send_as_claude(app, sender_session_id="me")
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["recipient_session_id"] == "other"
+
+
+@pytest.mark.asyncio
+async def test_only_the_sender_means_no_reachable_session(env):
+    app, db = env
+    await start(app, "claude", "me", "claude-code", "/home/p/placet")
+    db.touch_waiter("me")
+    resp = await send_as_claude(app, sender_session_id="me")
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["recipient_session_id"] is None  # unbound, as before

@@ -624,7 +624,9 @@ def create_app(
         never the first idle session, which may be stale or foreign.
         """
         sender = db.get_session(sender_session) if sender_session else None
-        reachable = [s for s in db.list_sessions(agent_id=req.recipient_id) if s.reachable]
+        # The sender is never a candidate: a session cannot receive its own request.
+        reachable = [s for s in db.list_sessions(agent_id=req.recipient_id)
+                     if s.reachable and s.id != sender_session]
         candidates = [s for s in reachable if s.cwd == sender.cwd] if sender is not None and sender.cwd else reachable
         if len(candidates) == 1:
             return req.model_copy(update={"recipient_session_id": candidates[0].id})
