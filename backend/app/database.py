@@ -1349,6 +1349,7 @@ class Database:
                 SELECT r.id, r.recipient_session_id AS sid, (
                     SELECT COUNT(*) FROM requests w
                     WHERE w.recipient_session_id = r.recipient_session_id AND w.status = ?
+                      AND (w.scheduled_at IS NULL OR datetime(w.scheduled_at) <= datetime(?))
                 ) AS waiting
                 FROM requests r
                 WHERE r.hold_alerted_at IS NULL AND r.queue_released_at IS NULL
@@ -1363,7 +1364,7 @@ class Database:
                   AND waiting > 0
                 ORDER BY r.id
                 """,
-                (RequestStatus.APPROVED.value, RequestStatus.EXECUTING.value, RequestStatus.STALLED.value,
+                (RequestStatus.APPROVED.value, now, RequestStatus.EXECUTING.value, RequestStatus.STALLED.value,
                  RequestStatus.COMPLETED.value, RequestStatus.COMPLETED.value, RequestStatus.STALLED.value,
                  cutoff),
             )
