@@ -96,13 +96,38 @@ def _request_id_from_tool_response(response, depth: int = 0):
     return None
 
 
+def _summary_text(record):
+    """
+    The text of a continuation summary record, or None for anything else. The
+    structure Claude Code writes (observed, see bridge/transcripts.py): a
+    `user` record from the main conversation whose message is the user's own
+    text, as a string or text blocks. Assistant, tool, subagent and metadata
+    records never count.
+    """
+    if record.get("type") != "user" or record.get("isSidechain") or record.get("isMeta"):
+        return None
+    message = record.get("message")
+    if not isinstance(message, dict) or message.get("role") not in (None, "user"):
+        return None
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list) and content and all(
+            isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str) for b in content):
+        return "\n".join(b["text"] for b in content)
+    return None
+
+
 def continued_from_transcript(path):
     """
-    The session this one continues, from the head of its own transcript: a
-    continuation starts with a summary naming the previous transcript. Only
-    that explicit reference counts, and never the transcript itself. None
-    when the file is unreadable, says nothing, or is too long to be at its
-    first prompt (it is then not even opened when it is large).
+    The session this one continues, from the head of its own transcript: the
+    conversation's first user message is a summary that starts with Claude
+    Code's continuation phrase and names the previous transcript. Only that
+    explicit reference counts: a record quoting the phrase (an assistant
+    message, a tool result, a later or pasted message) is not proof, nor is a
+    summary naming several different transcripts, nor the transcript itself.
+    None when the file is unreadable, says nothing, or is too long to be at
+    its first prompt (it is then not even opened when it is large).
     """
     if not path:
         return None
@@ -115,15 +140,20 @@ def continued_from_transcript(path):
         return None
     if len(lines) > TRANSCRIPT_MAX_LINES:
         return None
-    own = Path(path).stem.lower()
     for line in lines[:TRANSCRIPT_HEAD_LINES]:
-        index = line.find(CONTINUED_PREFIX)
-        if index == -1:
+        try:
+            record = json.loads(line)
+        except ValueError:
             continue
-        found = [u.lower() for u in CONTINUED_JSONL_UUID.findall(line[index:])]
-        found = [u for u in found if u != own]
-        if found:
-            return found[-1]
+        if not isinstance(record, dict) or record.get("type") != "user":
+            continue
+        # The first user record of the conversation decides, whatever it says.
+        text = _summary_text(record)
+        if text is None or not text.lstrip().startswith(CONTINUED_PREFIX):
+            return None
+        own = Path(path).stem.lower()
+        found = {u.lower() for u in CONTINUED_JSONL_UUID.findall(text)} - {own}
+        return found.pop() if len(found) == 1 else None
     return None
 
 

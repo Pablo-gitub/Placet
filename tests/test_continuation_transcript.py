@@ -94,3 +94,61 @@ def test_nothing_found_leaves_the_key_out(tmp_path):
     assert "continues" not in build_event(event)
     assert "continues" not in build_event({**event, "transcript_path": str(tmp_path / "missing.jsonl")})
     assert "continues" not in build_event({k: v for k, v in event.items() if k != "transcript_path"})
+
+
+# --- only the structure Claude Code writes for a continuation counts --------------------------
+
+
+def assistant(text):
+    return {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}
+
+
+def tool_result(text):
+    return {"type": "user", "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": "t1", "content": text}]}}
+
+
+def head(tmp_path, *records):
+    return write_transcript(tmp_path / f"{NEW}.jsonl", list(records))
+
+
+def test_the_observed_shapes_are_accepted(tmp_path):
+    as_string = {"type": "user", "isCompactSummary": True, "message": {"role": "user", "content": SUMMARY}}
+    assert continued_from_transcript(head(tmp_path, as_string)) == OLD
+    assert continued_from_transcript(head(tmp_path, {"type": "system", "subtype": "compact_boundary"}, user(SUMMARY))) == OLD
+    flagged = {**user(SUMMARY), "isCompactSummary": True}
+    assert continued_from_transcript(head(tmp_path, {"type": "summary"}, flagged, user("continua"))) == OLD
+
+
+@pytest.mark.parametrize("record", [
+    assistant(SUMMARY),                       # an assistant message quoting the summary
+    tool_result(SUMMARY),                     # a tool result (a file or command output containing it)
+    {"type": "system", "content": SUMMARY},   # metadata
+    {"type": "summary", "summary": SUMMARY},
+    {**user(SUMMARY), "isSidechain": True},   # a subagent's own conversation
+    user("Guarda questo: " + SUMMARY),        # the phrase in the middle of a user message
+    {"type": "user", "message": {"role": "assistant", "content": SUMMARY}},
+])
+def test_other_records_quoting_the_summary_are_not_proof(tmp_path, record):
+    assert continued_from_transcript(head(tmp_path, record)) is None
+
+
+def test_a_summary_that_is_not_the_first_user_message_is_not_a_continuation(tmp_path):
+    assert continued_from_transcript(head(tmp_path, user("ciao"), assistant("ok"), user(SUMMARY))) is None
+
+
+def test_several_distinct_references_are_ambiguous_and_one_repeated_is_not(tmp_path):
+    other = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    two = SUMMARY + f"See also /home/paolo/.claude/projects/x/{other}.jsonl\n"
+    assert continued_from_transcript(head(tmp_path, user(two))) is None
+    twice = SUMMARY + f"Again: /home/paolo/.claude/projects/x/{OLD}.jsonl\n"
+    assert continued_from_transcript(head(tmp_path, user(twice))) == OLD
+
+
+def test_a_malformed_line_is_skipped_not_trusted(tmp_path):
+    path = tmp_path / f"{NEW}.jsonl"
+    flat = SUMMARY.replace("\n", " ")
+    path.write_text("not json " + flat + "\n" + json.dumps(user(SUMMARY)) + "\n", encoding="utf-8")
+    assert continued_from_transcript(str(path)) == OLD
+    path.write_text("not json " + flat + "\n", encoding="utf-8")
+    assert continued_from_transcript(str(path)) is None
