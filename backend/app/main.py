@@ -2578,6 +2578,23 @@ def create_app(
             alert_wake(session_id)
         return {"session": session_id, "outcome": body.outcome}
 
+    class WakeCauseReport(BaseModel):
+        cause: Optional[Literal["warm_capacity_denied"]] = None
+        observed_at: Optional[datetime] = None
+        attempt_at: datetime
+
+    @app.post("/api/bridge/sessions/{session_id}/wake-cause")
+    async def bridge_wake_cause(session_id: str, body: WakeCauseReport, who: Principal = Depends(principal)):
+        """
+        Why the app did not start a session whose link it accepted, as the bridge read in the app's log:
+        a closed code only, for the current attempt. Informs the notice; it changes nothing.
+        """
+        require_bridge(who)
+        if not db.report_wake_cause(session_id, body.cause, body.observed_at, body.attempt_at):
+            raise HTTPException(status_code=404, detail="Session not found")
+        notify_session(session_id)
+        return {"session": session_id, "cause": body.cause}
+
     @app.post("/api/sessions/{session_id}/wake")
     async def retry_wake(session_id: str, who: Principal = Depends(principal)):
         """

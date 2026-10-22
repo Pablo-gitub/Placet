@@ -92,6 +92,8 @@ class BridgeStore(Protocol):
     def report_titles(self, titles: Dict[str, str]) -> None: ...
     # What happened to a Claude Desktop continue link: "open_requested" or "failed".
     def report_wake(self, session_id: str, outcome: str) -> None: ...
+    # Why the app did not start the session this attempt asked for: a closed code, or None.
+    def report_wake_cause(self, session_id: str, cause: Optional[str], observed_at, attempt_at) -> None: ...
     def report_usage(self, providers: List[dict]) -> None: ...
     # Takes a "now" message: {"request_id", "session_id", "provider", "text"} or None.
     def take_steer(self, request_id: int) -> Optional[dict]: ...
@@ -184,6 +186,9 @@ class LocalStore:
 
     def report_wake(self, session_id: str, outcome: str) -> None:
         self.db.report_wake(session_id, outcome)
+
+    def report_wake_cause(self, session_id: str, cause: Optional[str], observed_at, attempt_at) -> None:
+        self.db.report_wake_cause(session_id, cause, observed_at, attempt_at)
 
     def report_usage(self, providers: List[dict]) -> None:
         from backend.app.models import UsageReport
@@ -287,6 +292,12 @@ class HttpStore:
 
     def report_wake(self, session_id: str, outcome: str) -> None:
         resp = self.client.post(f"/api/bridge/sessions/{session_id}/wake", json={"outcome": outcome})
+        resp.raise_for_status()
+
+    def report_wake_cause(self, session_id: str, cause: Optional[str], observed_at, attempt_at) -> None:
+        resp = self.client.post(f"/api/bridge/sessions/{session_id}/wake-cause", json={
+            "cause": cause, "observed_at": observed_at.isoformat() if observed_at else None,
+            "attempt_at": attempt_at.isoformat()})
         resp.raise_for_status()
 
     def report_usage(self, providers: List[dict]) -> None:
