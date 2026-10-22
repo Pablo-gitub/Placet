@@ -1147,6 +1147,31 @@ def create_app(
                 f"Request {request_id} is in {current.status.value} state, not in PENDING state.",
                 {"id": request_id},
             )
+
+        # RF-66: If approved message to an over-limit recipient and deliver_at_reset is ON:
+        # schedule delivery at recipient's reset time (unless mode is "now").
+        if decision.status == RequestStatus.APPROVED and decision.delivery_mode != "now" and req.recipient_id != "human":
+            target_id = decision.recipient_session_id or req.recipient_session_id
+            target_sess = db.get_session(target_id) if target_id else None
+            if target_sess is None and relation and relation.to_node:
+                node = db.get_node(relation.to_node)
+                target_sess = db.get_session(node.session_id) if node and node.session_id else None
+            rec_provider = target_sess.provider if target_sess else None
+            if rec_provider is None:
+                if req.recipient_id in ("claude", "claude-code"):
+                    rec_provider = "claude-code"
+                elif req.recipient_id in ("codex", "gemini"):
+                    rec_provider = req.recipient_id
+
+            cfg = usage_guard()
+            if cfg.get("deliver_at_reset", False) and rec_provider:
+                if db.is_provider_over_limit(rec_provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"]):
+                    rec_reset = db.provider_reset_time(rec_provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"])
+                    if rec_reset is not None:
+                        sched_res = db.schedule_request(request_id, rec_reset, actor=who.actor)
+                        if sched_res is not None:
+                            updated = sched_res
+
         notify_change(request_id)
         return updated
 

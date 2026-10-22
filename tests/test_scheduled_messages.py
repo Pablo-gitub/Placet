@@ -596,3 +596,51 @@ async def test_write_to_session_deliver_at_reset(rel_app_and_db):
         assert data["status"] == "APPROVED"
         assert data["scheduled_at"] is None
 
+
+@pytest.mark.asyncio
+async def test_decide_request_deliver_at_reset(rel_app_and_db):
+    """Approval of a manual relation request schedules at reset if recipient is over limit."""
+    app, db = rel_app_and_db
+    a, b = await two_nodes(app, db)
+    review = db.create_relation_type("review", "")
+    # Manual relation
+    db.create_relation(a.id, b.id, review.id, "manual")
+
+    # Usage guard ON, deliver at reset ON
+    async with human_client(app) as human:
+        await human.put("/api/settings/usage-guard", json={"enabled": True, "five_hour": 90, "seven_day": 95})
+        await human.put("/api/settings/deliver-at-reset", json={"enabled": True})
+
+    # Recipient (codex) is over limit (92%), reset in 2 hours
+    soon = datetime.now(timezone.utc) + timedelta(hours=2)
+    set_provider_usage(db, "codex", five=92, resets_at=soon.isoformat())
+
+    # 1. Prompt on manual relation is created as PENDING
+    resp = await post(app, {"target_node": "builder"})
+    data = resp.json()
+    assert data["status"] == "PENDING"
+    assert data["scheduled_at"] is None
+    req_id = data["id"]
+
+    # 2. Human approves request: with deliver_at_reset ON, it gets scheduled at recipient reset!
+    async with human_client(app) as human:
+        dec_resp = await human.post(f"/api/requests/{req_id}/decision", json={"status": "APPROVED"})
+        assert dec_resp.status_code == 200
+        decided = dec_resp.json()
+        assert decided["status"] == "APPROVED"
+        assert decided["scheduled_at"] is not None
+        sched = datetime.fromisoformat(decided["scheduled_at"].replace("Z", "+00:00"))
+        assert abs((sched - soon).total_seconds()) < 5
+
+    # 3. With deliver_at_reset OFF: approval leaves scheduled_at as None (send now, not put back in PENDING)
+    async with human_client(app) as human:
+        await human.put("/api/settings/deliver-at-reset", json={"enabled": False})
+        resp2 = await post(app, {"target_node": "builder"})
+        req2_id = resp2.json()["id"]
+        dec_resp2 = await human.post(f"/api/requests/{req2_id}/decision", json={"status": "APPROVED"})
+        assert dec_resp2.status_code == 200
+        decided2 = dec_resp2.json()
+        assert decided2["status"] == "APPROVED"
+        assert decided2["scheduled_at"] is None
+
+
