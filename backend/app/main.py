@@ -794,6 +794,11 @@ def create_app(
             )
         req = req.model_copy(update={"sender_id": who.id})
 
+        if req.scheduled_at is not None:
+            if not who.is_human:
+                raise ProductError(422, "schedule.not_allowed", "Only human users can schedule requests.")
+            validate_scheduled_time(req.scheduled_at)
+
         # RFC-08: a node by name stands for its current session and agent.
         if req.target_node:
             node = db.node_by_name(req.target_node.strip())

@@ -644,3 +644,30 @@ async def test_decide_request_deliver_at_reset(rel_app_and_db):
         assert decided2["scheduled_at"] is None
 
 
+@pytest.mark.asyncio
+async def test_agent_cannot_create_scheduled_request(rel_app_and_db):
+    """Agents cannot create scheduled requests via API (422 schedule.not_allowed)."""
+    app, db = rel_app_and_db
+    soon = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    async with agent_client(app, "tok-claude") as agent:
+        resp = await agent.post("/api/requests", json={
+            "recipient_id": "codex",
+            "question_type": "prompt_review",
+            "prompt": "Test agent scheduled",
+            "scheduled_at": soon,
+        })
+        assert resp.status_code == 422
+        err = resp.json()
+        assert err["code"] == "schedule.not_allowed"
+
+    # Agent without scheduled_at succeeds
+    async with agent_client(app, "tok-claude") as agent:
+        ok_resp = await agent.post("/api/requests", json={
+            "recipient_id": "codex",
+            "question_type": "prompt_review",
+            "prompt": "Test agent unscheduled",
+        })
+        assert ok_resp.status_code == 201
+
+
+
