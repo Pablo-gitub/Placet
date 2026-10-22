@@ -3,10 +3,11 @@
 Undocumented and isolated, like the log adapter. The app keeps one engine process per loaded
 conversation and, above its cap, does not warm another one for a link wake-up. It also spawns
 short-lived "temporary query" engines several times a minute, which do not count: only
-processes that have lived a while do. Nothing but two numbers leaves this module; it reads
+processes that have lived a while do. Nothing but two numbers and the host ids of loaded conversations leave this module; it reads
 only the user's own processes, signals none, and never raises.
 """
 import os
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -17,6 +18,8 @@ MIN_AGE_SECONDS = 10.0
 MAX_PROCESSES = 5000
 MAX_READ = 256 * 1024
 ENTRYPOINT = b"CLAUDE_CODE_ENTRYPOINT=claude-desktop"
+HOST_ID_PREFIX = b"CLAUDE_CODE_HOST_SESSION_ID="
+HOST_ID = re.compile(r"local_[0-9a-f-]{36}\Z")
 
 
 class EngineCounter:
@@ -47,14 +50,17 @@ class EngineCounter:
                 or any(a == b"--output-format" and i + 1 < len(argv) and argv[i + 1] == b"stream-json"
                        for i, a in enumerate(argv)))
 
-    def count(self, min_age: float = MIN_AGE_SECONDS) -> Optional[int]:
-        """Engines of the app, alive for at least `min_age` seconds; None if /proc cannot tell."""
+    def _engines(self, min_age: float):
+        """
+        Yields the environ of each engine of the app alive for at least `min_age` seconds; None if /proc
+        cannot tell. The environ never leaves this class: callers take one value out of it, or none.
+        """
         try:
             uptime = float((self.root / "uptime").read_text().split()[0])
             names = [n for n in os.listdir(self.root) if n.isdigit()][:MAX_PROCESSES]
         except (OSError, IndexError, ValueError):
             return None
-        total = 0
+        found = []
         for name in names:
             folder = self.root / name
             try:
@@ -64,15 +70,45 @@ class EngineCounter:
                 if cmdline is None or not self._is_engine(cmdline.rstrip(b"\0").split(b"\0")):
                     continue
                 environ = self._read(folder / "environ")
-                if environ is None or ENTRYPOINT not in environ.split(b"\0"):
+                if environ is None:
+                    continue
+                entries = environ.split(b"\0")
+                if ENTRYPOINT not in entries:
                     continue
                 age = self._age(folder, uptime)
                 if age is None or age < min_age:
                     continue                                     # a temporary query, or unknown
-                total += 1
+                found.append(entries)
             except Exception:
                 continue
-        return total
+        return found
+
+    def count(self, min_age: float = MIN_AGE_SECONDS) -> Optional[int]:
+        """Engines of the app, alive for at least `min_age` seconds; None if /proc cannot tell."""
+        engines = self._engines(min_age)
+        return None if engines is None else len(engines)
+
+    def loaded(self, min_age: float = MIN_AGE_SECONDS) -> Optional[dict]:
+        """
+        {"ids": host ids of the loaded conversations, "unknown": engines without a valid one}. Of each
+        environment only the value of CLAUDE_CODE_HOST_SESSION_ID is kept, and only if it is
+        `local_<uuid>`: the rest (an OAuth token lives there) is never returned, logged or stored.
+        """
+        engines = self._engines(min_age)
+        if engines is None:
+            return None
+        ids, unknown = set(), 0
+        for entries in engines:
+            host = next((e[len(HOST_ID_PREFIX):] for e in entries if e.startswith(HOST_ID_PREFIX)), None)
+            try:
+                text = host.decode("ascii") if host is not None else ""
+            except UnicodeDecodeError:
+                text = ""
+            if HOST_ID.fullmatch(text):
+                ids.add(text)
+            else:
+                unknown += 1
+        return {"ids": ids, "unknown": unknown}
 
     def cap(self) -> Optional[int]:
         try:

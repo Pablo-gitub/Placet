@@ -83,17 +83,12 @@ class ClaudeDesktopWake:
                 raise RuntimeError('Claude Desktop did not accept the conversation link')
         return True
 
-    def archived_states(self):
-        """
-        {Placet session id: archived in the app?} for the conversations whose Desktop record can be
-        read: the same safety as resolve() (no symlinks, plain files, bounded size and count). A
-        session with several records, an unreadable one or an odd id is left out: no claim.
-        """
-        seen, ambiguous = {}, set()
+    def _records(self):
+        """(local id, Placet session id, archived) of each Desktop record that can be read safely, as resolve() reads."""
         try:
             paths = sorted(self.sessions_dir.glob('*/*/local_*.json'))[:MAX_RECORDS]
         except OSError:
-            return {}
+            return
         for path in paths:
             try:
                 if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_RECORD_BYTES:
@@ -103,10 +98,24 @@ class ClaudeDesktopWake:
                 archived = bool(data.get('isArchived'))
             except (OSError, ValueError, TypeError, AttributeError):
                 continue
+            yield path.stem, cli_id, archived
+
+    def archived_states(self):
+        """
+        {Placet session id: archived in the app?} for the conversations whose Desktop record can be
+        read: the same safety as resolve() (no symlinks, plain files, bounded size and count). A
+        session with several records, an unreadable one or an odd id is left out: no claim.
+        """
+        seen, ambiguous = {}, set()
+        for _local, cli_id, archived in self._records():
             if cli_id in seen:
                 ambiguous.add(cli_id)
             seen[cli_id] = archived
         return {k: v for k, v in seen.items() if k not in ambiguous}
+
+    def local_to_cli(self):
+        """{local_<uuid>: Placet session id}, read with the same safety as archived_states()."""
+        return {local: cli_id for local, cli_id, _archived in self._records() if LOCAL_ID.fullmatch(local)}
 
     def diagnose(self, session_id, cwd, since):
         """Why the app did not start the session this attempt asked for (a closed code), if its log says so."""
