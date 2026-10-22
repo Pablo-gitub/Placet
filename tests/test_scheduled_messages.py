@@ -989,6 +989,18 @@ def test_record_reply_avoids_nested_connections(db):
         db._get_connection = orig_get_conn
 
 
+def test_normalize_utc_iso_raises_value_error_on_invalid_timestamp():
+    """_normalize_utc_iso raises ValueError on unparsable string or invalid type."""
+    from backend.app.database import _normalize_utc_iso
+    assert _normalize_utc_iso(None) is None
+
+    with pytest.raises(ValueError, match="Invalid timestamp format"):
+        _normalize_utc_iso("not-a-timestamp")
+
+    with pytest.raises(ValueError, match="Invalid timestamp format"):
+        _normalize_utc_iso("2026-99-99T99:99:99Z")
+
+
 @pytest.mark.asyncio
 async def test_decide_request_preserves_user_schedule_when_reset_is_earlier(rel_app_and_db):
     """Approval does not advance user scheduled_at if recipient reset is earlier."""

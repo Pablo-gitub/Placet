@@ -114,12 +114,12 @@ def _normalize_utc_iso(val: Union[str, datetime, None]) -> Optional[str]:
     if isinstance(val, str):
         try:
             dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
-        except Exception:
-            return val
+        except Exception as e:
+            raise ValueError(f"Invalid timestamp format: {val}") from e
     elif isinstance(val, datetime):
         dt = val
     else:
-        return None
+        raise ValueError(f"Invalid timestamp format: {val}")
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     else:
