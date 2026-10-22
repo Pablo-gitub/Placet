@@ -4,3 +4,10 @@ export function isUndelivered(req) {
     && (req.status === "PENDING" || (req.status === "APPROVED" && (req.delivery || "waiting") === "waiting"));
 }
 
+
+/** The first line of the message, for the compact row. */
+export function previewOf(req) {
+  const line = (req.edited_prompt || req.prompt || "").split("\n").map((l) => l.trim()).find(Boolean) || "";
+  return line.replace(/^[#>*\-\s]+/, "");
+}
+

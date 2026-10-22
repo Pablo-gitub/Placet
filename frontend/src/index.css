@@ -2234,3 +2234,7 @@ body.chat-open { overflow: hidden; }
 .message-row-body { padding: 0 0 0.75rem; overflow-wrap: anywhere; }
 .message-actions { margin-top: 0.6rem; }
 .error-text { color: var(--danger); }
+.history-row { padding: 0 1rem; }
+.history-row > summary { border-top: 0; }
+.message-preview::before { content: attr(data-preview); }
+.message-preview { flex: 1 1 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 0.85rem; }
