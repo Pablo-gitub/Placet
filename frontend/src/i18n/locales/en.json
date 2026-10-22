@@ -31,7 +31,6 @@
   "mcp": {
     "warning": "Placet MCP not detected",
     "hintMissing": "Not found in the configurations Placet checks. Check the client's MCP configuration and its available tools.",
-    "hintSuspect": "No Placet tool call was seen in this session. Check the client's available tools.",
     "guide": "Installation guide"
   },
   "home": {
