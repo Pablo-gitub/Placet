@@ -1,0 +1,1085 @@
+"""
+Tests for scheduled messages storage and inbox delivery filtering (Part 1, RF-65).
+"""
+import os
+import sqlite3
+import tempfile
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
+from backend.app.database import Database
+from backend.app.models import Priority, QuestionType, RequestCreate, RequestModel, RequestStatus, SessionModel
+
+
+@pytest.fixture
+def db(tmp_path):
+    database = Database(str(tmp_path / "placet.db"))
+    database.init_db()
+    return database
+
+
+def _create_idle_session(db: Database, agent_id: str = "gemini", provider: str = "antigravity", session_id: str = "sess-1") -> SessionModel:
+    now = datetime.now(timezone.utc).isoformat()
+    with db._get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO sessions (
+                id, agent_id, provider, entrypoint, cwd, title,
+                tmux_session, state, turn_request_id, started_at, last_seen_at
+            ) VALUES (?, ?, ?, 'cli', '/test', 'test session', 'agent-gemini', 'idle', NULL, ?, ?)
+            """,
+            (session_id, agent_id, provider, now, now),
+        )
+    return db.get_session(session_id)
+
+
+def test_migration_adds_scheduled_at_to_requests(tmp_path):
+    """An older database missing scheduled_at column gets migrated upon init_db."""
+    db_path = str(tmp_path / "legacy.db")
+    conn = sqlite3.connect(db_path)
+    # Create bare minimal older requests table without scheduled_at
+    conn.execute("""
+        CREATE TABLE requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sender_id TEXT NOT NULL,
+            recipient_id TEXT NOT NULL,
+            question_type TEXT NOT NULL,
+            prompt TEXT NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+    """)
+    conn.commit()
+    conn.close()
+
+    db = Database(db_path)
+    db.init_db()
+
+    with db._get_connection() as c:
+        cols = [r["name"] for r in c.execute("PRAGMA table_info(requests);").fetchall()]
+    assert "scheduled_at" in cols
+
+
+def test_request_model_and_create_scheduled_at(db):
+    """RequestCreate stores scheduled_at and RequestModel exposes it."""
+    scheduled_time = datetime.now(timezone.utc) + timedelta(hours=2)
+    req = db.create_request(
+        RequestCreate(
+            sender_id="human",
+            recipient_id="gemini",
+            question_type=QuestionType.MESSAGE,
+            prompt="Hello future message",
+            scheduled_at=scheduled_time,
+        )
+    )
+    assert req.scheduled_at is not None
+    # Truncate to seconds comparison due to ISO string normalization
+    assert req.scheduled_at.year == scheduled_time.year
+    assert req.scheduled_at.hour == scheduled_time.hour
+    assert req.scheduled_at.minute == scheduled_time.minute
+
+    fetched = db.get_request(req.id)
+    assert fetched is not None
+    assert fetched.scheduled_at is not None
+    assert fetched.scheduled_at.isoformat() == req.scheduled_at.isoformat()
+
+
+def test_take_inbox_message_skips_future_scheduled_at(db):
+    """An approved message scheduled in the future is never handed out."""
+    session = _create_idle_session(db, agent_id="gemini", session_id="sess-idle")
+    future_time = datetime.now(timezone.utc) + timedelta(hours=1)
+
+    req = db.create_request(
+        RequestCreate(
+            sender_id="human",
+            recipient_id="gemini",
+            question_type=QuestionType.MESSAGE,
+            prompt="Wait for future",
+            scheduled_at=future_time,
+        )
+    )
+    # Approve the request so it is eligible for injection
+    db.update_request_decision(req.id, RequestStatus.APPROVED, actor="human")
+
+    # Future scheduled message must NOT be available in inbox
+    assert db.inbox_has_message(session) is False
+    assert db.take_inbox_message(session) is None
+    mail_sessions = db.bridge_sessions_with_mail()
+    assert all(s.id != session.id for s in mail_sessions)
+
+
+def test_take_inbox_message_delivers_when_scheduled_at_is_past_or_current(db):
+    """An approved message scheduled in the past or current time is handed out."""
+    session = _create_idle_session(db, agent_id="gemini", session_id="sess-past")
+    past_time = datetime.now(timezone.utc) - timedelta(minutes=5)
+
+    req = db.create_request(
+        RequestCreate(
+            sender_id="human",
+            recipient_id="gemini",
+            question_type=QuestionType.MESSAGE,
+            prompt="Execute now",
+            scheduled_at=past_time,
+        )
+    )
+    db.update_request_decision(req.id, RequestStatus.APPROVED, actor="human")
+
+    assert db.inbox_has_message(session) is True
+    mail_sessions = db.bridge_sessions_with_mail()
+    assert any(s.id == session.id for s in mail_sessions)
+
+    result = db.take_inbox_message(session)
+    assert result is not None
+    kind, delivered_req = result
+    assert kind == "injection"
+    assert delivered_req.id == req.id
+    assert delivered_req.status == RequestStatus.DELIVERING
+
+
+def test_take_inbox_message_delivers_when_scheduled_at_is_none(db):
+    """A standard message with scheduled_at=None continues to be handed out normally."""
+    session = _create_idle_session(db, agent_id="gemini", session_id="sess-none")
+
+    req = db.create_request(
+        RequestCreate(
+            sender_id="human",
+            recipient_id="gemini",
+            question_type=QuestionType.MESSAGE,
+            prompt="Immediate message",
+            scheduled_at=None,
+        )
+    )
+    db.update_request_decision(req.id, RequestStatus.APPROVED, actor="human")
+
+    assert db.inbox_has_message(session) is True
+    result = db.take_inbox_message(session)
+    assert result is not None
+    kind, delivered_req = result
+    assert kind == "injection"
+    assert delivered_req.id == req.id
+
+
+# --- Part 2: API and Composer scheduling tests ---
+
+from backend.app.config import AgentSpec, PlacetConfig
+from backend.app.main import create_app
+from tests.helpers import agent_client, human_client
+
+CONFIG = PlacetConfig(agents={
+    "claude": AgentSpec(tmux_session="agent-claude", token="tok-claude", allowed_targets=["human"]),
+    "gemini": AgentSpec(tmux_session="agent-gemini", token="tok-gemini", allowed_targets=["human"]),
+})
+
+
+@pytest.fixture
+def app_and_db(tmp_path):
+    database = Database(str(tmp_path / "placet.db"))
+    database.init_db()
+    app = create_app(db=database, config=CONFIG, bridge_token="tok-bridge")
+    return app, database
+
+
+@pytest.mark.asyncio
+async def test_schedule_api_human_only(app_and_db):
+    app, db = app_and_db
+    req = db.create_request(
+        RequestCreate(sender_id="human", recipient_id="gemini", prompt="Test")
+    )
+    future = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+
+    # Agent cannot schedule requests (human only)
+    async with agent_client(app, "tok-gemini") as client:
+        resp = await client.post(f"/api/requests/{req.id}/schedule", json={"scheduled_at": future})
+        assert resp.status_code == 403
+
+    # Human can schedule
+    async with human_client(app) as human:
+        resp = await human.post(f"/api/requests/{req.id}/schedule", json={"scheduled_at": future})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["scheduled_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_schedule_api_only_while_not_yet_delivered(app_and_db):
+    app, db = app_and_db
+    future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+
+    # 1. PENDING request
+    req_pending = db.create_request(RequestCreate(sender_id="human", recipient_id="gemini", prompt="Pending"))
+    async with human_client(app) as human:
+        resp = await human.post(f"/api/requests/{req_pending.id}/schedule", json={"scheduled_at": future})
+        assert resp.status_code == 200
+
+    # 2. APPROVED with delivery waiting
+    req_approved = db.create_request(RequestCreate(sender_id="human", recipient_id="gemini", prompt="Approved"))
+    db.update_request_decision(req_approved.id, RequestStatus.APPROVED, actor="human")
+    async with human_client(app) as human:
+        resp = await human.post(f"/api/requests/{req_approved.id}/schedule", json={"scheduled_at": future})
+        assert resp.status_code == 200
+
+    # 3. DELIVERING (delivery in progress / already delivered) -> 409
+    session = _create_idle_session(db, agent_id="gemini", session_id="sess-deliv")
+    req_delivering = db.create_request(RequestCreate(sender_id="human", recipient_id="gemini", prompt="Delivering"))
+    db.update_request_decision(req_delivering.id, RequestStatus.APPROVED, actor="human")
+    taken = db.take_inbox_message(session)
+    assert taken is not None
+    async with human_client(app) as human:
+        resp = await human.post(f"/api/requests/{req_delivering.id}/schedule", json={"scheduled_at": future})
+        assert resp.status_code == 409
+
+    # 4. COMPLETED -> 409
+    req_completed = db.create_request(RequestCreate(sender_id="human", recipient_id="gemini", prompt="Completed"))
+    db.update_request_decision(req_completed.id, RequestStatus.REJECTED, actor="human")
+    async with human_client(app) as human:
+        resp = await human.post(f"/api/requests/{req_completed.id}/schedule", json={"scheduled_at": future})
+        assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_schedule_api_rejects_past_and_too_far(app_and_db):
+    app, db = app_and_db
+    req = db.create_request(RequestCreate(sender_id="human", recipient_id="gemini", prompt="Timing"))
+
+    async with human_client(app) as human:
+        # > 1 min in the past -> 422
+        past_2m = (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()
+        resp = await human.post(f"/api/requests/{req.id}/schedule", json={"scheduled_at": past_2m})
+        assert resp.status_code == 422
+
+        # <= 1 min in the past -> allowed
+        past_20s = (datetime.now(timezone.utc) - timedelta(seconds=20)).isoformat()
+        resp = await human.post(f"/api/requests/{req.id}/schedule", json={"scheduled_at": past_20s})
+        assert resp.status_code == 200
+
+        # > 30 days ahead -> 422
+        far_future = (datetime.now(timezone.utc) + timedelta(days=31)).isoformat()
+        resp = await human.post(f"/api/requests/{req.id}/schedule", json={"scheduled_at": far_future})
+        assert resp.status_code == 422
+
+        # 20 days ahead -> allowed
+        ok_future = (datetime.now(timezone.utc) + timedelta(days=20)).isoformat()
+        resp = await human.post(f"/api/requests/{req.id}/schedule", json={"scheduled_at": ok_future})
+        assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_schedule_api_clear_schedule_and_events(app_and_db):
+    app, db = app_and_db
+    req = db.create_request(RequestCreate(sender_id="human", recipient_id="gemini", prompt="Clear me"))
+    future = (datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
+
+    async with human_client(app) as human:
+        # Schedule it
+        resp = await human.post(f"/api/requests/{req.id}/schedule", json={"scheduled_at": future})
+        assert resp.status_code == 200
+        events = db.list_events(req.id)
+        assert any(e.event == "scheduled" for e in events)
+
+        # Clear it
+        resp = await human.post(f"/api/requests/{req.id}/schedule", json={"scheduled_at": None})
+        assert resp.status_code == 200
+        assert resp.json()["scheduled_at"] is None
+        events = db.list_events(req.id)
+        assert any(e.event == "schedule_cleared" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_write_to_session_with_scheduled_at(app_and_db):
+    app, db = app_and_db
+    session = _create_idle_session(db, agent_id="gemini", session_id="sess-write")
+    future = (datetime.now(timezone.utc) + timedelta(hours=5)).isoformat()
+
+    async with human_client(app) as human:
+        # 1. Invalid time in past -> 422
+        past = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        resp = await human.post(
+            f"/api/sessions/{session.id}/messages",
+            json={"text": "Hello past", "scheduled_at": past},
+        )
+        assert resp.status_code == 422
+
+        # 2. Invalid time > 30 days -> 422
+        too_far = (datetime.now(timezone.utc) + timedelta(days=32)).isoformat()
+        resp = await human.post(
+            f"/api/sessions/{session.id}/messages",
+            json={"text": "Hello far", "scheduled_at": too_far},
+        )
+        assert resp.status_code == 422
+
+        # 3. Valid future time -> 201
+        resp = await human.post(
+            f"/api/sessions/{session.id}/messages",
+            json={"text": "Hello future", "scheduled_at": future},
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["scheduled_at"] is not None
+        req_id = data["id"]
+        events = db.list_events(req_id)
+        assert any(e.event == "scheduled" for e in events)
+
+        # Verify it is not handed out yet because it is in the future
+        assert db.inbox_has_message(session) is False
+
+
+# --- Part 4: Deliver at reset (RF-66) tests ---
+
+from backend.app.models import ProviderUsage
+from tests.test_relations import two_nodes, post, event
+
+
+_DEFAULT_RESET = object()
+
+
+def set_provider_usage(db: Database, provider: str, five: float = None, seven: float = None, resets_at = _DEFAULT_RESET, observed = None, group = None):
+    soon = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat() if resets_at is _DEFAULT_RESET else resets_at
+    buckets = []
+    if five is not None:
+        buckets.append({"id": "5h", "group": group, "window": "5h", "used_percent": five, "resets_at": soon})
+    if seven is not None:
+        buckets.append({"id": "7d", "group": group, "window": "7d", "used_percent": seven, "resets_at": soon})
+    row = ProviderUsage(provider=provider, observed_at=observed or datetime.now(timezone.utc), buckets=buckets)
+    db.set_usage(provider, row.model_dump_json())
+
+
+RELATION_CONFIG = PlacetConfig(agents={
+    "claude": AgentSpec(tmux_session="agent-claude", token="tok-claude", allowed_targets=["human", "codex"]),
+    "codex": AgentSpec(tmux_session="agent-codex", token="tok-codex", allowed_targets=["human", "claude"]),
+})
+
+
+@pytest.fixture
+def rel_app_and_db(tmp_path):
+    database = Database(str(tmp_path / "placet.db"))
+    database.init_db()
+    app = create_app(db=database, config=RELATION_CONFIG, bridge_token="tok-bridge")
+    return app, database
+
+
+@pytest.mark.asyncio
+async def test_deliver_at_reset_settings_api(rel_app_and_db):
+    app, db = rel_app_and_db
+    # Default is false
+    async with human_client(app) as human:
+        resp = await human.get("/api/settings/deliver-at-reset")
+        assert resp.status_code == 200
+        assert resp.json() == {"enabled": False}
+
+        # Toggle to true
+        resp = await human.put("/api/settings/deliver-at-reset", json={"enabled": True})
+        assert resp.status_code == 200
+        assert resp.json() == {"enabled": True}
+
+        # Verify persisted
+        assert db.get_setting("deliver_at_reset") == "true"
+        assert db.get_setting("deliver_at_reset_enabled") is None
+
+        # Toggle back to false
+        resp = await human.put("/api/settings/deliver-at-reset", json={"enabled": False})
+        assert resp.status_code == 200
+        assert resp.json() == {"enabled": False}
+        assert db.get_setting("deliver_at_reset") == "false"
+        assert db.get_setting("deliver_at_reset_enabled") is None
+
+    # Agent cannot access
+    async with agent_client(app, "tok-claude") as client:
+        assert (await client.get("/api/settings/deliver-at-reset")).status_code == 403
+        assert (await client.put("/api/settings/deliver-at-reset", json={"enabled": True})).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_deliver_at_reset_recipient_option_on_schedules_at_reset(rel_app_and_db):
+    app, db = rel_app_and_db
+    a, b = await two_nodes(app, db)
+    review = db.create_relation_type("review", "")
+    db.create_relation(a.id, b.id, review.id, "automatic")
+
+    # Turn on usage guard and deliver at reset
+    async with human_client(app) as human:
+        await human.put("/api/settings/usage-guard", json={"enabled": True, "five_hour": 90, "seven_day": 95})
+        await human.put("/api/settings/deliver-at-reset", json={"enabled": True})
+
+    # Recipient (codex) is over 5h limit (92%), reset in 2 hours
+    reset_target = (datetime.now(timezone.utc) + timedelta(hours=2))
+    set_provider_usage(db, "codex", five=92, resets_at=reset_target.isoformat())
+
+    # Send from claude to codex
+    resp = await post(app, {"target_node": "builder"})
+    out = resp.json()
+    assert resp.status_code == 201
+    assert out["status"] == "APPROVED"
+    assert out["delivery_policy"] == "automatic"
+    assert out["scheduled_at"] is not None
+    # scheduled_at matches recipient's reset time
+    sched = datetime.fromisoformat(out["scheduled_at"].replace("Z", "+00:00"))
+    assert abs((sched - reset_target).total_seconds()) < 5
+
+    # Recipient session does not have message in inbox yet because it is scheduled
+    b_session = db.get_session("cx")
+    assert db.inbox_has_message(b_session) is False
+
+    # User can "send now" (clear schedule via schedule API)
+    async with human_client(app) as human:
+        clear_resp = await human.post(f"/api/requests/{out['id']}/schedule", json={"scheduled_at": None})
+        assert clear_resp.status_code == 200
+        assert clear_resp.json()["scheduled_at"] is None
+
+    # Now it is available in inbox!
+    assert db.inbox_has_message(b_session) is True
+
+
+@pytest.mark.asyncio
+async def test_deliver_at_reset_recipient_option_off_falls_back_to_manual(rel_app_and_db):
+    app, db = rel_app_and_db
+    a, b = await two_nodes(app, db)
+    review = db.create_relation_type("review", "")
+    db.create_relation(a.id, b.id, review.id, "automatic")
+
+    # Turn on usage guard, but keep deliver at reset OFF
+    async with human_client(app) as human:
+        await human.put("/api/settings/usage-guard", json={"enabled": True, "five_hour": 90, "seven_day": 95})
+        await human.put("/api/settings/deliver-at-reset", json={"enabled": False})
+
+    # Recipient (codex) is over 5h limit (92%)
+    reset_target = (datetime.now(timezone.utc) + timedelta(hours=2))
+    set_provider_usage(db, "codex", five=92, resets_at=reset_target.isoformat())
+
+    resp = await post(app, {"target_node": "builder"})
+    out = resp.json()
+    assert resp.status_code == 201
+    assert out["status"] == "PENDING"
+    assert out["delivery_policy"] == "manual"
+    assert out["automation_limit"] == "usage"
+    assert out["scheduled_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_deliver_at_reset_unknown_or_stale_falls_back_to_manual(rel_app_and_db):
+    app, db = rel_app_and_db
+    a, b = await two_nodes(app, db)
+    review = db.create_relation_type("review", "")
+    db.create_relation(a.id, b.id, review.id, "automatic")
+
+    # Turn on usage guard and deliver at reset
+    async with human_client(app) as human:
+        await human.put("/api/settings/usage-guard", json={"enabled": True, "five_hour": 90, "seven_day": 95})
+        await human.put("/api/settings/deliver-at-reset", json={"enabled": True})
+
+    # 1. Unknown reset time (resets_at is None)
+    set_provider_usage(db, "codex", five=95, resets_at=None)
+    resp = await post(app, {"target_node": "builder"})
+    out = resp.json()
+    assert out["status"] == "PENDING"
+    assert out["delivery_policy"] == "manual"
+    assert out["automation_limit"] == "usage"
+
+    # 2. Multiple over-limit windows where one has unknown reset time
+    soon = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+    row = ProviderUsage(
+        provider="codex",
+        observed_at=datetime.now(timezone.utc),
+        buckets=[
+            {"id": "5h", "window": "5h", "used_percent": 95, "resets_at": None},
+            {"id": "7d", "window": "7d", "used_percent": 98, "resets_at": soon},
+        ],
+    )
+    db.set_usage("codex", row.model_dump_json())
+    resp = await post(app, {"target_node": "builder"})
+    out = resp.json()
+    assert out["status"] == "PENDING"
+    assert out["delivery_policy"] == "manual"
+    assert out["automation_limit"] == "usage"
+
+
+@pytest.mark.asyncio
+async def test_deliver_at_reset_outcome_sender_over_limit(rel_app_and_db):
+    app, db = rel_app_and_db
+    a, b = await two_nodes(app, db)
+    review = db.create_relation_type("review", "")
+    # Automatic both directions
+    db.create_relation(a.id, b.id, review.id, "automatic", reply_approval="automatic")
+
+    # Turn on usage guard and deliver at reset
+    async with human_client(app) as human:
+        await human.put("/api/settings/usage-guard", json={"enabled": True, "five_hour": 90, "seven_day": 95})
+        await human.put("/api/settings/deliver-at-reset", json={"enabled": True})
+
+    # Claude (sender) is over limit (96%), reset in 3 hours; Codex (recipient) is fine
+    sender_reset = (datetime.now(timezone.utc) + timedelta(hours=3))
+    set_provider_usage(db, "claude-code", five=96, resets_at=sender_reset.isoformat())
+
+    # Send prompt to Codex: prompt itself is NOT held because recipient is not over limit
+    resp = await post(app, {"target_node": "builder"})
+    req_data = resp.json()
+    assert req_data["delivery_policy"] == "automatic"
+    req_id = req_data["id"]
+
+    # Prompt delivered to Codex
+    codex_session = db.get_session("cx")
+    taken = db.take_inbox_message(codex_session)
+    assert taken is not None and taken[1].id == req_id
+
+    # Codex replies
+    async with agent_client(app, "tok-codex") as codex_client:
+        reply_resp = await codex_client.post(f"/api/requests/{req_id}/reply", json={"content": "Done!"})
+        assert reply_resp.status_code == 200
+
+    # Because sender (claude-code) is over limit and deliver_at_reset is ON:
+    # Outcome is scheduled at sender's reset time!
+    completed_req = db.get_request(req_id)
+    assert completed_req.status == RequestStatus.COMPLETED
+    assert completed_req.scheduled_at is not None
+    sched = completed_req.scheduled_at
+    assert abs((sched - sender_reset).total_seconds()) < 5
+
+    # Sender session (cl) is idle now
+    await event(app, "claude", "cl", {"event": "stop", "provider": "claude-code"})
+    cl_session = db.get_session("cl")
+
+    # Outcome is NOT handed out to sender yet because it is scheduled
+    assert db.inbox_has_message(cl_session) is False
+    assert db.take_inbox_message(cl_session) is None
+
+    # User can "send now" (clear schedule on outcome)
+    async with human_client(app) as human:
+        clear_resp = await human.post(f"/api/requests/{req_id}/schedule", json={"scheduled_at": None})
+        assert clear_resp.status_code == 200
+
+    # Now outcome is handed out to sender!
+    assert db.inbox_has_message(cl_session) is True
+    outcome_result = db.take_inbox_message(cl_session)
+    assert outcome_result is not None
+    kind, out_req = outcome_result
+    assert kind == "outcome"
+    assert out_req.id == req_id
+
+
+@pytest.mark.asyncio
+async def test_write_to_session_deliver_at_reset(rel_app_and_db):
+    app, db = rel_app_and_db
+    session = _create_idle_session(db, agent_id="codex", provider="codex", session_id="sess-cx")
+
+    # Usage guard ON
+    async with human_client(app) as human:
+        await human.put("/api/settings/usage-guard", json={"enabled": True, "five_hour": 90, "seven_day": 95})
+
+    # Provider over limit: codex 100% account limit
+    soon = (datetime.now(timezone.utc) + timedelta(hours=1))
+    set_provider_usage(db, "codex", five=100, resets_at=soon.isoformat())
+
+    # 1. With deliver_at_reset OFF -> stays PENDING (manual approval)
+    async with human_client(app) as human:
+        await human.put("/api/settings/deliver-at-reset", json={"enabled": False})
+        resp = await human.post(f"/api/sessions/{session.id}/messages", json={"text": "Message 1"})
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["status"] == "PENDING"
+        assert data["scheduled_at"] is None
+        events = db.list_events(data["id"])
+        assert any(e.event == "automation_limited" for e in events)
+
+    # 2. With deliver_at_reset ON -> gets scheduled at reset time and APPROVED
+    async with human_client(app) as human:
+        await human.put("/api/settings/deliver-at-reset", json={"enabled": True})
+        resp = await human.post(f"/api/sessions/{session.id}/messages", json={"text": "Message 2"})
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["status"] == "APPROVED"
+        assert data["scheduled_at"] is not None
+        sched = datetime.fromisoformat(data["scheduled_at"].replace("Z", "+00:00"))
+        assert abs((sched - soon).total_seconds()) < 5
+
+    # 3. Mode "now" sends at once even if over limit
+    async with human_client(app) as human:
+        resp = await human.post(f"/api/sessions/{session.id}/messages", json={"text": "Message 3", "mode": "now"})
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["status"] == "APPROVED"
+        assert data["scheduled_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_decide_request_deliver_at_reset(rel_app_and_db):
+    """Approval of a manual relation request schedules at reset if recipient is over limit."""
+    app, db = rel_app_and_db
+    a, b = await two_nodes(app, db)
+    review = db.create_relation_type("review", "")
+    # Manual relation
+    db.create_relation(a.id, b.id, review.id, "manual")
+
+    # Usage guard ON, deliver at reset ON
+    async with human_client(app) as human:
+        await human.put("/api/settings/usage-guard", json={"enabled": True, "five_hour": 90, "seven_day": 95})
+        await human.put("/api/settings/deliver-at-reset", json={"enabled": True})
+
+    # Recipient (codex) is over limit (92%), reset in 2 hours
+    soon = datetime.now(timezone.utc) + timedelta(hours=2)
+    set_provider_usage(db, "codex", five=92, resets_at=soon.isoformat())
+
+    # 1. Prompt on manual relation is created as PENDING
+    resp = await post(app, {"target_node": "builder"})
+    data = resp.json()
+    assert data["status"] == "PENDING"
+    assert data["scheduled_at"] is None
+    req_id = data["id"]
+
+    # 2. Human approves request: with deliver_at_reset ON, it gets scheduled at recipient reset!
+    async with human_client(app) as human:
+        dec_resp = await human.post(f"/api/requests/{req_id}/decision", json={"status": "APPROVED"})
+        assert dec_resp.status_code == 200
+        decided = dec_resp.json()
+        assert decided["status"] == "APPROVED"
+        assert decided["scheduled_at"] is not None
+        sched = datetime.fromisoformat(decided["scheduled_at"].replace("Z", "+00:00"))
+        assert abs((sched - soon).total_seconds()) < 5
+
+    # 3. With deliver_at_reset OFF: approval leaves scheduled_at as None (send now, not put back in PENDING)
+    async with human_client(app) as human:
+        await human.put("/api/settings/deliver-at-reset", json={"enabled": False})
+        resp2 = await post(app, {"target_node": "builder"})
+        req2_id = resp2.json()["id"]
+        dec_resp2 = await human.post(f"/api/requests/{req2_id}/decision", json={"status": "APPROVED"})
+        assert dec_resp2.status_code == 200
+        decided2 = dec_resp2.json()
+        assert decided2["status"] == "APPROVED"
+        assert decided2["scheduled_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_decide_request_deliver_at_reset_gemini_fallback(rel_app_and_db):
+    """When recipient_id is 'gemini' and no session exists, provider maps to 'antigravity'."""
+    app, db = rel_app_and_db
+    async with human_client(app) as human:
+        await human.put("/api/settings/usage-guard", json={"enabled": True, "five_hour": 90, "seven_day": 95})
+        await human.put("/api/settings/deliver-at-reset", json={"enabled": True})
+
+    soon = datetime.now(timezone.utc) + timedelta(hours=2)
+    set_provider_usage(db, "antigravity", five=92, resets_at=soon.isoformat())
+
+    req = db.create_request(RequestCreate(
+        sender_id="claude",
+        recipient_id="gemini",
+        prompt="Check something",
+        question_type=QuestionType.PROMPT_REVIEW,
+    ))
+    assert req.status == RequestStatus.PENDING
+
+    async with human_client(app) as human:
+        resp = await human.post(f"/api/requests/{req.id}/decision", json={"status": "APPROVED"})
+        assert resp.status_code == 200
+        decided = resp.json()
+        assert decided["status"] == "APPROVED"
+        assert decided["scheduled_at"] is not None
+        sched = datetime.fromisoformat(decided["scheduled_at"].replace("Z", "+00:00"))
+        assert abs((sched - soon).total_seconds()) < 5
+
+
+@pytest.mark.asyncio
+async def test_agent_cannot_create_scheduled_request(rel_app_and_db):
+    """Agents cannot create scheduled requests via API (422 schedule.not_allowed)."""
+    app, db = rel_app_and_db
+    soon = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    async with agent_client(app, "tok-claude") as agent:
+        resp = await agent.post("/api/requests", json={
+            "recipient_id": "codex",
+            "question_type": "prompt_review",
+            "prompt": "Test agent scheduled",
+            "scheduled_at": soon,
+        })
+        assert resp.status_code == 422
+        err = resp.json()
+        assert err["code"] == "schedule.not_allowed"
+
+    # Agent without scheduled_at succeeds
+    async with agent_client(app, "tok-claude") as agent:
+        ok_resp = await agent.post("/api/requests", json={
+            "recipient_id": "codex",
+            "question_type": "prompt_review",
+            "prompt": "Test agent unscheduled",
+        })
+        assert ok_resp.status_code == 201
+
+
+def test_claim_injection_rejects_future_scheduled_at(db):
+    """claim_injection must not claim requests scheduled in the future."""
+    req = db.create_request(RequestCreate(
+        sender_id="claude", recipient_id="gemini", prompt="Future injection",
+        scheduled_at=datetime.now(timezone.utc) + timedelta(hours=2),
+    ))
+    db.update_request_decision(req.id, RequestStatus.APPROVED)
+    assert db.claim_injection(req.id) is None
+    # Still APPROVED, not DELIVERING
+    assert db.get_request(req.id).status == RequestStatus.APPROVED
+
+
+def test_schedule_after_work_fetch_prevents_claim(db):
+    """Scheduling between bridge fetch and claim prevents claim_injection."""
+    req = db.create_request(RequestCreate(sender_id="claude", recipient_id="gemini", prompt="Race test"))
+    db.update_request_decision(req.id, RequestStatus.APPROVED)
+    ready = db.injections_ready()
+    assert any(r.id == req.id for r in ready)
+    # Bridge fetched it, but user schedules it before claim
+    future = datetime.now(timezone.utc) + timedelta(hours=3)
+    db.schedule_request(req.id, future, actor="human")
+    assert db.claim_injection(req.id) is None
+    assert db.get_request(req.id).status == RequestStatus.APPROVED
+
+
+def test_steer_candidates_and_claim_reject_future_scheduled_at(db):
+    """steer_candidates and claim_steer skip future scheduled requests."""
+    session = _create_idle_session(db, agent_id="gemini", provider="antigravity", session_id="sess-steer-fut")
+    with db._get_connection() as c:
+        c.execute("UPDATE sessions SET state = 'busy' WHERE id = 'sess-steer-fut'")
+    future = datetime.now(timezone.utc) + timedelta(hours=1)
+    req = db.create_request(RequestCreate(
+        sender_id="human", recipient_id="gemini", recipient_session_id=session.id,
+        prompt="Steer prompt", scheduled_at=future,
+    ))
+    db.update_request_decision(req.id, RequestStatus.APPROVED, delivery_mode="now")
+
+    assert not any(r.id == req.id for r, _ in db.steer_candidates())
+    assert db.claim_steer(req.id, session.id, "bridge") is None
+
+
+@pytest.mark.asyncio
+async def test_write_to_session_rejects_mode_now_with_scheduled_at(rel_app_and_db):
+    """write_to_session rejects mode='now' with scheduled_at with 422 schedule.steer_conflict."""
+    app, db = rel_app_and_db
+    session = _create_idle_session(db, agent_id="claude", provider="claude-code", session_id="sess-steer-rej")
+    future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    async with human_client(app) as human:
+        resp = await human.post(
+            f"/api/sessions/{session.id}/messages",
+            json={"text": "Steer me", "mode": "now", "scheduled_at": future},
+        )
+        assert resp.status_code == 422
+        assert resp.json()["code"] == "schedule.steer_conflict"
+
+
+@pytest.mark.asyncio
+async def test_decide_request_rejects_mode_now_on_already_scheduled_request(rel_app_and_db):
+    """decide_request rejects mode='now' on an already scheduled request with 422 schedule.steer_conflict."""
+    app, db = rel_app_and_db
+    session = _create_idle_session(db, agent_id="claude", provider="claude-code", session_id="sess-dec-steer")
+    future = datetime.now(timezone.utc) + timedelta(hours=1)
+    req = db.create_request(RequestCreate(
+        sender_id="human", recipient_id="claude", prompt="Scheduled steer",
+        recipient_session_id=session.id, scheduled_at=future
+    ))
+    async with human_client(app) as human:
+        resp = await human.post(
+            f"/api/requests/{req.id}/decision",
+            json={"status": "APPROVED", "delivery_mode": "now", "recipient_session_id": session.id},
+        )
+        assert resp.status_code == 422
+        assert resp.json()["code"] == "schedule.steer_conflict"
+
+
+def test_future_tmux_return_ignored_by_results_and_mark_delivered(db):
+    """list_undelivered_results and mark_delivered ignore future scheduled outcomes."""
+    req = db.create_request(RequestCreate(sender_id="claude", recipient_id="codex", prompt="Return test"))
+    db.update_request_decision(req.id, RequestStatus.APPROVED, allow_auto_return=True)
+    db.claim_injection(req.id)
+    future = datetime.now(timezone.utc) + timedelta(hours=4)
+    db.record_reply(req.id, "codex", "Done")
+    # Schedule outcome at future
+    db.schedule_request(req.id, future, actor="human")
+
+    now = datetime.now(timezone.utc)
+    results = db.list_undelivered_results(settled_before=now + timedelta(minutes=1), settled_after=now - timedelta(hours=6))
+    assert not any(r.id == req.id for r in results)
+    assert db.mark_delivered(req.id) is False
+    assert db.get_request(req.id).delivered_at is None
+
+
+def test_schedule_request_fails_after_claim(db):
+    """schedule_request returns None once the request has been claimed."""
+    req = db.create_request(RequestCreate(sender_id="claude", recipient_id="gemini", prompt="Claim test"))
+    db.update_request_decision(req.id, RequestStatus.APPROVED)
+    claimed = db.claim_injection(req.id)
+    assert claimed is not None
+    # Now in DELIVERING state
+    future = datetime.now(timezone.utc) + timedelta(hours=1)
+    assert db.schedule_request(req.id, future, actor="human") is None
+
+
+def test_create_request_expires_at_based_on_scheduled_at(db):
+    """create_request sets expires_at = (scheduled_at or now) + window."""
+    now = datetime.now(timezone.utc)
+    future = now + timedelta(days=3)
+    req = db.create_request(RequestCreate(
+        sender_id="claude", recipient_id="gemini", prompt="Long wait",
+        expires_in_seconds=7200, scheduled_at=future,
+    ))
+    assert req.expires_at >= future + timedelta(seconds=7195)
+    assert req.expires_at <= future + timedelta(seconds=7205)
+
+
+def test_schedule_request_recalculates_expires_at(db):
+    """schedule_request extends expires_at to maintain the original window from scheduled_at."""
+    req = db.create_request(RequestCreate(
+        sender_id="claude", recipient_id="gemini", prompt="Reschedule test",
+        expires_in_seconds=3600,
+    ))
+    original_window = (req.expires_at - req.created_at).total_seconds()
+    assert 3590 <= original_window <= 3610
+
+    future = datetime.now(timezone.utc) + timedelta(days=5)
+    resched = db.schedule_request(req.id, future, actor="human")
+    assert resched is not None
+    assert resched.expires_at >= future + timedelta(seconds=3595)
+    assert resched.expires_at <= future + timedelta(seconds=3605)
+
+
+def test_list_undelivered_results_uses_coalesce_scheduled_at(db):
+    """list_undelivered_results compares age against coalesce(scheduled_at, updated_at)."""
+    req = db.create_request(RequestCreate(sender_id="claude", recipient_id="codex", prompt="Old result"))
+    db.update_request_decision(req.id, RequestStatus.APPROVED, allow_auto_return=True)
+    db.claim_injection(req.id)
+    db.record_reply(req.id, "codex", "Finished long ago")
+
+    # Simulate request updated 2 days ago, but scheduled for delivery 1 minute ago
+    now = datetime.now(timezone.utc)
+    two_days_ago = (now - timedelta(days=2)).isoformat()
+    one_min_ago = (now - timedelta(minutes=1)).isoformat()
+    with db._get_connection() as c:
+        c.execute("UPDATE requests SET updated_at = ?, scheduled_at = ? WHERE id = ?",
+                  (two_days_ago, one_min_ago, req.id))
+
+    # 6 hour window ending at now
+    results = db.list_undelivered_results(
+        settled_before=now,
+        settled_after=now - timedelta(hours=6),
+    )
+    assert any(r.id == req.id for r in results)
+
+
+def test_list_undelivered_results_uses_later_of_scheduled_at_and_updated_at(db):
+    """A request scheduled long ago (7h ago) but completed 1m ago must be returned within the 6h window."""
+    req = db.create_request(RequestCreate(sender_id="claude", recipient_id="codex", prompt="Prompt"))
+    db.update_request_decision(req.id, RequestStatus.APPROVED, allow_auto_return=True)
+    db.claim_injection(req.id)
+    db.record_reply(req.id, "codex", "Completed recently")
+
+    now = datetime.now(timezone.utc)
+    seven_hours_ago = (now - timedelta(hours=7)).isoformat()
+    one_min_ago = (now - timedelta(minutes=1)).isoformat()
+    with db._get_connection() as c:
+        c.execute("UPDATE requests SET scheduled_at = ?, updated_at = ? WHERE id = ?",
+                  (seven_hours_ago, one_min_ago, req.id))
+
+    # 6 hour window ending at now
+    results = db.list_undelivered_results(
+        settled_before=now,
+        settled_after=now - timedelta(hours=6),
+    )
+    assert any(r.id == req.id for r in results)
+
+    # And a request scheduled 30s ago but completed 2s ago must NOT be returned if grace cutoff is 10s ago
+    two_secs_ago = (now - timedelta(seconds=2)).isoformat()
+    thirty_secs_ago = (now - timedelta(seconds=30)).isoformat()
+    with db._get_connection() as c:
+        c.execute("UPDATE requests SET scheduled_at = ?, updated_at = ? WHERE id = ?",
+                  (thirty_secs_ago, two_secs_ago, req.id))
+
+    results_grace = db.list_undelivered_results(
+        settled_before=now - timedelta(seconds=10),
+        settled_after=now - timedelta(hours=6),
+    )
+    assert not any(r.id == req.id for r in results_grace)
+
+
+def test_schedule_request_preserves_original_expiry_window_on_reschedule_cycles(db):
+    """The expiry window must not grow or drift when repeatedly scheduling and clearing."""
+    req = db.create_request(RequestCreate(
+        sender_id="claude", recipient_id="codex", prompt="Prompt", expires_in_seconds=3600
+    ))
+    now = datetime.now(timezone.utc)
+    t1 = now + timedelta(hours=2)
+    s1 = db.schedule_request(req.id, t1, actor="human")
+    assert abs((s1.expires_at - t1).total_seconds() - 3600) < 5
+
+    # Simulate clearing the schedule:
+    # Say the request was scheduled, then cleared, so scheduled_at is NULL,
+    # and some time has elapsed since created_at.
+    with db._get_connection() as c:
+        # created_at was 2 hours ago; expires_at was set when clearing to 1 hour from now
+        two_hours_ago = (now - timedelta(hours=2)).isoformat()
+        one_hour_ahead = (now + timedelta(hours=1)).isoformat()
+        c.execute("UPDATE requests SET scheduled_at = NULL, created_at = ?, expires_at = ? WHERE id = ?",
+                  (two_hours_ago, one_hour_ahead, req.id))
+
+    # Now reschedule again for 5 hours in future:
+    # Under the old code: base_dt = created_at (2 hours ago), exp_dt = 1 hour ahead -> window = 3 hours!
+    t2 = now + timedelta(hours=5)
+    s2 = db.schedule_request(req.id, t2, actor="human")
+    # Must STILL be exactly 3600 seconds from t2, NOT 3 hours (10800s)!
+    assert abs((s2.expires_at - t2).total_seconds() - 3600) < 5
+
+    # Also test update_request_decision with schedule preserves original window
+    req3 = db.create_request(RequestCreate(
+        sender_id="claude", recipient_id="codex", prompt="Prompt 3", expires_in_seconds=3600
+    ))
+    with db._get_connection() as c:
+        two_hours_ago = (now - timedelta(hours=2)).isoformat()
+        one_hour_ahead = (now + timedelta(hours=1)).isoformat()
+        c.execute("UPDATE requests SET created_at = ?, expires_at = ? WHERE id = ?",
+                  (two_hours_ago, one_hour_ahead, req3.id))
+    decided = db.update_request_decision(req3.id, RequestStatus.APPROVED, scheduled_at=t2)
+    assert abs((decided.expires_at - t2).total_seconds() - 3600) < 5
+
+
+def test_open_request_toward_excludes_future_scheduled_approved(db):
+    """open_request_toward returns None when incoming request is APPROVED but scheduled in the future."""
+    req = db.create_request(RequestCreate(
+        sender_id="claude", recipient_id="codex", prompt="Future task",
+        recipient_session_id="s_codex",
+    ))
+    future = datetime.now(timezone.utc) + timedelta(hours=2)
+    db.update_request_decision(req.id, RequestStatus.APPROVED, scheduled_at=future)
+    with db._get_connection() as c:
+        c.execute("UPDATE requests SET sender_session_id = ? WHERE id = ?", ("s_claude", req.id))
+
+    # s_codex checking open request toward claude:
+    # Under current code, this returns req.id (1) because it doesn't check scheduled_at!
+    # Must be None because it is scheduled in the future!
+    assert db.open_request_toward("s_codex", "claude", "s_claude") is None
+
+    # But once scheduled_at is past or None, it returns req.id:
+    past = datetime.now(timezone.utc) - timedelta(minutes=5)
+    with db._get_connection() as c:
+        c.execute("UPDATE requests SET scheduled_at = ? WHERE id = ?", (past.isoformat(), req.id))
+    assert db.open_request_toward("s_codex", "claude", "s_claude") == req.id
+
+
+def test_record_reply_avoids_nested_connections(db):
+    """record_reply must not open nested database connections during its write transaction."""
+    req = db.create_request(RequestCreate(
+        sender_id="claude", recipient_id="codex", prompt="Prompt", sender_session_id="s1"
+    ))
+    db.update_request_decision(req.id, RequestStatus.APPROVED, allow_auto_return=True)
+    db.claim_injection(req.id)
+    with db._get_connection() as c:
+        c.execute("UPDATE requests SET sender_session_id = 's1' WHERE id = ?", (req.id,))
+
+    depth = 0
+    max_depth = 0
+    orig_get_conn = db._get_connection
+
+    from contextlib import contextmanager
+    @contextmanager
+    def tracked_get_conn():
+        nonlocal depth, max_depth
+        depth += 1
+        max_depth = max(max_depth, depth)
+        try:
+            with orig_get_conn() as conn:
+                yield conn
+        finally:
+            depth -= 1
+
+    db._get_connection = tracked_get_conn
+    try:
+        res = db.record_reply(req.id, "codex", "Reply content")
+        assert res is not None
+        assert max_depth <= 1, f"Expected max connection nesting depth <= 1, got {max_depth}"
+    finally:
+        db._get_connection = orig_get_conn
+
+
+def test_normalize_utc_iso_raises_value_error_on_invalid_timestamp():
+    """_normalize_utc_iso raises ValueError on unparsable string or invalid type."""
+    from backend.app.database import _normalize_utc_iso
+    assert _normalize_utc_iso(None) is None
+
+    with pytest.raises(ValueError, match="Invalid timestamp format"):
+        _normalize_utc_iso("not-a-timestamp")
+
+    with pytest.raises(ValueError, match="Invalid timestamp format"):
+        _normalize_utc_iso("2026-99-99T99:99:99Z")
+
+
+@pytest.mark.asyncio
+async def test_decide_request_preserves_user_schedule_when_reset_is_earlier(rel_app_and_db):
+    """Approval does not advance user scheduled_at if recipient reset is earlier."""
+    app, db = rel_app_and_db
+    a, b = await two_nodes(app, db)
+    review = db.create_relation_type("review", "")
+    db.create_relation(a.id, b.id, review.id, "manual")
+
+    async with human_client(app) as human:
+        await human.put("/api/settings/usage-guard", json={"enabled": True, "five_hour": 90, "seven_day": 95})
+        await human.put("/api/settings/deliver-at-reset", json={"enabled": True})
+
+    # Recipient reset in 1 hour
+    soon = datetime.now(timezone.utc) + timedelta(hours=1)
+    set_provider_usage(db, "codex", five=92, resets_at=soon.isoformat())
+
+    # User scheduled it for 3 days in the future
+    user_sched = datetime.now(timezone.utc) + timedelta(days=3)
+    resp = await post(app, {"target_node": "builder"})
+    req_id = resp.json()["id"]
+
+    async with human_client(app) as human:
+        sched_resp = await human.post(f"/api/requests/{req_id}/schedule", json={"scheduled_at": user_sched.isoformat()})
+        assert sched_resp.status_code == 200
+        dec_resp = await human.post(f"/api/requests/{req_id}/decision", json={"status": "APPROVED"})
+        assert dec_resp.status_code == 200
+        decided = dec_resp.json()
+        assert decided["status"] == "APPROVED"
+        assert decided["scheduled_at"] is not None
+        sched = datetime.fromisoformat(decided["scheduled_at"].replace("Z", "+00:00"))
+        # Preserved user schedule (3 days), NOT reset (1 hour)
+        assert abs((sched - user_sched).total_seconds()) < 5
+
+
+@pytest.mark.asyncio
+async def test_decide_request_postpones_to_reset_when_user_schedule_is_earlier(rel_app_and_db):
+    """Approval postpones delivery to recipient reset if user schedule is earlier."""
+    app, db = rel_app_and_db
+    a, b = await two_nodes(app, db)
+    review = db.create_relation_type("review", "")
+    db.create_relation(a.id, b.id, review.id, "manual")
+
+    async with human_client(app) as human:
+        await human.put("/api/settings/usage-guard", json={"enabled": True, "five_hour": 90, "seven_day": 95})
+        await human.put("/api/settings/deliver-at-reset", json={"enabled": True})
+
+    # Recipient reset in 3 days
+    far = datetime.now(timezone.utc) + timedelta(days=3)
+    set_provider_usage(db, "codex", five=92, resets_at=far.isoformat())
+
+    # User scheduled for 1 hour
+    user_sched = datetime.now(timezone.utc) + timedelta(hours=1)
+    resp = await post(app, {"target_node": "builder"})
+    req_id = resp.json()["id"]
+
+    async with human_client(app) as human:
+        sched_resp = await human.post(f"/api/requests/{req_id}/schedule", json={"scheduled_at": user_sched.isoformat()})
+        assert sched_resp.status_code == 200
+        dec_resp = await human.post(f"/api/requests/{req_id}/decision", json={"status": "APPROVED"})
+        assert dec_resp.status_code == 200
+        decided = dec_resp.json()
+        assert decided["status"] == "APPROVED"
+        assert decided["scheduled_at"] is not None
+        sched = datetime.fromisoformat(decided["scheduled_at"].replace("Z", "+00:00"))
+        # Postponed to reset time (3 days)
+        assert abs((sched - far).total_seconds()) < 5
+
+
+def test_update_request_decision_atomic_scheduled_at(db):
+    """update_request_decision sets APPROVED and scheduled_at atomically."""
+    future = datetime.now(timezone.utc) + timedelta(hours=2)
+    req = db.create_request(RequestCreate(sender_id="claude", recipient_id="gemini", prompt="Atomic test"))
+    updated = db.update_request_decision(req.id, RequestStatus.APPROVED, scheduled_at=future)
+    assert updated is not None
+    assert updated.status == RequestStatus.APPROVED
+    assert updated.scheduled_at is not None
+    assert db.claim_injection(req.id) is None
+
+
+
+
+

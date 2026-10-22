@@ -26,7 +26,7 @@ export const holdsQueueUnseen = (req, now = Date.now()) =>
  */
 export const queueStuck = (requests, sessionId, now = Date.now()) =>
   requests.some((r) => r.recipient_session_id === sessionId && holdsQueueUnseen(r, now)) &&
-  requests.some((r) => r.recipient_session_id === sessionId && r.status === "APPROVED");
+  requests.some((r) => r.recipient_session_id === sessionId && r.status === "APPROVED" && (!r.scheduled_at || Date.parse(r.scheduled_at) <= now));
 
 /**
  * RF-27: "missing" (the provider's configuration has no Placet MCP server) or

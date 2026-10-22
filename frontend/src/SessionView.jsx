@@ -4,7 +4,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Attachments from "./Attachments";
 import Composer from "./Composer";
 import { limitReset, resetClock } from "./usage";
-import { formatNumber } from "./i18n/formatters";
+import { formatDateTime, formatNumber } from "./i18n/formatters";
 import { splitPrompt } from "./draft";
 import {
   ArrowLeft,
@@ -197,11 +197,13 @@ function ModelLine({ meta }) {
 // Delivered, but its turn not seen yet: still shown as the user's message.
 const notStarted = (req) => req.status !== "EXECUTING" || req.execution === "unobserved";
 
-function Outgoing({ req, session, limitAt, onDelivery, onEdit }) {
+function Outgoing({ req, session, limitAt, onDelivery, onEdit, onSchedule }) {
   const { t } = useTranslation();
   const uncertain = isUncertain(req);
   const failed = req.status === "DELIVERY_FAILED" || req.status === "EXPIRED";
   const projName = req.project_name || "";
+  // oxlint-disable-next-line react/purity
+  const isScheduled = !!req.scheduled_at && req.status === "APPROVED" && new Date(req.scheduled_at) > new Date();
   return (
     <div
       className={`msg msg-user outgoing${failed ? " failed" : ""}${uncertain ? " uncertain" : ""}`}
@@ -221,17 +223,26 @@ function Outgoing({ req, session, limitAt, onDelivery, onEdit }) {
       <time>
         {uncertain
           ? t("deliveryUi.uncertain")
-          : req.delivery_mode === "now" && ["APPROVED", "DELIVERING"].includes(req.status)
-            ? t(OUTGOING_STATES.NOW)
-            : req.status === "APPROVED" && limitAt
-              ? t("deliveryUi.limited", { provider: providerOf(session).label, time: resetClock(limitAt) })
-            : req.status === "APPROVED" && session?.suspended_at
-              ? session.provider === "claude-code"
-                ? t("deliveryUi.suspendedClaude")
-                : t("deliveryUi.suspendedCodex")
-              : req.status === "EXECUTING" && session?.provider === "codex"
-                ? t("deliveryUi.queuedCodex")
-                : t(OUTGOING_STATES[req.status])}
+          : isScheduled
+            ? t("deliveryUi.scheduledFor", {
+                time: formatDateTime(req.scheduled_at, {
+                  day: "numeric",
+                  month: "short",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                }),
+              })
+            : req.delivery_mode === "now" && ["APPROVED", "DELIVERING"].includes(req.status)
+              ? t(OUTGOING_STATES.NOW)
+              : req.status === "APPROVED" && limitAt
+                ? t("deliveryUi.limited", { provider: providerOf(session).label, time: resetClock(limitAt) })
+              : req.status === "APPROVED" && session?.suspended_at
+                ? session.provider === "claude-code"
+                  ? t("deliveryUi.suspendedClaude")
+                  : t("deliveryUi.suspendedCodex")
+                : req.status === "EXECUTING" && session?.provider === "codex"
+                  ? t("deliveryUi.queuedCodex")
+                  : t(OUTGOING_STATES[req.status])}
       </time>
       {onDelivery && (uncertain || req.status === "APPROVED") && (
         <div className="outgoing-actions">
@@ -240,9 +251,18 @@ function Outgoing({ req, session, limitAt, onDelivery, onEdit }) {
               {t("deliveryUi.retry")}
             </button>
           )}
+          {isScheduled && onSchedule && (
+            <button
+              type="button"
+              data-testid={`send-now-${req.id}`}
+              onClick={() => onSchedule(req.id, null)}
+            >
+              {t("deliveryUi.sendNow")}
+            </button>
+          )}
           {req.status === "APPROVED" && onEdit && (
             <button type="button" data-testid={`edit-${req.id}`} onClick={() => onEdit(req)}>
-              {t("deliveryUi.edit")}
+              {t(isScheduled ? "deliveryUi.modify" : "deliveryUi.edit")}
             </button>
           )}
           <button type="button" data-testid={`cancel-${req.id}`} onClick={() => onDelivery(req.id, "cancel")}>
@@ -300,6 +320,7 @@ export default function SessionView({
   onDecide,
   onSend,
   onDelivery,
+  onSchedule,
   submittingId,
   focusId,
 }) {
@@ -324,7 +345,9 @@ export default function SessionView({
   // Editing withdraws a waiting message and puts it back in the composer.
   const [draft, setDraft] = useState(null);
   const edit = async (req) => {
-    if (await onDelivery(req.id, "cancel")) setDraft({ ...splitPrompt(req.prompt, sessions), nonce: req.id });
+    if (await onDelivery(req.id, "cancel")) {
+      setDraft({ ...splitPrompt(req.prompt, sessions), nonce: req.id, scheduled_at: req.scheduled_at });
+    }
   };
 
   const [activeProjectId, setActiveProjectId] = useState(initialProjectId || null);
@@ -484,7 +507,7 @@ export default function SessionView({
             />
           ))}
         {outgoing.map((req) => (
-          <Outgoing key={req.id} req={req} session={session} limitAt={limitAt} onDelivery={onDelivery} onEdit={onDelivery && edit} />
+          <Outgoing key={req.id} req={req} session={session} limitAt={limitAt} onDelivery={onDelivery} onEdit={onDelivery && edit} onSchedule={onSchedule} />
         ))}
         {questions.map((req) => (
           <RequestCard
@@ -506,10 +529,15 @@ export default function SessionView({
           draftKey={`chat:${sessionId}`}
           sessions={sessions}
           onSelectProject={(pid) => setActiveProjectId(pid)}
-          onSend={async (text, mentions, attachments, mode) => {
+          onSend={async (text, mentions, attachments, mode, scheduledAt) => {
             following.current = true;
             if (activeProjectId) {
-              return onSend(sessionId, text, mentions || [], attachments || [], mode || "queue", activeProjectId);
+              const args = [sessionId, text, mentions || [], attachments || [], mode || "queue", activeProjectId];
+              if (scheduledAt) args.push(scheduledAt);
+              return onSend(...args);
+            }
+            if (scheduledAt) {
+              return onSend(sessionId, text, mentions || [], attachments || [], mode || "queue", null, scheduledAt);
             }
             if (mode === "now") return onSend(sessionId, text, mentions || [], attachments || [], "now");
             return attachments?.length ? onSend(sessionId, text, mentions, attachments)

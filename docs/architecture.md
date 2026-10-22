@@ -36,7 +36,7 @@ Three flows:
 
 - Python 3.11+, FastAPI, SQLite WAL, Pydantic, Uvicorn.
 - **Two listeners in one process** (`serve.py`): TCP `127.0.0.1:8000` for agents/bridge; Unix socket `/run/placet/human.sock` in production for the PWA through Tailscale Serve. If either listener stops, the process stops.
-- Requests/lifecycle, hook-driven session registry, per-session inboxes, routing, SSE (`request_update`, `session_update`, `usage_update`, `automation_update`), notifications and a 30-second expiration/redelivery sweeper. Notifications go through Web Push to the installed PWA (VAPID keys generated on first use and kept in the database; only browser vendors' push services are contacted; payloads carry a short title, never request text) and through ntfy when configured. Notification preferences are managed via human-only `GET/PUT /api/settings/notifications` and stored in `app_settings` under `notification_preferences` (`needs_you`, `problems`, `queue_held`, `turn_end`); preferences currently apply globally to all devices.
+- Requests/lifecycle, hook-driven session registry, per-session inboxes, routing, SSE (`request_update`, `session_update`, `usage_update`, `automation_update`), notifications and a 30-second expiration/redelivery sweeper. Notifications go through Web Push to the installed PWA (VAPID keys generated on first use and kept in the database; only browser vendors' push services are contacted; payloads carry a short title, never request text) and through ntfy when configured. Notification preferences are managed via human-only `GET/PUT /api/settings/notifications` and stored in `app_settings` under `notification_preferences` (`needs_you`, `problems`, `queue_held`, `turn_end`); preferences currently apply globally to all devices. Deliver-at-reset preference is managed via human-only `GET/PUT /api/settings/deliver-at-reset` and stored in `app_settings` under `deliver_at_reset` (`enabled`).
 - Relays bridge-read conversation pages (§5).
 - **Planned:** nodes, projects and relations/types. Provider usage is now reported by the bridge and shown in the PWA.
 
@@ -84,7 +84,7 @@ Sources observed in experiments do not imply all corresponding product controls 
 - **Home** (`Home.jsx`): current questions, then pinned sessions ordered by `activity_at` (turn start/end, not waiter polls), provider/state/question count. **Add / view all** (`AddSessionsDialog.jsx`) handles one provider at a time; checkbox controls `PUT /api/sessions/{id}/pin`, including removal of closed sessions.
 - **Conversation** (`SessionView.jsx`, `useTranscript.js`): pages from `/api/sessions/{id}/transcript`, initial bottom position, older pages on upward scroll with position retention; `session_update` requests new entries through `after`. Consecutive actions collapse into groups. Open session questions appear at the bottom.
 - **History** (`History.jsx`): per-request timeline and three-aspect state.
-- **Composer** (`Composer.jsx`): `POST /api/sessions/{id}/messages`; pending/delivering/failed state remains visible. Mentions, phone uploads and supported Queue/Now selection are implemented.
+- **Composer** (`Composer.jsx`): `POST /api/sessions/{id}/messages`; pending/delivering/failed state remains visible. Mentions, phone uploads, scheduling (`datetime-local` picker stored as UTC ISO) and supported Queue/Now selection are implemented.
 - **Localization:** English/Italian with English fallback and device-local preference; separate shared background-message language. [Full contract](localization.md).
 - **Usage bar:** provider windows, with account-wide exhausted windows holding delivery until reset. **Planned:** project graph/editor. No service worker is installed; [cache behavior](experiments/2026-10-18-session-integration.md#pwa-updates-and-caching).
 
@@ -198,6 +198,20 @@ RF-35: `hooks/steer.py`, `bridge/steer.py`.
 - **Antigravity:** `SendUserCascadeMessage` with `MESSAGE_DELIVERY_STRATEGY_NEXT_INVOCATION`; definite failure returns to queue. Needs live validation on the installed app.
 - **Codex:** not enabled; no verified PostToolUse `additionalContext` support. Consuming without proof would lose the message.
 - At turn end, inserted Now requests complete with an **ambiguous** implicit response because the turn answered multiple messages.
+
+### 3.11 Scheduled messages and deliver at reset
+
+RF-65, RF-66: `scheduled_at` in requests, `POST /api/requests/{id}/schedule`, deliver at reset setting.
+
+- **Scheduled messages (RF-65):** Requests support an optional `scheduled_at` timestamp (canonical UTC ISO). While `scheduled_at` is in the future, the request is not handed out: both prompt injections (`_INJECTIONS_SQL`) and reply outcomes (`_OUTCOMES_SQL`) filter `(scheduled_at IS NULL OR datetime(scheduled_at) <= datetime(?))`.
+- **API and UI:** The composer offers a date-time picker in the user's local timezone, converting to UTC ISO on send. Scheduled messages appear in the session view with "Programmato per <local time>" and action controls: **Invia subito** (`POST /api/requests/{id}/schedule` with `{ "scheduled_at": null }`), **Modifica** (resumes draft in composer and cancels request), and **Annulla** (`POST /api/requests/{id}/delivery/cancel`). Rescheduling via `POST /api/requests/{id}/schedule` is allowed for human supervisors while the message is not yet delivered (PENDING, APPROVED or undelivered COMPLETED outcome), rejects times more than 1 minute in the past or more than 30 days ahead, and logs `scheduled` or `schedule_cleared` events.
+- **Deliver at reset (RF-66):** Configured via human-only `GET/PUT /api/settings/deliver-at-reset` and the Settings toggle "Recapita al refresh". A provider is considered over limit if it is in `limited_providers()` (100% account limit) or in `near_limit_providers(5h, 7d)` under the user's active usage guard thresholds.
+  - **Recipient over limit:** When a message is about to be sent or delivered to an over-limit recipient session:
+    - *Option ON:* If a valid future reset time is known among the over-limit windows, `scheduled_at` is set to the latest `resets_at` and the request is approved/scheduled. The user can still choose "Invia subito" to deliver immediately.
+    - *Option OFF or unknown/stale reset:* The request is not delivered; even on an automatic relation, it falls back to manual approval (status `PENDING`, `delivery_policy: manual`, `automation_limit: usage`), logging `automation_limited`.
+  - **Sender over limit on return:** Evaluated independently when the recipient replies and the sender is over limit:
+    - *Option ON:* The outcome delivery is scheduled at the sender's own reset time (`scheduled_at = latest_resets_at`).
+    - *Option OFF or unknown/stale reset:* Automatic return is disabled (`allow_auto_return = 0`), requiring human approval before the response is forwarded.
 
 ## 4. Request lifecycle
 

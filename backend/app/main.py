@@ -7,7 +7,7 @@ import contextlib
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import List, Literal, Optional, Dict, Set
+from typing import Any, List, Literal, Optional, Dict, Set
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, status, Request, Depends
 from fastapi import Path as FastAPIPath
 from fastapi.middleware.cors import CORSMiddleware
@@ -46,6 +46,7 @@ from backend.app.models import (
     RequestDecision,
     OutcomeDecision,
     SessionMessage,
+    RequestSchedule,
     NodeModel,
     ProjectModel,
     ProjectSummaryModel,
@@ -53,6 +54,7 @@ from backend.app.models import (
     RelationModel,
     RelationTypeModel,
     SessionModel,
+    AGENT_PROVIDERS,
     BRIDGE_PROVIDERS,
     SUSPENDING_PROVIDERS,
     STEER_PROVIDERS,
@@ -133,6 +135,20 @@ class FoldersReport(BaseModel):
 EXCLUDED_DETAIL = "This project is excluded from Placet (.placet-off)."
 
 
+def validate_scheduled_time(dt: Optional[datetime]) -> None:
+    if dt is None:
+        return
+    now = datetime.now(timezone.utc)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    if dt < now - timedelta(minutes=1):
+        raise ProductError(422, "schedule.time_in_past", "Scheduled time cannot be in the past.")
+    if dt > now + timedelta(days=30):
+        raise ProductError(422, "schedule.too_far_ahead", "Scheduled time cannot be more than 30 days in the future.")
+
+
 class BackgroundLanguage(BaseModel):
     language: Literal["en", "it"]
 
@@ -141,11 +157,16 @@ class ClaudeRenewSetting(BaseModel):
     enabled: bool
 
 
+class DeliverAtResetSetting(BaseModel):
+    enabled: bool
+
+
 class UsageGuardSetting(BaseModel):
     """Automatic relations fall back to review near a provider's usage limit."""
     enabled: bool
     five_hour: int = Field(ge=50, le=100)
     seven_day: int = Field(ge=50, le=100)
+    deliver_at_reset: Optional[bool] = None
 
 
 class QueueRelease(BaseModel):
@@ -561,7 +582,10 @@ def create_app(
 
     def reply_is_automatic(relation) -> bool:
         """RFC-16: the relation's own reply policy, held back by the usage guard."""
-        if relation is None or relation_guarded(relation):
+        if relation is None:
+            return False
+        cfg = usage_guard()
+        if not cfg.get("deliver_at_reset", False) and relation_guarded(relation):
             return False
         return relation.reply_approval == "automatic"
 
@@ -718,14 +742,8 @@ def create_app(
         response.headers["Cache-Control"] = "no-store"
         return db.get_notification_preferences()
 
-    def usage_guard() -> Dict[str, object]:
-        def percent(key: str, default: int) -> int:
-            try:
-                return int(db.get_setting(key) or default)
-            except ValueError:
-                return default
-        return {"enabled": db.get_setting("usage_guard_enabled") == "true",
-                "five_hour": percent("usage_guard_5h", 90), "seven_day": percent("usage_guard_7d", 95)}
+    def usage_guard() -> Dict[str, Any]:
+        return db.usage_guard_config()
 
     def usage_guarded() -> Set[str]:
         """The providers whose automatic relations are reviewed now, if the guard is on."""
@@ -750,7 +768,8 @@ def create_app(
     async def get_usage_guard(response: Response, who: Principal = Depends(principal)):
         require_human(who)
         response.headers["Cache-Control"] = "no-store"
-        return {**usage_guard(), "guarded": sorted(usage_guarded())}
+        cfg = usage_guard()
+        return {"enabled": cfg["enabled"], "five_hour": cfg["five_hour"], "seven_day": cfg["seven_day"], "guarded": sorted(usage_guarded())}
 
     @app.put("/api/settings/usage-guard")
     async def set_usage_guard(payload: UsageGuardSetting, response: Response, who: Principal = Depends(principal)):
@@ -758,8 +777,26 @@ def create_app(
         db.set_setting("usage_guard_enabled", "true" if payload.enabled else "false")
         db.set_setting("usage_guard_5h", str(payload.five_hour))
         db.set_setting("usage_guard_7d", str(payload.seven_day))
+        if payload.deliver_at_reset is not None:
+            val = "true" if payload.deliver_at_reset else "false"
+            db.set_setting("deliver_at_reset", val)
         response.headers["Cache-Control"] = "no-store"
-        return {**usage_guard(), "guarded": sorted(usage_guarded())}
+        cfg = usage_guard()
+        return {"enabled": cfg["enabled"], "five_hour": cfg["five_hour"], "seven_day": cfg["seven_day"], "guarded": sorted(usage_guarded())}
+
+    @app.get("/api/settings/deliver-at-reset", response_model=DeliverAtResetSetting)
+    async def get_deliver_at_reset_setting(response: Response, who: Principal = Depends(principal)):
+        require_human(who)
+        response.headers["Cache-Control"] = "no-store"
+        return {"enabled": db.get_setting("deliver_at_reset") == "true"}
+
+    @app.put("/api/settings/deliver-at-reset", response_model=DeliverAtResetSetting)
+    async def set_deliver_at_reset_setting(payload: DeliverAtResetSetting, response: Response, who: Principal = Depends(principal)):
+        require_human(who)
+        val = "true" if payload.enabled else "false"
+        db.set_setting("deliver_at_reset", val)
+        response.headers["Cache-Control"] = "no-store"
+        return {"enabled": payload.enabled}
 
     @app.get("/api/health")
     def health():
@@ -787,6 +824,11 @@ def create_app(
                 detail=f"Token belongs to {who.id}, not to {req.sender_id}.",
             )
         req = req.model_copy(update={"sender_id": who.id})
+
+        if req.scheduled_at is not None:
+            if not who.is_human:
+                raise ProductError(422, "schedule.not_allowed", "Only human users can schedule requests.")
+            validate_scheduled_time(req.scheduled_at)
 
         # RFC-08: a node by name stands for its current session and agent.
         if req.target_node:
@@ -947,8 +989,39 @@ def create_app(
             elif db.automatic_sends_last_hour(relation.id) >= limits["max_per_hour"]:
                 automation_limit = "rate"
             details: Dict[str, object] = {}
-            if not automation_limit and (near := relation_guarded(relation)):
-                automation_limit, details = "usage", {"provider": near}
+            cfg = usage_guard()
+            deliver_at_reset_on = cfg.get("deliver_at_reset", False)
+
+            to_node = db.get_node(relation.to_node) if relation.to_node else None
+            rec_session = db.get_session(to_node.session_id) if to_node and to_node.session_id else None
+            rec_provider = rec_session.provider if rec_session else None
+            rec_over = rec_provider and db.is_provider_over_limit(
+                rec_provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"]
+            )
+
+            from_node = db.get_node(relation.from_node) if relation.from_node else None
+            snd_session = db.get_session(from_node.session_id) if from_node and from_node.session_id else None
+            snd_provider = snd_session.provider if snd_session else None
+            snd_over = snd_provider and db.is_provider_over_limit(
+                snd_provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"]
+            )
+
+            if not automation_limit:
+                if rec_over:
+                    if deliver_at_reset_on:
+                        rec_reset = db.provider_reset_time(
+                            rec_provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"]
+                        )
+                        if rec_reset is not None:
+                            db.schedule_request(created.id, rec_reset, actor=f"system:relation#{relation.id}")
+                            created = db.get_request(created.id)
+                        else:
+                            automation_limit, details = "usage", {"provider": rec_provider}
+                    else:
+                        automation_limit, details = "usage", {"provider": rec_provider}
+                elif snd_over:
+                    if not deliver_at_reset_on:
+                        automation_limit, details = "usage", {"provider": snd_provider}
             if automation_limit:
                 needs_approval, by_relation = True, False
                 db.log_event(created.id, "system:limits", "automation_limited",
@@ -1083,6 +1156,8 @@ def create_app(
                 relation = relation_of(req.sender_session_id, decision.recipient_session_id)
                 redirect = (redirect_to, relation.id if relation else None)
         if decision.status == RequestStatus.APPROVED and decision.delivery_mode == "now":
+            if req.scheduled_at is not None:
+                raise ProductError(422, "schedule.steer_conflict", "A message in 'now' mode cannot be scheduled.")
             target_id = decision.recipient_session_id or req.recipient_session_id
             target = db.get_session(target_id) if target_id else None
             if (req.question_type != QuestionType.PROMPT_REVIEW or req.recipient_id == "human"
@@ -1095,6 +1170,29 @@ def create_app(
             raise ProductError(409, "decision.not_pending",
                                f"Request {request_id} is no longer in PENDING state.", {"id": request_id})
 
+        # RF-66: If approved message to an over-limit recipient and deliver_at_reset is ON:
+        # schedule delivery at recipient's reset time (unless mode is "now").
+        effective_schedule = None
+        if decision.status == RequestStatus.APPROVED and decision.delivery_mode != "now" and req.recipient_id != "human":
+            target_id = decision.recipient_session_id or req.recipient_session_id
+            target_sess = db.get_session(target_id) if target_id else None
+            if target_sess is None and relation and relation.to_node:
+                node = db.get_node(relation.to_node)
+                target_sess = db.get_session(node.session_id) if node and node.session_id else None
+            rec_provider = target_sess.provider if target_sess else None
+            if rec_provider is None:
+                rec_provider = AGENT_PROVIDERS.get(req.recipient_id, req.recipient_id)
+
+            cfg = usage_guard()
+            if cfg.get("deliver_at_reset", False) and rec_provider:
+                if db.is_provider_over_limit(rec_provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"]):
+                    rec_reset = db.provider_reset_time(rec_provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"])
+                    if rec_reset is not None:
+                        if req.scheduled_at is not None:
+                            effective_schedule = max(req.scheduled_at, rec_reset)
+                        else:
+                            effective_schedule = rec_reset
+
         updated = db.update_request_decision(
             request_id=request_id,
             status=decision.status,
@@ -1105,6 +1203,7 @@ def create_app(
             allow_auto_return=decision.allow_auto_return or reply_is_automatic(relation),
             delivery_mode=decision.delivery_mode if decision.status == RequestStatus.APPROVED and req.recipient_id != "human" else None,
             recipient_session_id=decision.recipient_session_id,
+            scheduled_at=effective_schedule,
         )
         if updated is None:
             # State changed between the check and the update (e.g. expired or cancelled).
@@ -1114,6 +1213,33 @@ def create_app(
                 f"Request {request_id} is in {current.status.value} state, not in PENDING state.",
                 {"id": request_id},
             )
+
+        notify_change(request_id)
+        return updated
+
+    @app.post("/api/requests/{request_id}/schedule", response_model=RequestModel)
+    async def schedule_request(
+        request_id: int, body: RequestSchedule, who: Principal = Depends(principal)
+    ):
+        """
+        Schedules or clears the scheduled delivery time of a request (RF-65).
+        Allowed only for the human supervisor, while the request is PENDING or APPROVED
+        with delivery waiting.
+        """
+        require_human(who)
+        validate_scheduled_time(body.scheduled_at)
+        req = db.get_request(request_id)
+        if req is None:
+            raise ProductError(404, "request.not_found", "Request not found")
+        if (
+            req.status not in (RequestStatus.PENDING, RequestStatus.APPROVED, RequestStatus.COMPLETED)
+            or req.delivered_at is not None
+            or (req.delivery != "waiting" and req.status != RequestStatus.COMPLETED)
+        ):
+            raise ProductError(409, "schedule.not_allowed", "This request can no longer be scheduled.")
+        updated = db.schedule_request(request_id, body.scheduled_at, actor=who.actor)
+        if updated is None:
+            raise ProductError(409, "schedule.not_allowed", "This request can no longer be scheduled.")
         notify_change(request_id)
         return updated
 
@@ -1651,17 +1777,50 @@ def create_app(
             block = compose_project_instructions(project.name, project.instructions, node_inst, outgoing)
             if block:
                 project_context = block
+        if body.scheduled_at is not None:
+            if body.mode == "now":
+                raise ProductError(422, "schedule.steer_conflict", "A message in 'now' mode cannot be scheduled.")
+            validate_scheduled_time(body.scheduled_at)
+        cfg = usage_guard()
+        rec_provider = session.provider
+        sched_at = body.scheduled_at
+        hold_for_usage = False
+        if (
+            body.mode != "now"
+            and sched_at is None
+            and rec_provider
+            and db.is_provider_over_limit(rec_provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"])
+        ):
+            if cfg.get("deliver_at_reset", False):
+                rec_reset = db.provider_reset_time(
+                    rec_provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"]
+                )
+                if rec_reset is not None:
+                    sched_at = rec_reset.isoformat()
+                else:
+                    hold_for_usage = True
+            else:
+                hold_for_usage = True
+
         created = db.create_request(
             RequestCreate(
                 sender_id="human", recipient_id=session.agent_id, question_type=QuestionType.MESSAGE,
                 prompt=prompt, context=mention_context, recipient_session_id=session.id, priority=Priority.NORMAL,
                 project_id=body.project_id, project_context=project_context,
+                scheduled_at=sched_at,
             ),
             actor=who.actor,
         )
         if body.mode == "now":
             db.set_delivery_mode(created.id, "now")
             created = db.get_request(created.id)
+
+        if hold_for_usage:
+            db.log_event(created.id, "system:limits", "automation_limited",
+                         {"reason": "usage", "provider": rec_provider})
+            notify_change(created.id)
+            return created
+
         approved = db.update_request_decision(created.id, RequestStatus.APPROVED, actor=who.actor)
         notify_change(created.id)
         return approved

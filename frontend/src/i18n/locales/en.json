@@ -161,7 +161,10 @@
     "invalidTimezone": "Invalid timezone.",
     "invalidDate": "Invalid date format (expected YYYY-MM-DD).",
     "invalidRange": "Start date cannot be after end date.",
-    "rangeTooLarge": "Date range exceeds maximum allowed."
+    "rangeTooLarge": "Date range exceeds maximum allowed.",
+    "scheduleTimeInPast": "Scheduled time cannot be in the past.",
+    "scheduleTooFarAhead": "Scheduled time cannot be more than 30 days in the future.",
+    "scheduleNotAllowed": "This message cannot be scheduled."
   },
   "sessions": {
     "closed": "Closed",
@@ -311,7 +314,9 @@
     "send": "Send",
     "limited": "{{provider}} has reached its usage limit: your message waits in Placet and is sent after the reset at {{time}}.",
     "noProjectsForSession": "No projects for this session",
-    "projectMentionLabel": "Projects for this session"
+    "projectMentionLabel": "Projects for this session",
+    "schedule": "Schedule",
+    "clearSchedule": "Clear schedule"
   },
   "chat": {
     "actions_one": "{{count}} action",
@@ -390,7 +395,12 @@
     "markedFinished": "Marked finished: the session can receive the next message.",
     "queuedNext": "The next message will be sent without waiting.",
     "limited": "Waiting: {{provider}} reached its usage limit, sent after the reset at {{time}}",
-    "mayStillRun": "It has replied, but it may still be working: releasing the queue does not interrupt it."
+    "mayStillRun": "It has replied, but it may still be working: releasing the queue does not interrupt it.",
+    "scheduledFor": "Scheduled for {{time}}",
+    "sendNow": "Send now",
+    "modify": "Edit",
+    "sendNowFeedback": "Message sent now.",
+    "scheduledFeedback": "Message scheduled."
   },
   "backgroundLanguage": {
     "title": "Notification and message language",
@@ -593,6 +603,8 @@
     "guardActive": "Now reviewed because of usage: {{providers}}.",
     "guardClaudeWarning": "Claude needs automatic login renewal: without it, after about 8 hours Placet can no longer read its usage and the guard does not apply to Claude.",
     "renewHint": "Renews Claude Code's login when it expires, without using the model, so its usage stays current.",
+    "deliverAtResetTitle": "Deliver at reset",
+    "deliverAtResetHint": "When recipient or sender is over limit, schedule delivery for the next reset instead of requiring manual review.",
     "save": "Save",
     "saveError": "Could not save.",
     "loadError": "Settings unavailable.",

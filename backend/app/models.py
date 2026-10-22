@@ -136,6 +136,8 @@ class RequestCreate(BaseModel):
     expires_in_seconds: int = Field(
         DEFAULT_EXPIRES_IN_SECONDS, ge=10, le=MAX_EXPIRES_IN_SECONDS
     )
+    # RF-65: scheduled delivery time in UTC.
+    scheduled_at: Optional[datetime] = None
 
     @field_validator("options")
     @classmethod
@@ -207,6 +209,8 @@ class RequestModel(BaseModel):
     project_id: Optional[int] = None
     project_name: Optional[str] = None
     project_context: Optional[str] = None
+    # RF-65: scheduled delivery time in UTC.
+    scheduled_at: Optional[datetime] = None
     id: int
     sender_id: str
     recipient_id: str
@@ -221,6 +225,7 @@ class RequestModel(BaseModel):
     selected_options: List[str] = Field(default_factory=list)
     custom_text: Optional[str] = None
     created_at: datetime
+    expires_in_seconds: int = DEFAULT_EXPIRES_IN_SECONDS
     expires_at: Optional[datetime] = None
     decided_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
@@ -267,6 +272,14 @@ BRIDGE_PROVIDERS = ("codex", "antigravity")
 # SessionEnd only means the app unloaded the conversation (idle, restart,
 # update): it can be resumed, so the session is suspended, not ended.
 SUSPENDING_PROVIDERS = ("codex",)
+# Mapping from known agent names to their execution provider.
+AGENT_PROVIDERS = {
+    "claude": "claude-code",
+    "claude-code": "claude-code",
+    "codex": "codex",
+    "gemini": "antigravity",
+    "antigravity": "antigravity",
+}
 
 
 class SessionMention(BaseModel):
@@ -293,12 +306,19 @@ class SessionMessage(BaseModel):
     mentions: List[SessionMention] = Field(default_factory=list, max_length=20)
     # RFC-15: optional project context when sending message from PWA
     project_id: Optional[int] = None
+    # RF-65: scheduled delivery timestamp in UTC
+    scheduled_at: Optional[datetime] = None
 
     @model_validator(mode="after")
     def has_content(self):
         if not self.text.strip() and not self.attachments:
             raise ValueError("Write a message or select an attachment.")
         return self
+
+
+class RequestSchedule(BaseModel):
+    """Payload to schedule or clear scheduled delivery of a request (RF-65)."""
+    scheduled_at: Optional[datetime] = None
 
 
 class SessionModel(BaseModel):

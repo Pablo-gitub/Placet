@@ -11,6 +11,7 @@ function serve({ guard = { enabled: false, five_hour: 90, seven_day: 95, guarded
     let data = {};
     if (url === "/api/settings/usage-guard") data = opts.method === "PUT" ? { ...JSON.parse(opts.body), guarded: guard.guarded } : guard;
     else if (url === "/api/settings/claude-renew") data = { enabled: opts.method === "PUT" ? JSON.parse(opts.body).enabled : renew };
+    else if (url === "/api/settings/deliver-at-reset") data = { enabled: opts.method === "PUT" ? JSON.parse(opts.body).enabled : (guard.deliver_at_reset || false) };
     else if (url === "/api/settings/language") data = { language: "it" };
     else if (url === "/api/settings/notifications") {
       if (opts.method === "PUT" && putError) {
@@ -55,6 +56,15 @@ describe("usage guard settings", () => {
     fireEvent.click(renew);
     await waitFor(() => expect(calls.some((c) => c.method === "PUT" && c.url === "/api/settings/claude-renew" && c.body.enabled === true)).toBe(true));
     await waitFor(() => expect(screen.queryByTestId("usage-guard-claude-warning")).toBeNull());
+  });
+
+  it("toggles deliver at reset option", async () => {
+    const calls = serve();
+    render(<Settings />);
+    const toggle = await screen.findByTestId("deliver-at-reset-toggle");
+    await waitFor(() => expect(toggle).not.toBeChecked());
+    fireEvent.click(toggle);
+    await waitFor(() => expect(calls.some((c) => c.method === "PUT" && c.url === "/api/settings/deliver-at-reset" && c.body.enabled === true)).toBe(true));
   });
 });
 
