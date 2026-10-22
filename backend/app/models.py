@@ -404,6 +404,9 @@ class SessionModel(BaseModel):
     mcp_state: Optional[str] = None
     # The last time this session used a Placet MCP tool.
     mcp_seen_at: Optional[datetime] = None
+    # When the hook last reported the configuration (each start): a use before it does not
+    # prove the configuration of this start.
+    mcp_checked_at: Optional[datetime] = None
 
 
 class NodeModel(BaseModel):

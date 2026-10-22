@@ -22,6 +22,17 @@ describe("the missing Placet MCP warning", () => {
     }
   });
 
+  it("considers both: a use since this start hides the warning, a use before it does not", () => {
+    const at = (minutes) => new Date(Date.UTC(2026, 9, 22, 10, minutes)).toISOString();
+    for (const mcp_state of ["missing", "suspect"]) {
+      expect(mcpWarning({ ...base, mcp_state, mcp_checked_at: at(5), mcp_seen_at: at(2) })).toBe(mcp_state);   // used before
+      expect(mcpWarning({ ...base, mcp_state, mcp_checked_at: at(5), mcp_seen_at: at(9) })).toBeNull();        // used since
+      expect(mcpWarning({ ...base, mcp_state, mcp_checked_at: at(5), mcp_seen_at: at(5) })).toBeNull();        // same moment
+      expect(mcpWarning({ ...base, mcp_state, mcp_checked_at: at(5), mcp_seen_at: null })).toBe(mcp_state);    // never
+      expect(mcpWarning({ ...base, mcp_state, mcp_checked_at: null, mcp_seen_at: at(1) })).toBeNull();         // no check time: older record
+    }
+  });
+
   it("appears in the Home row, with a hint to the installation guide", () => {
     render(<Home requests={[]} sessions={[{ ...base, mcp_state: "missing" }, { ...base, id: "s2", mcp_state: "configured" }]}
       usage={null} onDecide={vi.fn()} onOpenSession={vi.fn()} onTogglePin={vi.fn()} />);

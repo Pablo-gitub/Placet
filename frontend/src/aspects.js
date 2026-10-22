@@ -30,8 +30,15 @@ export const queueStuck = (requests, sessionId, now = Date.now()) =>
 
 /**
  * RF-27: "missing" (the provider's configuration has no Placet MCP server) or
- * "suspect" (a Placet turn ended and the session never used it). Anything
- * else, including "unknown", is not worth a warning.
+ * "suspect" (a Placet turn ended and the session never used it since its
+ * start). Anything else, including "unknown", is not worth a warning.
  */
-export const mcpWarning = (session) =>
-  session && (session.mcp_state === "missing" || session.mcp_state === "suspect") ? session.mcp_state : null;
+export const mcpWarning = (session) => {
+  if (!session || (session.mcp_state !== "missing" && session.mcp_state !== "suspect")) return null;
+  // Configuration and use are kept apart: seeing the session use the MCP since the start that
+  // reported this configuration contradicts the warning; a use that predates the start does not.
+  if (session.mcp_seen_at && (!session.mcp_checked_at || Date.parse(session.mcp_seen_at) >= Date.parse(session.mcp_checked_at))) {
+    return null;
+  }
+  return session.mcp_state;
+};
