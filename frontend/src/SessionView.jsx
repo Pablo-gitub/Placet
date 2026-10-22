@@ -32,6 +32,7 @@ import { useTranscript } from "./useTranscript";
 import McpWarning from "./McpWarning";
 import { holdsQueueUnseen, isUncertain } from "./aspects";
 import NodeControl from "./NodeControl";
+import SessionControls from "./SessionControls";
 
 const ACTION_ICONS = {
   command: Terminal,
@@ -423,6 +424,7 @@ export default function SessionView({
           <ModelLine meta={{ model: session?.model, ...meta }} />
         </div>
         <NodeControl session={session} />
+        <SessionControls session={session} />
         {state && (
           <span className={`session-state state-${state.key}`} data-testid="session-view-state">
             <Circle size={8} fill="currentColor" />

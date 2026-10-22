@@ -61,6 +61,32 @@ def active(cwd: Optional[str]) -> bool:
     return not any((current / OFF_MARKER).exists() for current in (folder, *folder.parents))
 
 
+def tmux_server_pid() -> Optional[str]:
+    """The pid of the tmux server this process runs under ($TMUX is `socket,server_pid,index`)."""
+    parts = os.environ.get("TMUX", "").split(",")
+    return parts[1] if len(parts) >= 3 and parts[1].isdigit() else None
+
+
+def agent_process(start_pid: Optional[int] = None, proc_root: Path = Path("/proc")):
+    """
+    (pid, start time) of the nearest `claude` process above this one: the agent
+    the session runs in, identified by the kernel's start time so that a reused pid
+    is not mistaken for it. None when there is none (or no /proc).
+    """
+    pid = os.getppid() if start_pid is None else start_pid
+    for _ in range(32):
+        if pid <= 1:
+            return None
+        try:
+            stat = (proc_root / str(pid) / "stat").read_text().rsplit(")", 1)[1].split()
+            if (proc_root / str(pid) / "comm").read_text().strip() == "claude":
+                return pid, stat[19]
+            pid = int(stat[1])
+        except (OSError, IndexError, ValueError):
+            return None
+    return None
+
+
 GIT_TIMEOUT_SECONDS = 2.0
 
 

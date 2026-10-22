@@ -12,6 +12,7 @@ from backend.app.models import (
     HOLD_ALERT_SECONDS,
     PAUSE_UNRESUMED_SECONDS,
     START_UNCONFIRMED_SECONDS,
+    session_controls,
     OPEN_STATUSES,
     RequestCreate,
     RequestEvent,
@@ -125,6 +126,10 @@ def _normalize_utc_iso(val: Union[str, datetime, None]) -> Optional[str]:
     else:
         dt = dt.astimezone(timezone.utc)
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+class ControlPending(Exception):
+    """RF-62: the session already has a control being sent."""
 
 
 class Database:
@@ -424,6 +429,33 @@ class Database:
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_request_events_request ON request_events(request_id);"
             )
+            # RF-62: remote controls typed into a session (/compact, /effort), for the audit.
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS session_control_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                at TEXT NOT NULL,
+                actor TEXT NOT NULL,
+                command TEXT NOT NULL,
+                state TEXT NOT NULL DEFAULT 'sent'
+            );
+            """)
+            # pending (written before dispatch), sent, refused (certainly not typed) or
+            # uncertain. Rows from before states existed were typed: the default says sent.
+            cursor.execute("PRAGMA table_info(session_control_events);")
+            if "state" not in [r["name"] for r in cursor.fetchall()]:
+                cursor.execute("ALTER TABLE session_control_events ADD COLUMN state TEXT NOT NULL DEFAULT 'sent';")
+            # One pending control per session at most, enforced by the database. (A restart between
+            # dispatch and answer leaves what happened unknown: settle_pending_session_controls(),
+            # called when the backend starts, not by every process that opens the database.)
+            cursor.execute(
+                "UPDATE session_control_events SET state = 'uncertain' WHERE state = 'pending' AND id NOT IN"
+                " (SELECT MIN(id) FROM session_control_events WHERE state = 'pending' GROUP BY session_id);"
+            )
+            cursor.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_session_control_pending"
+                " ON session_control_events(session_id) WHERE state = 'pending';"
+            )
             # Hook events already applied: the bridge may forward one twice.
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS session_events_seen (
@@ -454,6 +486,12 @@ class Database:
             for col in ("activity_at", "pinned_at", "excluded_at", "suspended_at", "model", "continued_to"):
                 if col not in session_cols:
                     cursor.execute(f"ALTER TABLE sessions ADD COLUMN {col} TEXT;")
+            if "tmux_pane" not in session_cols:
+                cursor.execute("ALTER TABLE sessions ADD COLUMN tmux_pane TEXT;")
+            if "tmux_server" not in session_cols:
+                cursor.execute("ALTER TABLE sessions ADD COLUMN tmux_server TEXT;")
+                cursor.execute("ALTER TABLE sessions ADD COLUMN agent_pid INTEGER;")
+                cursor.execute("ALTER TABLE sessions ADD COLUMN agent_started TEXT;")
             if "project_root" not in session_cols:
                 cursor.execute("ALTER TABLE sessions ADD COLUMN project_root TEXT;")
             if "prompt_count" not in session_cols:
@@ -1901,6 +1939,10 @@ class Database:
             project_root=row["project_root"],
             title=row["title"],
             tmux_session=row["tmux_session"],
+            tmux_pane=row["tmux_pane"],
+            tmux_server=row["tmux_server"],
+            agent_pid=row["agent_pid"],
+            agent_started=row["agent_started"],
             state=row["state"],
             turn_request_id=row["turn_request_id"],
             started_at=datetime.fromisoformat(row["started_at"]),
@@ -1913,6 +1955,8 @@ class Database:
             pinned=row["pinned_at"] is not None,
             reachable=reachable and row["excluded_at"] is None,
             excluded=row["excluded_at"] is not None,
+            controls=session_controls(row["provider"], row["tmux_session"], row["entrypoint"], row["tmux_pane"],
+                                     bool(row["tmux_server"] and row["agent_pid"] and row["agent_started"])),
             mcp_state=row["mcp_state"],
             mcp_seen_at=_ts(row["mcp_seen_at"]),
             node_id=row["node_id"],
@@ -1931,6 +1975,10 @@ class Database:
         title: Optional[str] = None,
         tmux_session: Optional[str] = None,
         model: Optional[str] = None,
+        tmux_pane: Optional[str] = None,
+        tmux_server: Optional[str] = None,
+        agent_pid: Optional[int] = None,
+        agent_started: Optional[str] = None,
         project_root: Optional[str] = None,
     ) -> bool:
         """
@@ -1949,11 +1997,12 @@ class Database:
                 cursor.execute(
                     """
                     INSERT INTO sessions (id, agent_id, provider, entrypoint, cwd, project_root, title,
-                                          tmux_session, model, state, started_at, last_seen_at, activity_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?, ?)
+                                          tmux_session, tmux_pane, tmux_server, agent_pid, agent_started,
+                                          model, state, started_at, last_seen_at, activity_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?, ?)
                     """,
-                    (session_id, agent_id, provider, entrypoint, cwd, project_root, title, tmux_session, model,
-                     now, now, now),
+                    (session_id, agent_id, provider, entrypoint, cwd, project_root, title, tmux_session, tmux_pane,
+                     tmux_server, agent_pid, agent_started, model, now, now, now),
                 )
             else:
                 cursor.execute(
@@ -1961,11 +2010,14 @@ class Database:
                     UPDATE sessions SET
                         provider = COALESCE(?, provider), entrypoint = COALESCE(?, entrypoint),
                         cwd = COALESCE(?, cwd), project_root = COALESCE(?, project_root), title = COALESCE(?, title),
-                        tmux_session = COALESCE(?, tmux_session), model = COALESCE(?, model),
-                        last_seen_at = ?
+                        tmux_session = COALESCE(?, tmux_session), tmux_pane = COALESCE(?, tmux_pane),
+                        tmux_server = COALESCE(?, tmux_server), agent_pid = COALESCE(?, agent_pid),
+                        agent_started = COALESCE(?, agent_started),
+                        model = COALESCE(?, model), last_seen_at = ?
                     WHERE id = ?
                     """,
-                    (provider, entrypoint, cwd, project_root, title, tmux_session, model, now, session_id),
+                    (provider, entrypoint, cwd, project_root, title, tmux_session, tmux_pane, tmux_server, agent_pid,
+                     agent_started, model, now, session_id),
                 )
             return True
 
@@ -2107,6 +2159,77 @@ class Database:
                 cursor.execute("UPDATE sessions SET node_id = ? WHERE id = ?", (old["node_id"], new_session_id))
                 cursor.execute("UPDATE sessions SET node_id = NULL WHERE id = ?", (old_session_id,))
             return True
+
+    def pane_occupants(self, tmux_pane: str) -> List[SessionModel]:
+        """RF-62: the open, not suspended sessions reported in this pane, most recently seen first."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                f"{SESSIONS_WITH_NODE} WHERE sessions.tmux_pane = ? AND sessions.ended_at IS NULL"
+                " AND sessions.suspended_at IS NULL ORDER BY sessions.last_seen_at DESC, sessions.id",
+                (tmux_pane,),
+            ).fetchall()
+        return [self._row_to_session(r, WAITER_TTL_SECONDS) for r in rows]
+
+    def begin_session_control(self, session_id: str, actor: str, command: str) -> int:
+        """
+        RF-62: audits a control BEFORE it is dispatched, as pending; returns its id.
+        ControlPending if the session already has one (a unique index decides, so two
+        simultaneous requests cannot both start).
+        """
+        try:
+            with self._get_connection() as conn:
+                cur = conn.execute(
+                    "INSERT INTO session_control_events (session_id, at, actor, command, state)"
+                    " VALUES (?, ?, ?, ?, 'pending')",
+                    (session_id, datetime.now(timezone.utc).isoformat(), actor, command),
+                )
+                return cur.lastrowid
+        except sqlite3.IntegrityError:
+            raise ControlPending(session_id) from None
+
+    def settle_pending_session_controls(self) -> int:
+        """Backend startup: a control still pending belongs to a process that is gone, so its outcome is unknown."""
+        with self._get_connection() as conn:
+            return conn.execute(
+                "UPDATE session_control_events SET state = 'uncertain' WHERE state = 'pending'").rowcount
+
+    def session_has_running_request(self, session_id: str) -> bool:
+        """A Placet request is being delivered to, or executed by, this session."""
+        with self._get_connection() as conn:
+            return conn.execute(
+                "SELECT 1 FROM requests WHERE recipient_session_id = ? AND status IN (?, ?) LIMIT 1",
+                (session_id, RequestStatus.DELIVERING.value, RequestStatus.EXECUTING.value),
+            ).fetchone() is not None
+
+    def settle_session_control(self, control_id: int, state: str) -> None:
+        """sent | needs_confirmation (a dialog waits on the PC) | refused | uncertain; only a pending row changes."""
+        if state not in ("sent", "needs_confirmation", "refused", "uncertain"):
+            raise ValueError(state)
+        with self._get_connection() as conn:
+            conn.execute("UPDATE session_control_events SET state = ? WHERE id = ? AND state = 'pending'",
+                         (state, control_id))
+
+    def last_session_control(self, session_id: str) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT id, at, actor, command, state FROM session_control_events WHERE session_id = ?"
+                " ORDER BY id DESC LIMIT 1", (session_id,)).fetchone()
+        return dict(row) if row else None
+
+    def pending_session_control(self, session_id: str) -> Optional[int]:
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT id FROM session_control_events WHERE session_id = ? AND state = 'pending' LIMIT 1",
+                (session_id,)).fetchone()
+        return row["id"] if row else None
+
+    def list_session_controls(self, session_id: str) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT id, at, actor, command, state FROM session_control_events WHERE session_id = ? ORDER BY id",
+                (session_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def set_mcp_config_state(self, session_id: str, state: str) -> None:
         """RF-27: what the hook read at session start. A session seen using the MCP stays configured."""

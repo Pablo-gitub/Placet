@@ -1,0 +1,7 @@
+❯ /effort auto
+  ⎿  Effort level set to auto
+    ◐ medium · /effort
+────────────────────────────────────────
+❯
+────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle)

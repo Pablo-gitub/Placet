@@ -22,6 +22,21 @@ DEFAULT_BUSY_PATTERNS = [
 ]
 
 
+class TmuxTimeout(Exception):
+    """tmux did not answer in time: whether the keys reached the pane is unknown."""
+
+
+class TmuxCheckError(Exception):
+    """tmux could not answer: what it was asked is unknown (not "nobody", not "nothing")."""
+
+
+@dataclass
+class PaneInfo:
+    server_pid: int
+    pane_pid: int
+    session_name: str
+
+
 @dataclass
 class IdleCheck:
     """Outcome of an idle check, with the reasons (used by calibration)."""
@@ -78,6 +93,18 @@ class TmuxController:
         sessions = self.list_sessions()
         return session_name in sessions
 
+    def pane_info(self, pane_id: str):
+        """(server pid, the pane's process pid, tmux session name) of a pane (%N), or None if it is gone."""
+        try:
+            res = subprocess.run(
+                ["tmux", "display-message", "-p", "-t", pane_id, "#{pid} #{pane_pid} #{session_name}"],
+                capture_output=True, text=True, check=True, timeout=3,
+            )
+            server, pane, name = res.stdout.rstrip("\n").split(" ", 2)
+            return PaneInfo(int(server), int(pane), name)
+        except Exception:
+            return None
+
     def capture_pane(self, session_name: str) -> str:
         """Visible screen of the session's active pane."""
         try:
@@ -88,6 +115,7 @@ class TmuxController:
                 capture_output=True,
                 text=True,
                 check=True,
+                timeout=5,
             )
             return res.stdout
         except Exception as e:
@@ -192,6 +220,47 @@ class TmuxController:
         if not stamps:
             return None
         return max(0.0, time.time() - max(stamps))
+
+    def input_idle_seconds(self, session_name: str) -> Optional[float]:
+        """
+        Seconds since a client attached to the session last sent input, or None
+        when NO client is attached (nobody can be typing). Unlike
+        seconds_since_input, a check that cannot be made (tmux fails, the output
+        makes no sense) raises TmuxCheckError instead of looking like "nobody".
+        """
+        try:
+            res = subprocess.run(
+                ["tmux", "list-clients", "-t", session_name, "-F", "#{client_activity}"],
+                capture_output=True, text=True, check=True, timeout=3,
+            )
+        except Exception as e:
+            raise TmuxCheckError(f"cannot list the clients of {session_name}: {e}") from None
+        words = res.stdout.split()
+        stamps = [int(v) for v in words if v.isdigit()]
+        if len(stamps) != len(words):
+            raise TmuxCheckError(f"unexpected list-clients output for {session_name}")
+        if not stamps:
+            return None
+        return max(0.0, time.time() - max(stamps))
+
+    def type_text(self, target: str, text: str) -> bool:
+        """Types a single line literally, without Enter (target: a pane id or a session)."""
+        try:
+            subprocess.run(["tmux", "send-keys", "-t", target, "-l", text], check=True, timeout=5)
+            return True
+        except subprocess.TimeoutExpired:
+            raise TmuxTimeout(f"tmux did not answer while typing into {target}") from None
+        except Exception as e:
+            logger.error(f"Failed to type into {target}: {e}")
+            return False
+
+    def press_enter(self, target: str) -> bool:
+        try:
+            subprocess.run(["tmux", "send-keys", "-t", target, "Enter"], check=True, timeout=5)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to press Enter in {target}: {e}")
+            return False
 
     def send_keys(self, session_name: str, text: str, enter: bool = True) -> bool:
         """

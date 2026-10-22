@@ -70,6 +70,24 @@ def _tmux_session():
         return None
 
 
+PANE_ID = re.compile(r"^%\d{1,9}$")
+
+
+def _tmux_pane():
+    """The tmux pane id ($TMUX_PANE, e.g. %7) of this session's terminal: its stable address."""
+    pane = os.environ.get("TMUX_PANE") if os.environ.get("TMUX") else None
+    return pane if pane and PANE_ID.match(pane) else None
+
+
+def _identity():
+    """Who runs in the tmux pane: the tmux server and the agent process, with its start time."""
+    server = placet_common.tmux_server_pid() if os.environ.get("TMUX") else None
+    owner = placet_common.agent_process() if server else None
+    return {"tmux_server": server,
+            "agent_pid": owner[0] if owner else None,
+            "agent_started": owner[1] if owner else None}
+
+
 def _request_id_from_tool_response(response, depth: int = 0):
     """
     The id of the request a Placet MCP tool created. The tool returns the
@@ -179,6 +197,8 @@ def build_event(event: dict, provider: str = "claude-code"):
         "title": event.get("session_title"),
         # On every event: a session may predate its first SessionStart hook.
         "tmux_session": _tmux_session(),
+        "tmux_pane": _tmux_pane(),
+        **_identity(),
     }
     if name == "SessionStart":
         # "clear" lets Placet move the node to the new conversation (RFC-02).

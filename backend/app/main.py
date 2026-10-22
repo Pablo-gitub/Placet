@@ -1,5 +1,6 @@
 from dataclasses import replace
 import os
+import time
 import json
 import asyncio
 import base64
@@ -30,10 +31,14 @@ from backend.app.auth import (
 )
 from backend.app.config import PlacetConfig, load_agents_config
 from backend.app.database import (
+    ControlPending,
     Database, NameTaken, NodeNameTaken, ProjectNameTaken,
     compose_project_instructions,
 )
+from backend.app.session_commands import command_text, effort_levels
 from backend.app.models import (
+    ControlPayload,
+    EffortPayload,
     NotificationSettings,
     ProviderUsage,
     UsageReport,
@@ -69,7 +74,8 @@ from backend.app.models import (
 )
 from backend.app import envelopes
 from backend.app.upload_limits import MessageBodyLimit
-from backend.app.bridge_jobs import BridgeJobs, BridgeOffline, BridgeTimeout
+from backend.app import bridge_jobs as bridge_jobs_module
+from backend.app.bridge_jobs import BridgeJobs, BridgeNotTaken, BridgeOffline, BridgeTimeout
 from backend.app.webpush import WebPush, allowed_endpoint
 from backend.app.admin_commands import AdminCommands, install_routes as install_admin_routes
 from backend.app.notifier import NtfyConfig, send_ntfy_alert, send_ntfy_notification, send_ntfy_turn_end, session_label
@@ -98,6 +104,12 @@ class SessionEventPayload(BaseModel):
     model: Optional[str] = Field(default=None, max_length=100)
     title: Optional[str] = None
     tmux_session: Optional[str] = None
+    # RF-62: the tmux pane id (%N) of the terminal the session runs in.
+    tmux_pane: Optional[str] = Field(default=None, pattern=r"^%\d{1,9}$")
+    # ...and who runs in it: the tmux server pid, the agent process pid and its start time.
+    tmux_server: Optional[str] = Field(default=None, pattern=r"^\d{1,10}$")
+    agent_pid: Optional[int] = Field(default=None, ge=2, le=2**32)
+    agent_started: Optional[str] = Field(default=None, pattern=r"^\d{1,20}$")
     # prompt: the Placet request the prompt carries ("[Placet Request #N").
     # tool:   the request created by a Placet MCP call in this session.
     request_id: Optional[int] = None
@@ -119,6 +131,9 @@ class TitlesReport(BaseModel):
     titles: Dict[str, str] = Field(default_factory=dict, max_length=500)
 
 
+
+# RF-62: an uncertain control this recent asks for an explicit confirmation before a repeat.
+UNCERTAIN_CONFIRM_WINDOW = timedelta(minutes=30)
 
 # RF-43: one "turn finished" notification per followed session at most this often.
 TURN_END_NOTIFY_GAP = 60.0
@@ -519,6 +534,9 @@ def create_app(
     if db is None:
         db = Database(os.environ.get("PLACET_DB_PATH", "placet.db"))
         db.init_db()
+    # RF-62: a control left pending belongs to a backend that is gone: its outcome is unknown.
+    # Only here (the backend starting), not in init_db, which the bridge's own store also runs.
+    db.settle_pending_session_controls()
 
     if config is None:
         config = load_agents_config()
@@ -1512,7 +1530,8 @@ def create_app(
             return {"session": session_id, "event": payload.event, "duplicate": True}
         if not db.upsert_session(
             session_id, who.id, provider=payload.provider, entrypoint=payload.entrypoint,
-            cwd=payload.cwd, project_root=payload.project_root, title=payload.title, tmux_session=payload.tmux_session,
+            cwd=payload.cwd, project_root=payload.project_root, title=payload.title, tmux_session=payload.tmux_session, tmux_pane=payload.tmux_pane,
+            tmux_server=payload.tmux_server, agent_pid=payload.agent_pid, agent_started=payload.agent_started,
             model=payload.model,
         ):
             raise HTTPException(status_code=404, detail="Session not found")
@@ -1689,6 +1708,131 @@ def create_app(
         if who.kind == "bridge":
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not for the bridge.")
         return db.list_sessions(agent_id=agent_id, include_ended=include_ended, include_excluded=False)
+
+    async def session_command(session_id: str, command: str, level: Optional[str], who: Principal,
+                              confirm_uncertain: bool = False) -> Dict[str, object]:
+        """
+        RF-62: /compact or /effort typed into a Claude Code CLI's tmux pane.
+        Only a supported, open, idle session; a fixed line built here, sent
+        through the bridge; audited.
+        """
+        require_human(who)
+        session = db.get_session(session_id)
+        if session is None:
+            raise ProductError(404, "session.not_found", "Session not found")
+        if session.excluded:
+            raise ProductError(409, "session.excluded", "This project is excluded from Placet (.placet-off).")
+        if session.ended_at is not None:
+            raise ProductError(409, "session.closed", "The session is closed.")
+        state = session.controls.get(command, "unsupported")
+        if state == "pc_only":
+            raise ProductError(409, "session.control_pc_only", "This control is available only on the PC for this session.")
+        if state != "supported":
+            raise ProductError(409, "session.control_unsupported", "This provider offers no remote control for this.")
+        if command == "effort" and level not in effort_levels(session.provider):
+            raise ProductError(422, "session.effort_invalid", "Not an effort level this provider accepts.",
+                               {"levels": list(effort_levels(session.provider))})
+        if session.state != "idle":
+            raise ProductError(409, "session.busy", "The session is working: wait for the turn to end.")
+        # The pane must still be this session's: a later session in the same pane
+        # (a new conversation, a resume) makes this one stale, a tie is ambiguous.
+        occupants = db.pane_occupants(session.tmux_pane)
+        if not occupants or occupants[0].id != session.id:
+            raise ProductError(409, "session.pane_stale", "Another session now runs in this terminal.",
+                               {"current": occupants[0].id if occupants else None})
+        if len(occupants) > 1 and occupants[1].last_seen_at == occupants[0].last_seen_at:
+            raise ProductError(409, "session.pane_ambiguous", "Two sessions are equally recent in this terminal.")
+        line = command_text(command, level, session.provider)
+        params = {"agent_id": session.agent_id, "tmux_session": session.tmux_session,
+                  "tmux_pane": session.tmux_pane, "tmux_server": session.tmux_server,
+                  "agent_pid": session.agent_pid, "agent_started": session.agent_started,
+                  "session_id": session.id, "command": command}
+        if level is not None:
+            params["level"] = level
+
+        def local():
+            from bridge.session_commands import CommandError, run_command
+            from bridge.tmux_controller import SessionSpec, TmuxController
+            agent = config.get_agent(session.agent_id)
+            spec = SessionSpec(name=agent.tmux_session, idle_patterns=agent.idle_patterns,
+                               busy_patterns=agent.busy_patterns) if agent else None
+            try:
+                sent_, confirm_ = run_command(
+                    TmuxController(), spec, session.tmux_session, session.tmux_pane, command, level,
+                    identity={"tmux_server": session.tmux_server, "agent_pid": session.agent_pid,
+                              "agent_started": session.agent_started})
+                return {"sent": sent_, "needs_confirmation": confirm_}
+            except CommandError as e:
+                raise ProductError(409, f"session_command.{e.code}", str(e)) from None
+
+        errors = {"wrong_session": (409, "Not the tmux session configured for this agent."),
+                  "tmux_missing": (409, "The tmux session is not running."),
+                  "not_idle": (409, "The session is not at an empty prompt."),
+                  "user_typing": (409, "Someone is typing in the session."),
+                  "check_failed": (409, "tmux could not tell whether someone is typing."),
+                  "identity_unknown": (409, "The session did not report which process runs in its terminal."),
+                  "server_mismatch": (409, "tmux was restarted: this pane belongs to another server."),
+                  "agent_gone": (409, "The session's agent process is not running."),
+                  "agent_not_in_pane": (409, "The session's agent does not run in this pane."),
+                  "invalid": (422, "Not a fixed session command."),
+                  "send_failed": (502, "tmux refused the keys; nothing was typed."),
+                  "enter_failed": (502, "The text was typed but Enter was not sent."),
+                  "unverified": (502, "Enter was sent but the screen cannot be read."),
+                  "type_timeout": (502, "tmux did not answer while typing."),
+                  "expired": (409, "The command waited too long for the terminal and was dropped."),
+                  "unknown_job": (409, "The bridge is too old for this command.")}
+        # Certainly not typed: every check failed, or the job never reached the bridge. Anything
+        # else (lost reply, timeout, text typed without Enter, an unexpected error) is uncertain.
+        refused = {"bridge.offline", "bridge.not_taken", "session_command.expired", "session_command.unknown_job",
+                   "session_command.wrong_session", "session_command.tmux_missing",
+                   "session_command.not_idle", "session_command.user_typing", "session_command.check_failed",
+                   "session_command.identity_unknown", "session_command.server_mismatch",
+                   "session_command.agent_gone", "session_command.agent_not_in_pane",
+                   "session_command.invalid",
+                   "session_command.send_failed"}
+        # After an uncertain outcome the command may already have been applied: repeating it needs the
+        # user's explicit confirmation, kept here so that it holds for every tab and device.
+        last = db.last_session_control(session_id)
+        if last and last["state"] == "uncertain" and not confirm_uncertain \
+                and datetime.now(timezone.utc) - datetime.fromisoformat(last["at"]) < UNCERTAIN_CONFIRM_WINDOW:
+            raise ProductError(409, "session.control_uncertain",
+                               "The previous command's outcome is uncertain: check the session, then confirm.",
+                               {"control_id": last["id"], "command": last["command"]})
+        if db.session_has_running_request(session.id):
+            raise ProductError(409, "session.has_request_running",
+                               "A Placet request is being delivered to or executed by this session.")
+        params["deadline"] = time.time() + bridge_jobs_module.JOB_TIMEOUT_SECONDS
+        try:
+            control_id = db.begin_session_control(session_id, who.actor, line)
+        except ControlPending:
+            raise ProductError(409, "session.control_pending", "A control for this session is still being sent.") from None
+        try:
+            outcome = await bridge_call("session_command", params, local, errors)
+        except ProductError as e:
+            if e.code in refused:
+                db.settle_session_control(control_id, "refused")
+                raise
+            db.settle_session_control(control_id, "uncertain")
+            raise ProductError(502, "session_command.uncertain",
+                               "The outcome is uncertain: check the session before repeating.",
+                               {"control_id": control_id}) from None
+        except Exception:
+            db.settle_session_control(control_id, "uncertain")
+            raise
+        # A dialog is waiting for the user on the PC: neither "sent" nor uncertain, and not retried.
+        state = "needs_confirmation" if outcome.get("needs_confirmation") else "sent"
+        db.settle_session_control(control_id, state)
+        notify_session(session_id)
+        return {"ok": True, "command": line, "control_id": control_id, "state": state}
+
+    @app.post("/api/sessions/{session_id}/compact")
+    async def compact_session(session_id: str, payload: Optional[ControlPayload] = None,
+                              who: Principal = Depends(principal)):
+        return await session_command(session_id, "compact", None, who, bool(payload and payload.confirm_uncertain))
+
+    @app.post("/api/sessions/{session_id}/effort")
+    async def set_session_effort(session_id: str, payload: EffortPayload, who: Principal = Depends(principal)):
+        return await session_command(session_id, "effort", payload.level, who, payload.confirm_uncertain)
 
     @app.post("/api/sessions/{session_id}/messages", response_model=RequestModel,
               status_code=status.HTTP_201_CREATED)
@@ -2206,6 +2350,8 @@ def create_app(
             result = await bridge_jobs.run(kind, params)
         except BridgeOffline:
             raise ProductError(503, "bridge.offline", "The bridge is offline.") from None
+        except BridgeNotTaken:
+            raise ProductError(504, "bridge.not_taken", "The bridge did not pick the job up: nothing was done.") from None
         except BridgeTimeout:
             raise ProductError(504, "bridge.timeout", "The bridge did not respond in time.") from None
         if not result.get("ok"):

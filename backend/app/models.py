@@ -298,6 +298,16 @@ class SessionUpload(BaseModel):
 STEER_PROVIDERS = ("claude-code", "antigravity")
 
 
+class ControlPayload(BaseModel):
+    """RF-62: sent again after an uncertain outcome, the user confirms it explicitly."""
+    confirm_uncertain: bool = False
+
+
+class EffortPayload(ControlPayload):
+    """The level is checked against the provider's allowlist by the endpoint."""
+    level: str = Field(max_length=32)
+
+
 class SessionMessage(BaseModel):
     """A message the user writes to a session (RF-34)."""
     mode: Literal["queue", "now"] = "queue"
@@ -314,6 +324,30 @@ class SessionMessage(BaseModel):
         if not self.text.strip() and not self.attachments:
             raise ValueError("Write a message or select an attachment.")
         return self
+
+
+def session_controls(provider: Optional[str], tmux_session: Optional[str],
+                     entrypoint: Optional[str] = None, tmux_pane: Optional[str] = None,
+                     identified: bool = False) -> Dict[str, Any]:
+    """
+    RF-62: the remote controls a session offers, from its provider and how it
+    runs. "supported": the genuine command can be typed into its tmux pane
+    (Claude Code CLI); "pc_only": it exists but only at the PC (the desktop
+    app, a CLI outside tmux); "unsupported": no verified way (Codex ignores
+    the overrides of `codex queue`; Antigravity is not verified).
+    """
+    if provider == "claude-code":
+        if entrypoint == "claude-desktop" or not tmux_session:
+            state = "pc_only"
+        else:
+            # Typing needs the stable pane id AND proof of who runs in it (tmux server, agent
+            # process), which the hook reports; an older hook gives neither.
+            state = "supported" if tmux_pane and identified else "unsupported"
+    else:
+        state = "unsupported"
+    from backend.app.session_commands import effort_levels
+    return {"compact": state, "effort": state,
+            "effort_levels": list(effort_levels(provider)) if state == "supported" else []}
 
 
 class RequestSchedule(BaseModel):
@@ -333,6 +367,12 @@ class SessionModel(BaseModel):
     project_root: Optional[str] = None
     title: Optional[str] = None
     tmux_session: Optional[str] = None
+    # The pane id (%N) of its terminal, reported by the hook: the stable address for RF-62.
+    tmux_pane: Optional[str] = None
+    # Who runs in that pane, as the hook saw it: the tmux server pid and the agent process.
+    tmux_server: Optional[str] = None
+    agent_pid: Optional[int] = None
+    agent_started: Optional[str] = None
     state: str = "idle"                   # busy while a turn is running
     turn_request_id: Optional[int] = None
     started_at: datetime
@@ -356,6 +396,8 @@ class SessionModel(BaseModel):
     # RF-29d: continued conversation pointer and prompt counter
     continued_to: Optional[str] = None
     prompt_count: int = 0
+    # RF-62: computed, never stored. compact / effort: supported | pc_only | unsupported.
+    controls: Dict[str, Any] = Field(default_factory=dict)
     # RF-27: configured | missing | unknown (what the hook read from the
     # provider's configuration), or suspect (a Placet turn ended with no MCP
     # call ever made by an "unknown" session). None: never reported.
