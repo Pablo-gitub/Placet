@@ -35,6 +35,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import mcp_check  # noqa: E402
 import placet_common  # noqa: E402
 import spool  # noqa: E402
 
@@ -103,7 +104,9 @@ def build_event(event: dict, provider: str = "claude-code"):
     }
     if name == "SessionStart":
         # "clear" lets Placet move the node to the new conversation (RFC-02).
-        return {"event": "start", "start_source": event.get("source"), **common}
+        # RF-27: whether the provider's configuration lists the Placet MCP server.
+        mcp = mcp_check.mcp_state(provider, event.get("cwd"), home=Path.home())
+        return {"event": "start", "start_source": event.get("source"), "mcp": mcp, **common}
     if name == "UserPromptSubmit":
         payload = {"event": "prompt", **common}
         prompt_text = event.get("prompt") or ""

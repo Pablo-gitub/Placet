@@ -30,6 +30,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import mcp_check  # noqa: E402
 import placet_common  # noqa: E402
 import spool  # noqa: E402
 
@@ -188,6 +189,13 @@ def build_event(event_name: str, payload: dict):
     return None
 
 
+def with_mcp_state(body: dict, home=None) -> dict:
+    """RF-27: a start event also says whether Antigravity's MCP configuration lists Placet."""
+    if body.get("event") == "start":
+        body = {**body, "mcp": mcp_check.mcp_state("antigravity", body.get("cwd"), home=home)}
+    return body
+
+
 def main() -> None:
     agent = placet_common.agent_id(sys.argv)
     event_name = placet_common.option(sys.argv, "--event") or ""
@@ -201,6 +209,7 @@ def main() -> None:
     body = build_event(event_name, payload)
     if not session_id or body is None or not placet_common.active(body.get("cwd")):
         return
+    body = with_mcp_state(body)
     try:
         spool.write_event(agent, session_id, {k: v for k, v in body.items() if v is not None})
     except Exception:
