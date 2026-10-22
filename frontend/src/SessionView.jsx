@@ -524,6 +524,9 @@ export default function SessionView({
           />
         ))}
       </div>
+      {session?.desktop_archived && session.entrypoint === "claude-desktop" && (
+        <p className="composer-note" role="status" data-testid="archived-note">{t("archived.note")}</p>
+      )}
       {onSend && (
         <Composer
           key={`${sessionId}:${draft?.nonce ?? ""}`}

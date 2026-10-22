@@ -16,6 +16,9 @@ from bridge.claude_desktop_log import ClaudeDesktopLog
 
 LOCAL_ID = re.compile(r'local_[A-Za-z0-9-]{1,64}\Z')
 COOLDOWN_SECONDS = 300
+# archived_states(): how many records and how big a record are worth reading.
+MAX_RECORDS = 2000
+MAX_RECORD_BYTES = 1_000_000
 
 
 class ClaudeDesktopWake:
@@ -79,6 +82,31 @@ class ClaudeDesktopWake:
             if result.returncode != 0:
                 raise RuntimeError('Claude Desktop did not accept the conversation link')
         return True
+
+    def archived_states(self):
+        """
+        {Placet session id: archived in the app?} for the conversations whose Desktop record can be
+        read: the same safety as resolve() (no symlinks, plain files, bounded size and count). A
+        session with several records, an unreadable one or an odd id is left out: no claim.
+        """
+        seen, ambiguous = {}, set()
+        try:
+            paths = sorted(self.sessions_dir.glob('*/*/local_*.json'))[:MAX_RECORDS]
+        except OSError:
+            return {}
+        for path in paths:
+            try:
+                if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_RECORD_BYTES:
+                    continue
+                data = json.loads(path.read_text())
+                cli_id = str(uuid.UUID(data.get('cliSessionId')))
+                archived = bool(data.get('isArchived'))
+            except (OSError, ValueError, TypeError, AttributeError):
+                continue
+            if cli_id in seen:
+                ambiguous.add(cli_id)
+            seen[cli_id] = archived
+        return {k: v for k, v in seen.items() if k not in ambiguous}
 
     def diagnose(self, session_id, cwd, since):
         """Why the app did not start the session this attempt asked for (a closed code), if its log says so."""

@@ -3,6 +3,7 @@ import React, { useState } from "react";
 import { CheckCircle, ChevronDown, ChevronRight, Circle, MessageCircleQuestion, PauseCircle, Plus } from "lucide-react";
 import RequestCard from "./RequestCard";
 import { needsReturnApproval } from "./decisions";
+import DesktopCapacity from "./DesktopCapacity";
 import McpWarning from "./McpWarning";
 import { queueStuck } from "./aspects";
 import useHoldClock from "./useHoldClock";
@@ -94,6 +95,7 @@ function ProviderGroup({ provider, sessions, labels, questionsOf, stuckOf, colla
         </span>
         {questions > 0 && <span className="badge-count">{questions}</span>}
       </button>
+      {provider.key === "claude-code" && sessions.some((s) => s.entrypoint === "claude-desktop") && <DesktopCapacity />}
       {!collapsed &&
         sessions.map((s) => (
           <SessionRow

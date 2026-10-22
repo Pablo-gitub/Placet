@@ -1,6 +1,7 @@
 import logging
 
 from bridge.bridge_daemon import BridgeDaemon
+from bridge.claude_desktop_engines import EngineCounter
 from bridge.spool_forwarder import SpoolForwarder, http_sender
 from bridge.stores import HttpStore
 
@@ -14,4 +15,4 @@ if __name__ == "__main__":
     # Talks to the backend over REST (PLACET_API_URL, PLACET_BRIDGE_TOKEN):
     # the bridge needs no access to the database.
     # The hooks queue their events locally: the bridge forwards them.
-    BridgeDaemon(store=HttpStore(), spool=SpoolForwarder(http_sender())).run_forever()
+    BridgeDaemon(store=HttpStore(), spool=SpoolForwarder(http_sender()), engine_counter=EngineCounter()).run_forever()

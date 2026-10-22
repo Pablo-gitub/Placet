@@ -93,6 +93,10 @@ export function providerClass(session) {
 export function sessionStatus(session) {
   if (session.ended_at) return { key: "offline", label: i18n.t("sessions.closed") };
   if (session.suspended_at) return { key: "offline", label: i18n.t("sessions.suspended") };
+  // Archived in Claude Desktop: the app stopped its engine, so "waiting" would be untrue.
+  if (session.desktop_archived && session.entrypoint === "claude-desktop") {
+    return { key: "archived", label: i18n.t("sessions.archivedInClaude") };
+  }
   if (session.state === "busy") return { key: "busy", label: i18n.t("sessions.busy") };
   if (session.reachable) return { key: "idle", label: i18n.t("sessions.idle") };
   if (session.tmux_session) return { key: "idle", label: i18n.t("sessions.tmux") };

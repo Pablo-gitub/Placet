@@ -202,7 +202,8 @@
     "wakeInProgress": "The opening was just requested: wait for it to finish.",
     "wakeNothing": "No message is waiting for this session.",
     "wakeReachable": "The session is already listening.",
-    "wakeUnsupported": "Only a Claude Desktop session can be opened this way."
+    "wakeUnsupported": "Only a Claude Desktop session can be opened this way.",
+    "desktopArchived": "The conversation is archived in Claude: restore it in the app."
   },
   "sessions": {
     "closed": "Closed",
@@ -213,7 +214,8 @@
     "unreachable": "Unreachable",
     "desktop": "desktop app",
     "terminal": "terminal",
-    "opened": "{{project}} · opened {{time}}"
+    "opened": "{{project}} · opened {{time}}",
+    "archivedInClaude": "Archived in Claude"
   },
   "history": {
     "title": "Decision history & log",
@@ -780,5 +782,12 @@
     "lastAttempt": "Last attempt: {{when}}",
     "retry": "Retry opening",
     "capacityDenied": "Claude Desktop reported its limit on preloaded sessions during this attempt. The start is not confirmed; the message is still in Placet: write a message in the chat on the PC to start it."
+  },
+  "archived": {
+    "note": "Restore it in the Claude app to use it; your message will stay waiting."
+  },
+  "capacity": {
+    "line": "Claude Desktop: {{engines}}/{{cap}} sessions loaded",
+    "hint": "Wake-ups from Placet may not start: archive an inactive conversation in the app"
   }
 }

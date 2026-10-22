@@ -2610,6 +2610,8 @@ def create_app(
             raise ProductError(409, "session.excluded", "This project is excluded from Placet (.placet-off).")
         if session.ended_at is not None:
             raise ProductError(409, "session.closed", "The session is closed.")
+        if session.desktop_archived:
+            raise ProductError(409, "session.desktop_archived", "The conversation is archived in Claude: restore it in the app.")
         if session.reachable:
             raise ProductError(409, "session.already_reachable", "The session is already listening.")
         if session.wake_state in ("open_requested", "waiting_for_session"):
@@ -2619,6 +2621,31 @@ def create_app(
         db.request_wake_retry(session_id)
         notify_session(session_id)
         return {"session": session_id, "wake_state": None}
+
+    class DesktopStateReport(BaseModel):
+        archived: List[str] = Field(default_factory=list, max_length=2000)
+        not_archived: List[str] = Field(default_factory=list, max_length=2000)
+        # Loaded Claude Desktop engines against the app's cap: numbers only, both or neither.
+        engines: Optional[int] = Field(default=None, ge=0, le=1000)
+        cap: Optional[int] = Field(default=None, ge=1, le=1000)
+
+    @app.post("/api/bridge/desktop-state")
+    async def bridge_desktop_state(body: DesktopStateReport, who: Principal = Depends(principal)):
+        """What the Claude Desktop app records, read by the bridge: archived conversations (RF-34)."""
+        require_bridge(who)
+        changed = db.set_desktop_archived(body.archived, body.not_archived)
+        for session_id in changed:
+            notify_session(session_id)
+        if body.engines is not None and body.cap is not None:
+            db.set_desktop_capacity(body.engines, body.cap)
+        return {"changed": changed}
+
+    @app.get("/api/claude-desktop/capacity")
+    async def claude_desktop_capacity(response: Response, who: Principal = Depends(principal)):
+        """Loaded Claude Desktop engines against the app's cap, as the bridge last counted (empty if never)."""
+        require_human(who)
+        response.headers["Cache-Control"] = "no-store"
+        return db.get_desktop_capacity()
 
     @app.post("/api/bridge/titles")
     async def bridge_titles(payload: TitlesReport, who: Principal = Depends(principal)):
