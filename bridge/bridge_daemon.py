@@ -11,6 +11,7 @@ from backend.app import envelopes
 from backend.app.models import RequestModel
 from bridge.channels import ChannelError, ChannelUncertain, default_channels
 from bridge.stores import BridgeStore, LocalStore, Work
+from bridge.session_commands import CommandError, run_command
 from bridge.tmux_controller import SessionSpec, TmuxController
 from bridge.attachments import AttachmentError
 from bridge.transcripts import TranscriptError, read_attachment, read_transcript
@@ -426,6 +427,10 @@ class BridgeDaemon:
                     agent_id=job.get("agent_id"),
                 )
                 page = {"mime": mime, "data": base64.b64encode(data).decode("ascii")}
+            elif kind == "session_command":
+                line = run_command(self.tmux, self.store.session_for(job.get("agent_id") or ""),
+                                   job.get("tmux_session"), job.get("command") or "", job.get("level"))
+                page = {"sent": line}
             elif kind == "claude_renew":
                 ok = renew_claude_credentials()
                 if not ok:
@@ -443,7 +448,7 @@ class BridgeDaemon:
             else:
                 return {"ok": False, "error": "unknown_job", "message": f"Unknown job {kind!r}."}
             return {"ok": True, "page": page}
-        except (TranscriptError, AttachmentError) as e:
+        except (TranscriptError, AttachmentError, CommandError) as e:
             return {"ok": False, "error": e.code, "message": str(e)}
         except Exception as e:
             logger.exception("Job %s failed", job.get("id"))

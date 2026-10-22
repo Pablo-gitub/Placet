@@ -285,6 +285,11 @@ class SessionUpload(BaseModel):
 STEER_PROVIDERS = ("claude-code", "antigravity")
 
 
+class EffortPayload(BaseModel):
+    """RF-62: the level is checked against the provider's allowlist by the endpoint."""
+    level: str = Field(max_length=32)
+
+
 class SessionMessage(BaseModel):
     """A message the user writes to a session (RF-34)."""
     mode: Literal["queue", "now"] = "queue"

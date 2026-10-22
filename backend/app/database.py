@@ -408,6 +408,16 @@ class Database:
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_request_events_request ON request_events(request_id);"
             )
+            # RF-62: remote controls typed into a session (/compact, /effort), for the audit.
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS session_control_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                at TEXT NOT NULL,
+                actor TEXT NOT NULL,
+                command TEXT NOT NULL
+            );
+            """)
             # Hook events already applied: the bridge may forward one twice.
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS session_events_seen (
@@ -1904,6 +1914,22 @@ class Database:
                 cursor.execute("UPDATE sessions SET node_id = ? WHERE id = ?", (old["node_id"], new_session_id))
                 cursor.execute("UPDATE sessions SET node_id = NULL WHERE id = ?", (old_session_id,))
             return True
+
+    def log_session_control(self, session_id: str, actor: str, command: str) -> None:
+        """RF-62: a control typed into the session by `actor`."""
+        with self._get_connection() as conn:
+            conn.execute(
+                "INSERT INTO session_control_events (session_id, at, actor, command) VALUES (?, ?, ?, ?)",
+                (session_id, datetime.now(timezone.utc).isoformat(), actor, command),
+            )
+
+    def list_session_controls(self, session_id: str) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT at, actor, command FROM session_control_events WHERE session_id = ? ORDER BY id",
+                (session_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def increment_prompt_count(self, session_id: str) -> None:
         with self._get_connection() as conn:

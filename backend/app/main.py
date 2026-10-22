@@ -33,7 +33,9 @@ from backend.app.database import (
     Database, NameTaken, NodeNameTaken, ProjectNameTaken,
     compose_project_instructions,
 )
+from backend.app.session_commands import command_text, effort_levels
 from backend.app.models import (
+    EffortPayload,
     NotificationSettings,
     ProviderUsage,
     UsageReport,
@@ -1506,6 +1508,65 @@ def create_app(
         if who.kind == "bridge":
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not for the bridge.")
         return db.list_sessions(agent_id=agent_id, include_ended=include_ended, include_excluded=False)
+
+    async def session_command(session_id: str, command: str, level: Optional[str], who: Principal) -> Dict[str, object]:
+        """
+        RF-62: /compact or /effort typed into a Claude Code CLI's tmux pane.
+        Only a supported, open, idle session; a fixed line built here, sent
+        through the bridge; audited.
+        """
+        require_human(who)
+        session = db.get_session(session_id)
+        if session is None:
+            raise ProductError(404, "session.not_found", "Session not found")
+        if session.excluded:
+            raise ProductError(409, "session.excluded", "This project is excluded from Placet (.placet-off).")
+        if session.ended_at is not None:
+            raise ProductError(409, "session.closed", "The session is closed.")
+        state = session.controls.get(command, "unsupported")
+        if state == "pc_only":
+            raise ProductError(409, "session.control_pc_only", "This control is available only on the PC for this session.")
+        if state != "supported":
+            raise ProductError(409, "session.control_unsupported", "This provider offers no remote control for this.")
+        if command == "effort" and level not in effort_levels(session.provider):
+            raise ProductError(422, "session.effort_invalid", "Not an effort level this provider accepts.",
+                               {"levels": list(effort_levels(session.provider))})
+        if session.state != "idle":
+            raise ProductError(409, "session.busy", "The session is working: wait for the turn to end.")
+        line = command_text(command, level, session.provider)
+        params = {"agent_id": session.agent_id, "tmux_session": session.tmux_session, "command": command}
+        if level is not None:
+            params["level"] = level
+
+        def local():
+            from bridge.session_commands import CommandError, run_command
+            from bridge.tmux_controller import SessionSpec, TmuxController
+            agent = config.get_agent(session.agent_id)
+            spec = SessionSpec(name=agent.tmux_session, idle_patterns=agent.idle_patterns,
+                               busy_patterns=agent.busy_patterns) if agent else None
+            try:
+                return {"sent": run_command(TmuxController(), spec, session.tmux_session, command, level)}
+            except CommandError as e:
+                raise ProductError(409, f"session_command.{e.code}", str(e)) from None
+
+        errors = {"wrong_session": (409, "Not the tmux session configured for this agent."),
+                  "tmux_missing": (409, "The tmux session is not running."),
+                  "not_idle": (409, "The session is not at an empty prompt."),
+                  "user_typing": (409, "Someone is typing in the session."),
+                  "invalid": (422, "Not a fixed session command."),
+                  "send_failed": (502, "tmux refused the keys.")}
+        await bridge_call("session_command", params, local, errors)
+        db.log_session_control(session_id, who.actor, line)
+        notify_session(session_id)
+        return {"ok": True, "command": line}
+
+    @app.post("/api/sessions/{session_id}/compact")
+    async def compact_session(session_id: str, who: Principal = Depends(principal)):
+        return await session_command(session_id, "compact", None, who)
+
+    @app.post("/api/sessions/{session_id}/effort")
+    async def set_session_effort(session_id: str, payload: EffortPayload, who: Principal = Depends(principal)):
+        return await session_command(session_id, "effort", payload.level, who)
 
     @app.post("/api/sessions/{session_id}/messages", response_model=RequestModel,
               status_code=status.HTTP_201_CREATED)
