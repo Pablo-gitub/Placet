@@ -48,9 +48,12 @@ CONTINUED_JSONL_UUID = re.compile(
 PLACET_TOOLS = re.compile(r"(^|__|\.|/)placet_(ask_human|send_to_agent)$")
 MAX_MESSAGE_CHARS = 20000
 # RF-29d fallback: where, in the session's own transcript, a continuation
-# summary can be (it is the conversation's first message).
-TRANSCRIPT_HEAD_BYTES = 256 * 1024
+# summary can be (it is the conversation's first message). The backend uses
+# `continues` only on a session's first prompt, and the hook payload carries no
+# such signal, so only a short transcript is read: a longer one is past it.
+TRANSCRIPT_MAX_BYTES = 256 * 1024
 TRANSCRIPT_HEAD_LINES = 5
+TRANSCRIPT_MAX_LINES = TRANSCRIPT_HEAD_LINES + 3
 ADAPTER = "claude_code.py/2"
 
 
@@ -98,17 +101,22 @@ def continued_from_transcript(path):
     The session this one continues, from the head of its own transcript: a
     continuation starts with a summary naming the previous transcript. Only
     that explicit reference counts, and never the transcript itself. None
-    when the file is unreadable or says nothing.
+    when the file is unreadable, says nothing, or is too long to be at its
+    first prompt (it is then not even opened when it is large).
     """
     if not path:
         return None
     try:
+        if os.path.getsize(path) > TRANSCRIPT_MAX_BYTES:
+            return None
         with open(path, "rb") as handle:
-            head = handle.read(TRANSCRIPT_HEAD_BYTES).decode("utf-8", errors="replace")
+            lines = handle.read(TRANSCRIPT_MAX_BYTES).decode("utf-8", errors="replace").splitlines()
     except OSError:
         return None
+    if len(lines) > TRANSCRIPT_MAX_LINES:
+        return None
     own = Path(path).stem.lower()
-    for line in head.splitlines()[:TRANSCRIPT_HEAD_LINES]:
+    for line in lines[:TRANSCRIPT_HEAD_LINES]:
         index = line.find(CONTINUED_PREFIX)
         if index == -1:
             continue
@@ -147,7 +155,9 @@ def build_event(event: dict, provider: str = "claude-code"):
                 payload["continues"] = jsonl_uuids[-1].lower()
         if "continues" not in payload and provider == "claude-code":
             # The summary may not reach the prompt hook: the transcript has it.
-            payload["continues"] = continued_from_transcript(event.get("transcript_path"))
+            found = continued_from_transcript(event.get("transcript_path"))
+            if found:
+                payload["continues"] = found
         return payload
     if name == "PostToolUse" and PLACET_TOOLS.search(event.get("tool_name") or ""):
         request_id = _request_id_from_tool_response(event.get("tool_response"))

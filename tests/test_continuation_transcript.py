@@ -66,3 +66,31 @@ async def test_the_node_follows_even_when_the_prompt_text_lacks_the_summary(env,
     assert (await post(app, "tok-claude", NEW, payload))["continued_from"] == OLD
     assert (await relations_of(app, NEW))["node"] == "planner"
     assert db.get_node(planner.id).session_id == NEW
+
+
+def test_a_transcript_past_the_first_prompt_is_not_read(tmp_path, monkeypatch):
+    """The backend uses `continues` only on the first prompt: later prompts must not pay for a read."""
+    from hooks import claude_code
+    long_session = write_transcript(tmp_path / f"{NEW}.jsonl", [user(SUMMARY)] + [user("avanti")] * 12)
+    assert continued_from_transcript(long_session) is None
+
+    big = tmp_path / "big.jsonl"
+    big.write_text(json.dumps(user(SUMMARY)) + "\n" + "x" * (claude_code.TRANSCRIPT_MAX_BYTES + 1), encoding="utf-8")
+    opened = []
+    monkeypatch.setattr(claude_code, "open", lambda *a, **k: opened.append(a) or (_ for _ in ()).throw(AssertionError),
+                        raising=False)
+    assert continued_from_transcript(str(big)) is None
+    assert opened == []  # decided from the file size, without opening it
+
+
+def test_a_short_continued_transcript_is_still_read(tmp_path):
+    path = write_transcript(tmp_path / f"{NEW}.jsonl", [{"type": "summary"}, user(SUMMARY), user("continua")])
+    assert continued_from_transcript(path) == OLD
+
+
+def test_nothing_found_leaves_the_key_out(tmp_path):
+    plain = write_transcript(tmp_path / f"{NEW}.jsonl", [user("ciao")])
+    event = {"hook_event_name": "UserPromptSubmit", "cwd": CWD, "prompt": "ciao", "transcript_path": plain}
+    assert "continues" not in build_event(event)
+    assert "continues" not in build_event({**event, "transcript_path": str(tmp_path / "missing.jsonl")})
+    assert "continues" not in build_event({k: v for k, v in event.items() if k != "transcript_path"})
