@@ -1565,11 +1565,32 @@ def create_app(
                   "not_idle": (409, "The session is not at an empty prompt."),
                   "user_typing": (409, "Someone is typing in the session."),
                   "invalid": (422, "Not a fixed session command."),
-                  "send_failed": (502, "tmux refused the keys.")}
-        await bridge_call("session_command", params, local, errors)
-        db.log_session_control(session_id, who.actor, line)
+                  "send_failed": (502, "tmux refused the keys; nothing was typed."),
+                  "enter_failed": (502, "The text was typed but Enter was not sent.")}
+        # Certainly not typed: every check failed, or the job never reached the bridge. Anything
+        # else (lost reply, timeout, text typed without Enter, an unexpected error) is uncertain.
+        refused = {"bridge.offline", "session_command.wrong_session", "session_command.tmux_missing",
+                   "session_command.not_idle", "session_command.user_typing", "session_command.invalid",
+                   "session_command.send_failed"}
+        if db.pending_session_control(session_id) is not None:
+            raise ProductError(409, "session.control_pending", "A control for this session is still being sent.")
+        control_id = db.begin_session_control(session_id, who.actor, line)
+        try:
+            await bridge_call("session_command", params, local, errors)
+        except ProductError as e:
+            if e.code in refused:
+                db.settle_session_control(control_id, "refused")
+                raise
+            db.settle_session_control(control_id, "uncertain")
+            raise ProductError(502, "session_command.uncertain",
+                               "The outcome is uncertain: check the session before repeating.",
+                               {"control_id": control_id}) from None
+        except Exception:
+            db.settle_session_control(control_id, "uncertain")
+            raise
+        db.settle_session_control(control_id, "sent")
         notify_session(session_id)
-        return {"ok": True, "command": line}
+        return {"ok": True, "command": line, "control_id": control_id}
 
     @app.post("/api/sessions/{session_id}/compact")
     async def compact_session(session_id: str, who: Principal = Depends(principal)):

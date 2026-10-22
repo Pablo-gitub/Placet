@@ -18,6 +18,8 @@ export default function SessionControls({ session }) {
   const [pending, setPending] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState(null);
+  // The last command's outcome was uncertain: it may already have been applied.
+  const [uncertain, setUncertain] = useState(false);
   const controls = session?.controls;
   if (!controls || Object.keys(controls).length === 0) return null;
 
@@ -31,6 +33,7 @@ export default function SessionControls({ session }) {
   else if (!idle) reason = t("controls.busy");
 
   const run = async (path, body) => {
+    if (uncertain && !window.confirm(t("controls.confirmRepeat"))) return;
     setPending(true); setDone(false); setError(null);
     try {
       const res = await fetch(`/api/sessions/${encodeURIComponent(session.id)}/${path}`, {
@@ -41,11 +44,15 @@ export default function SessionControls({ session }) {
       if (!res.ok) {
         const data = await res.json().catch(() => null);
         setError(apiErrorDescriptor(data, res.status));
+        setUncertain(["session_command.uncertain", "session_command.enter_failed"].includes(data?.code));
       } else {
         setDone(true);
+        setUncertain(false);
       }
     } catch {
-      setError({ key: "errors.operation", params: { status: 0 } });
+      // The request may or may not have reached the backend: treat it as uncertain.
+      setError({ key: "errors.commandUncertain" });
+      setUncertain(true);
     } finally {
       setPending(false);
     }

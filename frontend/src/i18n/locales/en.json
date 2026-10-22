@@ -22,7 +22,8 @@
     "done": "Command sent.",
     "pcOnly": "Available only on the PC for this session.",
     "unsupported": "This provider has no remote control for this (Codex ignores it; Antigravity is not verified).",
-    "busy": "The session is working: available when the turn ends."
+    "busy": "The session is working: available when the turn ends.",
+    "confirmRepeat": "The previous command may already have been applied. Send it again?"
   },
   "home": {
     "questions": "Questions",
@@ -174,7 +175,12 @@
     "invalidTimezone": "Invalid timezone.",
     "invalidDate": "Invalid date format (expected YYYY-MM-DD).",
     "invalidRange": "Start date cannot be after end date.",
-    "rangeTooLarge": "Date range exceeds maximum allowed."
+    "rangeTooLarge": "Date range exceeds maximum allowed.",
+    "commandUncertain": "Uncertain outcome: check the session before repeating.",
+    "commandEnterFailed": "The text was typed but not confirmed: check the session.",
+    "paneStale": "Another session now runs in this terminal.",
+    "paneAmbiguous": "Two sessions are equally recent in this terminal: try again after one of them acts.",
+    "controlPending": "A control for this session is still being sent."
   },
   "sessions": {
     "closed": "Closed",

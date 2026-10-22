@@ -40,10 +40,11 @@ class BridgeJobs:
     def bridge_alive(self) -> bool:
         return self._seen_at is not None and time.monotonic() - self._seen_at < self.alive_seconds
 
-    async def run(self, kind: str, payload: dict, timeout: float = JOB_TIMEOUT_SECONDS) -> dict:
+    async def run(self, kind: str, payload: dict, timeout: Optional[float] = None) -> dict:
         """Queues a job and returns the bridge's result."""
         if not self.bridge_alive():
             raise BridgeOffline()
+        timeout = JOB_TIMEOUT_SECONDS if timeout is None else timeout
         job_id = uuid.uuid4().hex
         future = asyncio.get_running_loop().create_future()
         self._results[job_id] = future

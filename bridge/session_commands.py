@@ -48,6 +48,10 @@ def run_command(tmux, spec, tmux_session: Optional[str], tmux_pane: Optional[str
         recent = tmux.seconds_since_input(spec.name)
         if isinstance(recent, (int, float)) and recent < RECENT_INPUT_SECONDS:
             raise CommandError("user_typing", "Someone is typing in the session.")
-        if not tmux.send_keys(tmux_pane, line, enter=True):
-            raise CommandError("send_failed", "tmux refused the keys.")
+        # Two steps, so that a failure tells what happened: nothing typed (send_failed,
+        # certain) or the text typed but never confirmed (enter_failed, uncertain).
+        if not tmux.type_text(tmux_pane, line):
+            raise CommandError("send_failed", "tmux refused the keys; nothing was typed.")
+        if not tmux.press_enter(tmux_pane):
+            raise CommandError("enter_failed", "The text was typed but Enter was not sent: check the session.")
     return line

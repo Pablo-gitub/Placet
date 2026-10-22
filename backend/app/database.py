@@ -415,9 +415,17 @@ class Database:
                 session_id TEXT NOT NULL,
                 at TEXT NOT NULL,
                 actor TEXT NOT NULL,
-                command TEXT NOT NULL
+                command TEXT NOT NULL,
+                state TEXT NOT NULL DEFAULT 'sent'
             );
             """)
+            # pending (written before dispatch), sent, refused (certainly not typed) or
+            # uncertain. Rows from before states existed were typed: the default says sent.
+            cursor.execute("PRAGMA table_info(session_control_events);")
+            if "state" not in [r["name"] for r in cursor.fetchall()]:
+                cursor.execute("ALTER TABLE session_control_events ADD COLUMN state TEXT NOT NULL DEFAULT 'sent';")
+            # A restart between dispatch and answer leaves what happened unknown.
+            cursor.execute("UPDATE session_control_events SET state = 'uncertain' WHERE state = 'pending';")
             # Hook events already applied: the bridge may forward one twice.
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS session_events_seen (
@@ -1930,18 +1938,35 @@ class Database:
             ).fetchall()
         return [self._row_to_session(r, WAITER_TTL_SECONDS) for r in rows]
 
-    def log_session_control(self, session_id: str, actor: str, command: str) -> None:
-        """RF-62: a control typed into the session by `actor`."""
+    def begin_session_control(self, session_id: str, actor: str, command: str) -> int:
+        """RF-62: audits a control BEFORE it is dispatched, as pending; returns its id."""
         with self._get_connection() as conn:
-            conn.execute(
-                "INSERT INTO session_control_events (session_id, at, actor, command) VALUES (?, ?, ?, ?)",
+            cur = conn.execute(
+                "INSERT INTO session_control_events (session_id, at, actor, command, state)"
+                " VALUES (?, ?, ?, ?, 'pending')",
                 (session_id, datetime.now(timezone.utc).isoformat(), actor, command),
             )
+            return cur.lastrowid
+
+    def settle_session_control(self, control_id: int, state: str) -> None:
+        """sent | refused (certainly not typed) | uncertain; only a pending row changes."""
+        if state not in ("sent", "refused", "uncertain"):
+            raise ValueError(state)
+        with self._get_connection() as conn:
+            conn.execute("UPDATE session_control_events SET state = ? WHERE id = ? AND state = 'pending'",
+                         (state, control_id))
+
+    def pending_session_control(self, session_id: str) -> Optional[int]:
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT id FROM session_control_events WHERE session_id = ? AND state = 'pending' LIMIT 1",
+                (session_id,)).fetchone()
+        return row["id"] if row else None
 
     def list_session_controls(self, session_id: str) -> List[Dict[str, Any]]:
         with self._get_connection() as conn:
             rows = conn.execute(
-                "SELECT at, actor, command FROM session_control_events WHERE session_id = ? ORDER BY id",
+                "SELECT id, at, actor, command, state FROM session_control_events WHERE session_id = ? ORDER BY id",
                 (session_id,),
             ).fetchall()
         return [dict(r) for r in rows]

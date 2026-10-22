@@ -204,6 +204,23 @@ class TmuxController:
             return None
         return max(0.0, time.time() - max(stamps))
 
+    def type_text(self, target: str, text: str) -> bool:
+        """Types a single line literally, without Enter (target: a pane id or a session)."""
+        try:
+            subprocess.run(["tmux", "send-keys", "-t", target, "-l", text], check=True, timeout=5)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to type into {target}: {e}")
+            return False
+
+    def press_enter(self, target: str) -> bool:
+        try:
+            subprocess.run(["tmux", "send-keys", "-t", target, "Enter"], check=True, timeout=5)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to press Enter in {target}: {e}")
+            return False
+
     def send_keys(self, session_name: str, text: str, enter: bool = True) -> bool:
         """
         Injects text into tmux session.

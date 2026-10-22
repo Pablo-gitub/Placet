@@ -84,7 +84,7 @@ async def test_compact_goes_to_the_bridge_as_a_fixed_command(env):
     assert job["session_id"] == "s1" and job["tmux_pane"] == "%3"  # who, and the stable pane
     assert set(job) <= {"id", "kind", "command", "level", "tmux_session", "tmux_pane", "session_id", "agent_id"}  # no free text
     [event] = db.list_session_controls("s1")
-    assert event["actor"].startswith("human") and event["command"] == "/compact"
+    assert event["actor"].startswith("human") and event["command"] == "/compact" and event["state"] == "sent"
 
 
 @pytest.mark.asyncio
@@ -139,15 +139,16 @@ async def test_bridge_failures_become_product_errors(env):
     assert resp.status_code == 503 and resp.json()["code"] == "bridge.offline"
     resp = await post(app, "/api/sessions/s1/compact", bridge_answer={"ok": False, "error": "not_idle"})
     assert resp.status_code == 409 and resp.json()["code"] == "session_command.not_idle"
-    assert db.list_session_controls("s1") == []  # nothing was sent, nothing audited
+    assert [row["state"] for row in db.list_session_controls("s1")] == ["refused", "refused"]  # certainly not typed
 
 
 class FakeTmux:
     """Records every target an operation was aimed at: it must always be the pane id."""
 
-    def __init__(self, exists=True, idle=True, typing=None, pane_session="agent-claude"):
+    def __init__(self, exists=True, idle=True, typing=None, pane_session="agent-claude", type_ok=True, enter_ok=True):
         self.exists, self.idle, self.typing, self.pane_session = exists, idle, typing, pane_session
-        self.sent, self.targets = [], []
+        self.type_ok, self.enter_ok = type_ok, enter_ok
+        self.sent, self.targets, self.typed = [], [], None
 
     def session_exists(self, name):
         return self.exists
@@ -166,6 +167,19 @@ class FakeTmux:
     def send_keys(self, target, text, enter=True):
         self.targets.append(("send", target))
         self.sent.append((target, text, enter))
+        return True
+
+    def type_text(self, target, text):
+        self.targets.append(("send", target))
+        self.typed = (target, text)
+        self.typed_ok_flag = self.type_ok
+        return self.type_ok
+
+    def press_enter(self, target):
+        self.targets.append(("send", target))
+        if not self.enter_ok:
+            return False
+        self.sent.append((target, self.typed[1], True))
         return True
 
 
@@ -275,3 +289,120 @@ def test_normal_delivery_and_a_command_never_type_into_the_same_pane_at_once(env
         assert not finished.wait(0.3) and tmux.sent == []
     worker.join(5)
     assert finished.is_set() and [t for _, t, _ in tmux.sent][0].startswith("[Placet")
+
+
+# --- the outcome is audited before dispatch and may be uncertain ------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_audit_row_exists_as_pending_before_the_bridge_is_asked(env):
+    app, db = env
+    await start(app, "claude", "s1", "claude-code")
+    states = []
+
+    def handle(job):
+        states.append([row["state"] for row in db.list_session_controls("s1")])
+        return {"ok": True, "page": {"sent": "/compact"}}
+
+    task = asyncio.create_task(fake_bridge(app, handle, polls=1))
+    await asyncio.sleep(0.05)
+    async with human_client(app) as human:
+        assert (await human.post("/api/sessions/s1/compact")).status_code == 200
+    await task
+    assert states == [["pending"]]
+    assert [row["state"] for row in db.list_session_controls("s1")] == ["sent"]
+
+
+@pytest.mark.asyncio
+async def test_a_lost_reply_is_uncertain_and_never_retried(env, monkeypatch):
+    app, db = env
+    await start(app, "claude", "s1", "claude-code")
+    monkeypatch.setattr("backend.app.bridge_jobs.JOB_TIMEOUT_SECONDS", 0.3)
+    taken = []
+
+    async def silent_bridge():
+        async with agent_client(app, "tok-bridge") as bridge:
+            for _ in range(3):
+                resp = await bridge.get("/api/bridge/jobs?wait_seconds=1")
+                if resp.status_code != 204:
+                    taken.extend(resp.json()["jobs"])  # took it, never answers
+
+    task = asyncio.create_task(silent_bridge())
+    await asyncio.sleep(0.05)
+    resp = await post(app, "/api/sessions/s1/compact")
+    await task
+    assert resp.status_code == 502 and resp.json()["code"] == "session_command.uncertain"
+    assert len(taken) == 1  # no automatic retry
+    [row] = db.list_session_controls("s1")
+    assert row["state"] == "uncertain"
+    assert resp.json()["params"]["control_id"] == row["id"]
+
+
+@pytest.mark.asyncio
+async def test_text_typed_but_enter_failed_is_uncertain(env):
+    app, db = env
+    await start(app, "claude", "s1", "claude-code")
+    resp = await post(app, "/api/sessions/s1/compact", bridge_answer={"ok": False, "error": "enter_failed"})
+    assert resp.status_code == 502 and resp.json()["code"] == "session_command.uncertain"
+    assert [row["state"] for row in db.list_session_controls("s1")] == ["uncertain"]
+
+
+def test_the_bridge_separates_not_typed_from_typed_without_enter(env):
+    tmux = FakeTmux(type_ok=False)
+    out = daemon(env, tmux).handle_job(JOB)
+    assert out["error"] == "send_failed" and tmux.sent == []
+    tmux = FakeTmux(enter_ok=False)
+    out = daemon(env, tmux).handle_job(JOB)
+    assert out["ok"] is False and out["error"] == "enter_failed"
+    assert tmux.typed == ("%3", "/compact") and tmux.sent == []   # typed, never confirmed, not retried
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_is_audited_as_refused(env):
+    app, db = env
+    await start(app, "claude", "s1", "claude-code")
+    resp = await post(app, "/api/sessions/s1/compact", bridge_answer={"ok": False, "error": "not_idle"})
+    assert resp.status_code == 409 and resp.json()["code"] == "session_command.not_idle"
+    assert [row["state"] for row in db.list_session_controls("s1")] == ["refused"]
+
+
+@pytest.mark.asyncio
+async def test_an_offline_bridge_means_certainly_not_sent(env):
+    app, db = env
+    await start(app, "claude", "s1", "claude-code")
+    offline = await post(app, "/api/sessions/s1/compact")  # nobody ever polled
+    assert offline.status_code == 503 and offline.json()["code"] == "bridge.offline"
+    assert [row["state"] for row in db.list_session_controls("s1")] == ["refused"]
+
+
+@pytest.mark.asyncio
+async def test_a_pending_command_blocks_a_second_one(env):
+    app, db = env
+    await start(app, "claude", "s1", "claude-code")
+    db.begin_session_control("s1", "human:p", "/compact")
+    resp = await post(app, "/api/sessions/s1/effort", {"level": "low"})
+    assert resp.status_code == 409 and resp.json()["code"] == "session.control_pending"
+
+
+def test_a_restart_turns_pending_rows_into_uncertain(tmp_path):
+    path = str(tmp_path / "placet.db")
+    db = Database(path)
+    db.init_db()
+    pending = db.begin_session_control("s1", "human:p", "/compact")
+    done = db.begin_session_control("s1", "human:p", "/effort low")
+    db.settle_session_control(done, "sent")
+    restarted = Database(path)
+    restarted.init_db()
+    assert {row["id"]: row["state"] for row in restarted.list_session_controls("s1")} == {pending: "uncertain", done: "sent"}
+
+
+def test_rows_written_before_states_existed_count_as_sent(tmp_path):
+    import sqlite3
+    path = str(tmp_path / "legacy.db")
+    with sqlite3.connect(path) as conn:
+        conn.execute("CREATE TABLE session_control_events (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,"
+                     " at TEXT NOT NULL, actor TEXT NOT NULL, command TEXT NOT NULL)")
+        conn.execute("INSERT INTO session_control_events (session_id, at, actor, command) VALUES ('s1', '2026-10-22T00:00:00', 'human', '/compact')")
+    db = Database(path)
+    db.init_db()
+    assert [row["state"] for row in db.list_session_controls("s1")] == ["sent"]

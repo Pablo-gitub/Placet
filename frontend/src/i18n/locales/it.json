@@ -22,7 +22,8 @@
     "done": "Comando inviato.",
     "pcOnly": "Disponibile solo sul PC per questa sessione.",
     "unsupported": "Questo provider non ha un controllo da remoto per questa azione (Codex lo ignora; Antigravity non è verificato).",
-    "busy": "La sessione sta lavorando: disponibile a fine turno."
+    "busy": "La sessione sta lavorando: disponibile a fine turno.",
+    "confirmRepeat": "Il comando precedente potrebbe essere già stato applicato. Inviarlo di nuovo?"
   },
   "home": {
     "questions": "Domande",
@@ -174,7 +175,12 @@
     "invalidTimezone": "Fuso orario non valido.",
     "invalidDate": "Formato data non valido (atteso AAAA-MM-GG).",
     "invalidRange": "La data iniziale non può essere successiva alla data finale.",
-    "rangeTooLarge": "L'intervallo di date supera il limite massimo consentito."
+    "rangeTooLarge": "L'intervallo di date supera il limite massimo consentito.",
+    "commandUncertain": "Esito incerto: controlla la sessione prima di ripetere.",
+    "commandEnterFailed": "Il testo è stato digitato ma non confermato: controlla la sessione.",
+    "paneStale": "In questo terminale ora gira un'altra sessione.",
+    "paneAmbiguous": "Due sessioni sono ugualmente recenti in questo terminale: riprova dopo che una delle due agisce.",
+    "controlPending": "Un controllo per questa sessione è ancora in invio."
   },
   "sessions": {
     "closed": "Chiusa",

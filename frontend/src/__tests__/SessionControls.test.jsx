@@ -73,6 +73,46 @@ describe("session controls menu", () => {
     expect(error).not.toHaveTextContent("raw server text");
   });
 
+  it("tells an uncertain outcome apart and asks before repeating it", async () => {
+    const calls = serve(502, { code: "session_command.uncertain", params: { control_id: 4 }, detail: "x" });
+    render(<SessionControls session={session(SUPPORTED)} />);
+    open();
+    fireEvent.click(screen.getByTestId("control-compact"));
+    expect(await screen.findByTestId("control-error")).toHaveTextContent(i18n.t("errors.commandUncertain"));
+    expect(calls).toHaveLength(1);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    fireEvent.click(screen.getByTestId("control-compact"));
+    expect(confirm).toHaveBeenCalledWith(i18n.t("controls.confirmRepeat"));
+    expect(calls).toHaveLength(1);                     // declined: nothing sent
+    confirm.mockReturnValue(true);
+    fireEvent.click(screen.getByTestId("control-compact"));
+    await waitFor(() => expect(calls).toHaveLength(2));  // confirmed: sent again
+  });
+
+  it("does not ask for confirmation after a clean refusal", async () => {
+    const calls = serve(409, { code: "session_command.not_idle", params: {}, detail: "x" });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<SessionControls session={session(SUPPORTED)} />);
+    open();
+    fireEvent.click(screen.getByTestId("control-compact"));
+    await screen.findByTestId("control-error");
+    fireEvent.click(screen.getByTestId("control-compact"));
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it("translates the pane and pending refusals", async () => {
+    for (const [code, key] of [["session.pane_stale", "errors.paneStale"], ["session.pane_ambiguous", "errors.paneAmbiguous"],
+      ["session.control_pending", "errors.controlPending"]]) {
+      serve(409, { code, params: {}, detail: "raw" });
+      const { unmount } = render(<SessionControls session={session(SUPPORTED)} />);
+      open();
+      fireEvent.click(screen.getByTestId("control-compact"));
+      expect(await screen.findByTestId("control-error")).toHaveTextContent(i18n.t(key));
+      unmount();
+    }
+  });
+
   it("renders nothing for a session without control information", () => {
     const { container } = render(<SessionControls session={{ id: "s1", provider: "claude-code" }} />);
     expect(container).toBeEmptyDOMElement();
@@ -81,7 +121,8 @@ describe("session controls menu", () => {
   it("has both languages", () => {
     for (const lng of ["en", "it"]) {
       for (const key of ["controls.title", "controls.compact", "controls.effort", "controls.apply", "controls.done",
-        "controls.pcOnly", "controls.unsupported", "controls.busy", "errors.commandUserTyping", "errors.sessionBusy"]) {
+        "controls.pcOnly", "controls.unsupported", "controls.busy", "errors.commandUserTyping", "errors.sessionBusy", "errors.commandUncertain", "errors.commandEnterFailed",
+        "errors.paneStale", "errors.paneAmbiguous", "errors.controlPending", "controls.confirmRepeat"]) {
         expect(i18n.getFixedT(lng)(key)).not.toBe(key);
       }
     }
