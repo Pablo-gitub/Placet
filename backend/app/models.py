@@ -225,6 +225,7 @@ class RequestModel(BaseModel):
     selected_options: List[str] = Field(default_factory=list)
     custom_text: Optional[str] = None
     created_at: datetime
+    expires_in_seconds: int = DEFAULT_EXPIRES_IN_SECONDS
     expires_at: Optional[datetime] = None
     decided_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None

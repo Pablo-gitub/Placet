@@ -872,6 +872,46 @@ def test_list_undelivered_results_uses_later_of_scheduled_at_and_updated_at(db):
     assert not any(r.id == req.id for r in results_grace)
 
 
+def test_schedule_request_preserves_original_expiry_window_on_reschedule_cycles(db):
+    """The expiry window must not grow or drift when repeatedly scheduling and clearing."""
+    req = db.create_request(RequestCreate(
+        sender_id="claude", recipient_id="codex", prompt="Prompt", expires_in_seconds=3600
+    ))
+    now = datetime.now(timezone.utc)
+    t1 = now + timedelta(hours=2)
+    s1 = db.schedule_request(req.id, t1, actor="human")
+    assert abs((s1.expires_at - t1).total_seconds() - 3600) < 5
+
+    # Simulate clearing the schedule:
+    # Say the request was scheduled, then cleared, so scheduled_at is NULL,
+    # and some time has elapsed since created_at.
+    with db._get_connection() as c:
+        # created_at was 2 hours ago; expires_at was set when clearing to 1 hour from now
+        two_hours_ago = (now - timedelta(hours=2)).isoformat()
+        one_hour_ahead = (now + timedelta(hours=1)).isoformat()
+        c.execute("UPDATE requests SET scheduled_at = NULL, created_at = ?, expires_at = ? WHERE id = ?",
+                  (two_hours_ago, one_hour_ahead, req.id))
+
+    # Now reschedule again for 5 hours in future:
+    # Under the old code: base_dt = created_at (2 hours ago), exp_dt = 1 hour ahead -> window = 3 hours!
+    t2 = now + timedelta(hours=5)
+    s2 = db.schedule_request(req.id, t2, actor="human")
+    # Must STILL be exactly 3600 seconds from t2, NOT 3 hours (10800s)!
+    assert abs((s2.expires_at - t2).total_seconds() - 3600) < 5
+
+    # Also test update_request_decision with schedule preserves original window
+    req3 = db.create_request(RequestCreate(
+        sender_id="claude", recipient_id="codex", prompt="Prompt 3", expires_in_seconds=3600
+    ))
+    with db._get_connection() as c:
+        two_hours_ago = (now - timedelta(hours=2)).isoformat()
+        one_hour_ahead = (now + timedelta(hours=1)).isoformat()
+        c.execute("UPDATE requests SET created_at = ?, expires_at = ? WHERE id = ?",
+                  (two_hours_ago, one_hour_ahead, req3.id))
+    decided = db.update_request_decision(req3.id, RequestStatus.APPROVED, scheduled_at=t2)
+    assert abs((decided.expires_at - t2).total_seconds() - 3600) < 5
+
+
 @pytest.mark.asyncio
 async def test_decide_request_preserves_user_schedule_when_reset_is_earlier(rel_app_and_db):
     """Approval does not advance user scheduled_at if recipient reset is earlier."""

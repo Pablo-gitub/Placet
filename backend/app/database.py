@@ -366,7 +366,8 @@ class Database:
                 project_id INTEGER,
                 project_context TEXT,
                 relation_type_name TEXT,
-                scheduled_at TEXT
+                scheduled_at TEXT,
+                expires_in_seconds INTEGER NOT NULL DEFAULT 86400
             );
             """)
             cursor.execute("""
@@ -620,6 +621,8 @@ class Database:
             if "scheduled_at" not in cols:
                 # RF-65: scheduled delivery timestamp in UTC ISO format
                 cursor.execute("ALTER TABLE requests ADD COLUMN scheduled_at TEXT;")
+            if "expires_in_seconds" not in cols:
+                cursor.execute("ALTER TABLE requests ADD COLUMN expires_in_seconds INTEGER NOT NULL DEFAULT 86400;")
             # RFC-16: each relation has its own reply policy, initially equal to
             # its outbound policy; replies no longer depend on the reverse relation.
             rel_cols = [row["name"] for row in cursor.execute("PRAGMA table_info(relations);").fetchall()]
@@ -712,8 +715,8 @@ class Database:
                     sender_id, recipient_id, question_type, prompt, context,
                     options, status, created_at, expires_at, updated_at, priority,
                     recipient_session_id, prompt_source, project_id, project_context,
-                    scheduled_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    scheduled_at, expires_in_seconds
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     req.sender_id,
@@ -732,6 +735,7 @@ class Database:
                     req.project_id,
                     req.project_context,
                     scheduled_at,
+                    req.expires_in_seconds,
                 ),
             )
             req_id = cursor.lastrowid
@@ -833,6 +837,7 @@ class Database:
             progress_text=row["progress_text"] if "progress_text" in keys else None,
             progress_at=_ts(row["progress_at"]) if "progress_at" in keys else None,
             scheduled_at=_ts(row["scheduled_at"]) if "scheduled_at" in keys else None,
+            expires_in_seconds=row["expires_in_seconds"] if "expires_in_seconds" in keys and row["expires_in_seconds"] else DEFAULT_EXPIRES_IN_SECONDS,
         )
 
     def open_request_toward(self, sender_session: str, recipient_id: str,
@@ -940,20 +945,24 @@ class Database:
             new_expires_at = None
             if scheduled_at_iso is not None:
                 cursor.execute(
-                    "SELECT created_at, expires_at, scheduled_at FROM requests WHERE id = ?",
+                    "SELECT created_at, expires_at, scheduled_at, expires_in_seconds FROM requests WHERE id = ?",
                     (request_id,),
                 )
                 row = cursor.fetchone()
                 if row:
-                    try:
-                        exp_dt = datetime.fromisoformat(row["expires_at"].replace("Z", "+00:00"))
-                        base_str = row["scheduled_at"] or row["created_at"]
-                        base_dt = datetime.fromisoformat(base_str.replace("Z", "+00:00"))
-                        window = exp_dt - base_dt
-                        if window.total_seconds() < 10:
+                    secs = row["expires_in_seconds"] if "expires_in_seconds" in row.keys() and row["expires_in_seconds"] else None
+                    if secs and secs >= 10:
+                        window = timedelta(seconds=secs)
+                    else:
+                        try:
+                            exp_dt = datetime.fromisoformat(row["expires_at"].replace("Z", "+00:00"))
+                            base_str = row["scheduled_at"] or row["created_at"]
+                            base_dt = datetime.fromisoformat(base_str.replace("Z", "+00:00"))
+                            window = exp_dt - base_dt
+                            if window.total_seconds() < 10:
+                                window = timedelta(seconds=DEFAULT_EXPIRES_IN_SECONDS)
+                        except Exception:
                             window = timedelta(seconds=DEFAULT_EXPIRES_IN_SECONDS)
-                    except Exception:
-                        window = timedelta(seconds=DEFAULT_EXPIRES_IN_SECONDS)
                     sched_dt = datetime.fromisoformat(scheduled_at_iso.replace("Z", "+00:00"))
                     now_dt = datetime.now(timezone.utc)
                     new_base = max(now_dt, sched_dt)
@@ -1432,21 +1441,25 @@ class Database:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT created_at, expires_at, scheduled_at FROM requests WHERE id = ?",
+                "SELECT created_at, expires_at, scheduled_at, expires_in_seconds FROM requests WHERE id = ?",
                 (request_id,),
             )
             row = cursor.fetchone()
             if not row:
                 return None
-            try:
-                exp_dt = datetime.fromisoformat(row["expires_at"].replace("Z", "+00:00"))
-                base_str = row["scheduled_at"] or row["created_at"]
-                base_dt = datetime.fromisoformat(base_str.replace("Z", "+00:00"))
-                window = exp_dt - base_dt
-                if window.total_seconds() < 10:
+            secs = row["expires_in_seconds"] if "expires_in_seconds" in row.keys() and row["expires_in_seconds"] else None
+            if secs and secs >= 10:
+                window = timedelta(seconds=secs)
+            else:
+                try:
+                    exp_dt = datetime.fromisoformat(row["expires_at"].replace("Z", "+00:00"))
+                    base_str = row["scheduled_at"] or row["created_at"]
+                    base_dt = datetime.fromisoformat(base_str.replace("Z", "+00:00"))
+                    window = exp_dt - base_dt
+                    if window.total_seconds() < 10:
+                        window = timedelta(seconds=DEFAULT_EXPIRES_IN_SECONDS)
+                except Exception:
                     window = timedelta(seconds=DEFAULT_EXPIRES_IN_SECONDS)
-            except Exception:
-                window = timedelta(seconds=DEFAULT_EXPIRES_IN_SECONDS)
 
             if scheduled_at_iso is None:
                 new_expires_at = (now + window).isoformat()
