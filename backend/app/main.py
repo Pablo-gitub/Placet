@@ -44,6 +44,7 @@ from backend.app.models import (
     UsageReport,
     RequestCreate,
     RequestEvent,
+    UndeliveredItem,
     RequestModel,
     RequestStatus,
     Priority,
@@ -1131,6 +1132,89 @@ def create_app(
         require_human(who)
         expire_and_notify()
         return db.list_requests(status=status, limit=limit, hide_excluded=True)
+
+    BLOCKED_AFTER = timedelta(minutes=2)
+
+    def undelivered_cause(req: RequestModel, now: datetime):
+        """(cause, due_at) of a prompt that has not reached its recipient yet."""
+        if req.status == RequestStatus.PENDING:
+            return "awaiting_approval", req.scheduled_at
+        if req.scheduled_at is not None and req.scheduled_at.astimezone(timezone.utc) > now:
+            # Held back by the usage guard (a system actor scheduled it) or planned by the user.
+            scheduled = [e for e in db.list_events(req.id) if e.event == "scheduled"]
+            by_system = bool(scheduled) and scheduled[-1].actor.startswith("system:")
+            return ("awaiting_refresh" if by_system else "scheduled"), req.scheduled_at
+        target = db.get_session(req.recipient_session_id) if req.recipient_session_id else None
+        waited = now - (req.updated_at or req.created_at).astimezone(timezone.utc)
+        if (target is not None and not target.reachable) or waited > BLOCKED_AFTER:
+            return "blocked", None
+        return None, None                                # on its way: the bridge delivers it in moments
+
+    @app.get("/api/requests/undelivered", response_model=List[UndeliveredItem])
+    async def list_undelivered(response: Response, who: Principal = Depends(principal)):
+        """The user's view of prompts that have not been delivered, by cause (RF-65/66)."""
+        require_human(who)
+        response.headers["Cache-Control"] = "no-store"
+        now = datetime.now(timezone.utc)
+        items = []
+        for req in db.undelivered_requests():
+            cause, due_at = undelivered_cause(req, now)
+            if cause is None:
+                continue
+            sender = db.get_session(req.sender_session_id) if req.sender_session_id else None
+            target = db.get_session(req.recipient_session_id) if req.recipient_session_id else None
+            items.append(UndeliveredItem(
+                request=req, cause=cause, due_at=due_at,
+                sender_node=sender.node_name if sender else None,
+                recipient_node=target.node_name if target else None))
+        return items
+
+    def undelivered_or_refuse(request_id: int) -> RequestModel:
+        req = get_or_404(request_id)
+        if (req.recipient_id == "human"
+                or req.status not in (RequestStatus.PENDING, RequestStatus.APPROVED)
+                or (req.status == RequestStatus.APPROVED and req.delivery != "waiting")):
+            raise ProductError(409, "undelivered.not_available",
+                               "This message has already started to be delivered, or is not a prompt to an agent.")
+        return req
+
+    @app.post("/api/requests/{request_id}/undelivered/cancel", response_model=RequestModel)
+    async def cancel_undelivered(request_id: int, who: Principal = Depends(principal)):
+        """The user withdraws a prompt before it is delivered; the sender is told like for an expiry."""
+        require_human(who)
+        undelivered_or_refuse(request_id)
+        if not db.cancel_undelivered(request_id, actor=who.actor):
+            raise ProductError(409, "undelivered.not_available",
+                               "This message has already started to be delivered, or is not a prompt to an agent.")
+        notify_change(request_id)
+        return get_or_404(request_id)
+
+    class ForwardUndelivered(BaseModel):
+        session_id: str
+
+    @app.post("/api/requests/{request_id}/undelivered/forward", response_model=RequestModel)
+    async def forward_undelivered(request_id: int, payload: ForwardUndelivered, who: Principal = Depends(principal)):
+        """The user sends a prompt that has not been delivered to another open session instead."""
+        require_human(who)
+        req = undelivered_or_refuse(request_id)
+        target = db.get_session(payload.session_id)
+        if target is None:
+            raise ProductError(422, "session.unavailable", f"Session {payload.session_id} is not an open session.")
+        if target.id == req.sender_session_id:
+            raise ProductError(422, "decision.self_target", "A session cannot send a request to itself.")
+        if target.id == req.recipient_session_id:
+            raise ProductError(422, "undelivered.same_session", "The message is already addressed to this session.")
+        check_target_session(target.id, target.agent_id)
+        relation = relation_of(req.sender_session_id, target.id)
+        moved = db.redirect_request(
+            request_id, target.agent_id if target.agent_id != req.recipient_id else None,
+            relation.id if relation else None, target.id, who.actor, approved_too=True)
+        if not moved:
+            raise ProductError(409, "undelivered.not_available",
+                               "This message has already started to be delivered, or is not a prompt to an agent.")
+        notify_change(request_id)
+        notify_session(target.id)
+        return get_or_404(request_id)
 
     def mark_mcp_seen_by(who: Principal, req: RequestModel) -> None:
         """
