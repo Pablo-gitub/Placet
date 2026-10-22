@@ -285,8 +285,13 @@ class SessionUpload(BaseModel):
 STEER_PROVIDERS = ("claude-code", "antigravity")
 
 
-class EffortPayload(BaseModel):
-    """RF-62: the level is checked against the provider's allowlist by the endpoint."""
+class ControlPayload(BaseModel):
+    """RF-62: sent again after an uncertain outcome, the user confirms it explicitly."""
+    confirm_uncertain: bool = False
+
+
+class EffortPayload(ControlPayload):
+    """The level is checked against the provider's allowlist by the endpoint."""
     level: str = Field(max_length=32)
 
 
@@ -308,7 +313,7 @@ class SessionMessage(BaseModel):
 
 def session_controls(provider: Optional[str], tmux_session: Optional[str],
                      entrypoint: Optional[str] = None, tmux_pane: Optional[str] = None,
-                     identified: bool = False) -> Dict[str, str]:
+                     identified: bool = False) -> Dict[str, Any]:
     """
     RF-62: the remote controls a session offers, from its provider and how it
     runs. "supported": the genuine command can be typed into its tmux pane
@@ -325,7 +330,9 @@ def session_controls(provider: Optional[str], tmux_session: Optional[str],
             state = "supported" if tmux_pane and identified else "unsupported"
     else:
         state = "unsupported"
-    return {"compact": state, "effort": state}
+    from backend.app.session_commands import effort_levels
+    return {"compact": state, "effort": state,
+            "effort_levels": list(effort_levels(provider)) if state == "supported" else []}
 
 
 class SessionModel(BaseModel):
@@ -367,7 +374,7 @@ class SessionModel(BaseModel):
     continued_to: Optional[str] = None
     prompt_count: int = 0
     # RF-62: computed, never stored. compact / effort: supported | pc_only | unsupported.
-    controls: Dict[str, str] = Field(default_factory=dict)
+    controls: Dict[str, Any] = Field(default_factory=dict)
 
 
 class NodeModel(BaseModel):

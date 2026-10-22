@@ -5,7 +5,8 @@ import SessionControls from "../SessionControls";
 import i18n from "../i18n";
 
 const session = (controls, over = {}) => ({ id: "s1", provider: "claude-code", state: "idle", controls, ...over });
-const SUPPORTED = { compact: "supported", effort: "supported" };
+const LEVELS = ["low", "medium", "high", "xhigh", "max", "auto"];
+const SUPPORTED = { compact: "supported", effort: "supported", effort_levels: LEVELS };
 
 function serve(status = 200, body = { ok: true }) {
   const calls = [];
@@ -36,7 +37,7 @@ describe("session controls menu", () => {
     render(<SessionControls session={session(SUPPORTED)} />);
     open();
     const picker = screen.getByTestId("control-effort-level");
-    expect([...picker.options].map((o) => o.value)).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    expect([...picker.options].map((o) => o.value)).toEqual(LEVELS);          // the backend's list, not a copy
     fireEvent.change(picker, { target: { value: "xhigh" } });
     fireEvent.click(screen.getByTestId("control-effort"));
     await waitFor(() => expect(calls).toHaveLength(1));
@@ -44,13 +45,13 @@ describe("session controls menu", () => {
   });
 
   it("is disabled with the reason when the control is PC-only or unsupported", () => {
-    const { unmount } = render(<SessionControls session={session({ compact: "pc_only", effort: "pc_only" })} />);
+    const { unmount } = render(<SessionControls session={session({ compact: "pc_only", effort: "pc_only", effort_levels: [] })} />);
     open();
     expect(screen.getByTestId("control-compact")).toBeDisabled();
     expect(screen.getByTestId("control-effort")).toBeDisabled();
     expect(screen.getByTestId("control-explanation")).toHaveTextContent(i18n.t("controls.pcOnly"));
     unmount();
-    render(<SessionControls session={session({ compact: "unsupported", effort: "unsupported" }, { provider: "codex" })} />);
+    render(<SessionControls session={session({ compact: "unsupported", effort: "unsupported", effort_levels: [] }, { provider: "codex" })} />);
     open();
     expect(screen.getByTestId("control-compact")).toBeDisabled();
     expect(screen.getByTestId("control-explanation")).toHaveTextContent(i18n.t("controls.unsupported"));
@@ -73,20 +74,31 @@ describe("session controls menu", () => {
     expect(error).not.toHaveTextContent("raw server text");
   });
 
-  it("tells an uncertain outcome apart and asks before repeating it", async () => {
-    const calls = serve(502, { code: "session_command.uncertain", params: { control_id: 4 }, detail: "x" });
+  it("tells an uncertain outcome apart, and repeats only with the user's explicit confirmation", async () => {
+    const answers = [
+      [502, { code: "session_command.uncertain", params: { control_id: 4 }, detail: "x" }],
+      [409, { code: "session.control_uncertain", params: { control_id: 4 }, detail: "x" }],
+      [200, { ok: true, command: "/compact", state: "sent" }],
+    ];
+    const calls = [];
+    global.fetch = vi.fn((url, opts = {}) => {
+      calls.push({ url, body: opts.body && JSON.parse(opts.body) });
+      const [status, body] = answers[Math.min(calls.length - 1, answers.length - 1)];
+      return Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(body) });
+    });
     render(<SessionControls session={session(SUPPORTED)} />);
     open();
     fireEvent.click(screen.getByTestId("control-compact"));
     expect(await screen.findByTestId("control-error")).toHaveTextContent(i18n.t("errors.commandUncertain"));
-    expect(calls).toHaveLength(1);
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    fireEvent.click(screen.getByTestId("control-compact"));
-    expect(confirm).toHaveBeenCalledWith(i18n.t("controls.confirmRepeat"));
-    expect(calls).toHaveLength(1);                     // declined: nothing sent
+    fireEvent.click(screen.getByTestId("control-compact"));                    // the server asks for confirmation
+    await waitFor(() => expect(confirm).toHaveBeenCalledWith(i18n.t("controls.confirmRepeat")));
+    expect(calls).toHaveLength(2);                                             // declined: not resent
+    answers.splice(1, 0, answers[1]);
     confirm.mockReturnValue(true);
     fireEvent.click(screen.getByTestId("control-compact"));
-    await waitFor(() => expect(calls).toHaveLength(2));  // confirmed: sent again
+    await waitFor(() => expect(calls.at(-1).body).toEqual({ confirm_uncertain: true }));   // confirmed: resent, flagged
+    expect(await screen.findByTestId("control-done")).toBeInTheDocument();
   });
 
   it("does not ask for confirmation after a clean refusal", async () => {
@@ -118,6 +130,8 @@ describe("session controls menu", () => {
     open();
     const note = screen.getByTestId("control-effort-note");
     expect(note).toHaveTextContent(i18n.t("controls.effortPersists"));
+    expect(note).toHaveTextContent("CLAUDE_CODE_EFFORT_LEVEL");
+    expect(note).toHaveTextContent("auto");
     expect(note.querySelector("a")).toHaveAttribute(
       "href", "https://code.claude.com/docs/en/model-config#adjust-effort-level");
   });
@@ -172,7 +186,7 @@ describe("session controls menu", () => {
   it("has both languages", () => {
     for (const lng of ["en", "it"]) {
       for (const key of ["controls.title", "controls.compact", "controls.effort", "controls.apply", "controls.done",
-        "controls.pcOnly", "controls.unsupported", "controls.busy", "errors.commandUserTyping", "errors.sessionBusy", "errors.commandUncertain", "errors.commandEnterFailed", "errors.commandCheckFailed", "errors.commandIdentity", "controls.effortPersists", "controls.needsConfirmation", "controls.effortDocs",
+        "controls.pcOnly", "controls.unsupported", "controls.busy", "errors.commandUserTyping", "errors.sessionBusy", "errors.commandUncertain", "errors.commandEnterFailed", "errors.commandCheckFailed", "errors.commandIdentity", "errors.controlUncertain", "controls.effortPersists", "controls.needsConfirmation", "controls.effortDocs",
         "errors.paneStale", "errors.paneAmbiguous", "errors.controlPending", "controls.confirmRepeat"]) {
         expect(i18n.getFixedT(lng)(key)).not.toBe(key);
       }

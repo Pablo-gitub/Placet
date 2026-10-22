@@ -6,7 +6,8 @@ from fixed pieces, on both sides (backend and bridge).
 from typing import Optional
 
 # Claude Code's `--effort <level>` (claude --help, 2.1.x): low, medium, high, xhigh, max.
-EFFORT_LEVELS = {"claude-code": ("low", "medium", "high", "xhigh", "max")}
+# `auto` clears the saved level and returns to the model's default (same page).
+EFFORT_LEVELS = {"claude-code": ("low", "medium", "high", "xhigh", "max", "auto")}
 COMMANDS = ("compact", "effort")
 
 

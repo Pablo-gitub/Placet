@@ -69,6 +69,7 @@ export function apiErrorDescriptor(body, status) {
     "session.effort_invalid": "errors.effortInvalid",
     "session_command.invalid": "errors.effortInvalid",
     "session_command.uncertain": "errors.commandUncertain",
+    "session.control_uncertain": "errors.controlUncertain",
     "session_command.check_failed": "errors.commandCheckFailed",
     "session_command.expired": "errors.commandExpired",
     "session_command.unknown_job": "errors.commandBridgeOld",

@@ -24,7 +24,7 @@
     "unsupported": "This provider has no remote control for this (Codex ignores it; Antigravity is not verified).",
     "busy": "The session is working: available when the turn ends.",
     "confirmRepeat": "The previous command may already have been applied. Send it again?",
-    "effortPersists": "low, medium, high and xhigh are saved as the default for future sessions; max applies to this session only. Available levels depend on the model.",
+    "effortPersists": "low, medium, high and xhigh are saved as the default for future sessions; max applies to this session only; auto clears the saved level and returns to the model's default. If CLAUDE_CODE_EFFORT_LEVEL is set in the environment it is an explicit choice that takes precedence over saved levels. Available levels depend on the model.",
     "effortDocs": "Effort levels in the Claude Code documentation",
     "needsConfirmation": "Command typed, but a confirmation is waiting on the PC: confirm it there."
   },
@@ -189,7 +189,8 @@
     "commandExpired": "The terminal was busy for too long: nothing was sent.",
     "commandBridgeOld": "The bridge on the PC is too old for this command: update it. Nothing was sent.",
     "sessionRequestRunning": "A Placet request is being delivered to or executed by this session: try again when it ends.",
-    "bridgeNotTaken": "The bridge on the PC did not pick the command up. Nothing was sent."
+    "bridgeNotTaken": "The bridge on the PC did not pick the command up. Nothing was sent.",
+    "controlUncertain": "The previous command's outcome is uncertain: check the session first."
   },
   "sessions": {
     "closed": "Closed",

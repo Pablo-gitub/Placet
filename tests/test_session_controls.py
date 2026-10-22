@@ -39,9 +39,10 @@ async def start(app, agent, session_id, provider, entrypoint=None, tmux=None, pa
         assert (await client.post(f"/api/sessions/{session_id}/events", json=body)).status_code == 200
 
 
-SUPPORTED = {"compact": "supported", "effort": "supported"}
-PC_ONLY = {"compact": "pc_only", "effort": "pc_only"}
-UNSUPPORTED = {"compact": "unsupported", "effort": "unsupported"}
+LEVELS = ["low", "medium", "high", "xhigh", "max", "auto"]
+SUPPORTED = {"compact": "supported", "effort": "supported", "effort_levels": LEVELS}
+PC_ONLY = {"compact": "pc_only", "effort": "pc_only", "effort_levels": []}
+UNSUPPORTED = {"compact": "unsupported", "effort": "unsupported", "effort_levels": []}
 
 
 @pytest.mark.asyncio

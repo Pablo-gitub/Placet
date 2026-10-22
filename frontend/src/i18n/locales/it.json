@@ -24,7 +24,7 @@
     "unsupported": "Questo provider non ha un controllo da remoto per questa azione (Codex lo ignora; Antigravity non è verificato).",
     "busy": "La sessione sta lavorando: disponibile a fine turno.",
     "confirmRepeat": "Il comando precedente potrebbe essere già stato applicato. Inviarlo di nuovo?",
-    "effortPersists": "low, medium, high e xhigh vengono salvati come predefiniti per le sessioni future; max vale solo per questa sessione. I livelli disponibili dipendono dal modello.",
+    "effortPersists": "low, medium, high e xhigh vengono salvati come predefiniti per le sessioni future; max vale solo per questa sessione; auto cancella il livello salvato e torna al predefinito del modello. Se CLAUDE_CODE_EFFORT_LEVEL è impostata nell'ambiente è una scelta esplicita che ha la precedenza sui livelli salvati. I livelli disponibili dipendono dal modello.",
     "effortDocs": "Livelli di effort nella documentazione di Claude Code",
     "needsConfirmation": "Comando digitato, ma una conferma aspetta sul PC: confermalo lì."
   },
@@ -189,7 +189,8 @@
     "commandExpired": "Il terminale è rimasto occupato troppo a lungo: non è stato inviato nulla.",
     "commandBridgeOld": "Il bridge sul PC è troppo vecchio per questo comando: aggiornalo. Non è stato inviato nulla.",
     "sessionRequestRunning": "Una richiesta Placet è in consegna o in esecuzione in questa sessione: riprova quando finisce.",
-    "bridgeNotTaken": "Il bridge sul PC non ha preso in carico il comando. Non è stato inviato nulla."
+    "bridgeNotTaken": "Il bridge sul PC non ha preso in carico il comando. Non è stato inviato nulla.",
+    "controlUncertain": "L'esito del comando precedente è incerto: controlla prima la sessione."
   },
   "sessions": {
     "closed": "Chiusa",

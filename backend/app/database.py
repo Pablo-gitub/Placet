@@ -2005,6 +2005,13 @@ class Database:
             conn.execute("UPDATE session_control_events SET state = ? WHERE id = ? AND state = 'pending'",
                          (state, control_id))
 
+    def last_session_control(self, session_id: str) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT id, at, actor, command, state FROM session_control_events WHERE session_id = ?"
+                " ORDER BY id DESC LIMIT 1", (session_id,)).fetchone()
+        return dict(row) if row else None
+
     def pending_session_control(self, session_id: str) -> Optional[int]:
         with self._get_connection() as conn:
             row = conn.execute(

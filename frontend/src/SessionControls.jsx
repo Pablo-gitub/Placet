@@ -3,9 +3,6 @@ import { useTranslation } from "react-i18next";
 import { SlidersHorizontal } from "lucide-react";
 import { apiErrorDescriptor } from "./i18n/errors";
 
-// RF-62: what Claude Code's `--effort` accepts (the backend holds the same list).
-const EFFORT_LEVELS = { "claude-code": ["low", "medium", "high", "xhigh", "max"] };
-
 /**
  * RF-62: "Compact" and "Effort" for the session, in the header. Enabled only
  * for a supported idle session (a Claude Code CLI in tmux); otherwise the
@@ -20,12 +17,10 @@ export default function SessionControls({ session }) {
   // The command was typed but a dialog waits for the user on the PC.
   const [needsConfirmation, setNeedsConfirmation] = useState(false);
   const [error, setError] = useState(null);
-  // The last command's outcome was uncertain: it may already have been applied.
-  const [uncertain, setUncertain] = useState(false);
   const controls = session?.controls;
   if (!controls || Object.keys(controls).length === 0) return null;
 
-  const levels = EFFORT_LEVELS[session.provider] || [];
+  const levels = controls.effort_levels || [];
   const state = controls.compact;
   const idle = session.state === "idle";
   const enabled = state === "supported" && idle && !pending;
@@ -34,29 +29,33 @@ export default function SessionControls({ session }) {
   else if (state !== "supported") reason = t("controls.unsupported");
   else if (!idle) reason = t("controls.busy");
 
-  const run = async (path, body) => {
-    if (uncertain && !window.confirm(t("controls.confirmRepeat"))) return;
+  const run = async (path, body = {}, confirmed = false) => {
     setPending(true); setDone(false); setNeedsConfirmation(false); setError(null);
     try {
       const res = await fetch(`/api/sessions/${encodeURIComponent(session.id)}/${path}`, {
         method: "POST",
-        headers: body ? { "Content-Type": "application/json" } : undefined,
-        body: body ? JSON.stringify(body) : undefined,
+        headers: confirmed || body.level ? { "Content-Type": "application/json" } : undefined,
+        body: confirmed ? JSON.stringify({ ...body, confirm_uncertain: true })
+          : Object.keys(body).length ? JSON.stringify(body) : undefined,
       });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
+        if (data?.code === "session.control_uncertain" && !confirmed) {
+          // The previous command may already have been applied (the server remembers it for every
+          // tab): repeat only if the user says so.
+          setPending(false);
+          if (window.confirm(t("controls.confirmRepeat"))) await run(path, body, true);
+          return;
+        }
         setError(apiErrorDescriptor(data, res.status));
-        setUncertain(["session_command.uncertain", "session_command.enter_failed"].includes(data?.code));
       } else {
         const data = await res.json().catch(() => null);
         if (data?.state === "needs_confirmation") setNeedsConfirmation(true);
         else setDone(true);
-        setUncertain(false);
       }
     } catch {
-      // The request may or may not have reached the backend: treat it as uncertain.
+      // The request may or may not have reached the backend.
       setError({ key: "errors.commandUncertain" });
-      setUncertain(true);
     } finally {
       setPending(false);
     }

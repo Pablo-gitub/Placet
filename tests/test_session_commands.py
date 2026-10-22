@@ -74,6 +74,7 @@ async def post(app, path, body=None, bridge_answer=None, seen=None):
 def test_the_command_strings_are_fixed():
     assert command_text("compact") == "/compact"
     assert command_text("effort", "max") == "/effort max"
+    assert command_text("effort", "auto") == "/effort auto"          # clears the saved level
     for bad in (("effort", None), ("effort", "extreme"), ("effort", "high; rm -rf"), ("rm", None), ("compact", "x\n")):
         with pytest.raises(ValueError):
             command_text(*bad)
@@ -786,3 +787,59 @@ async def test_a_session_with_a_request_being_delivered_or_executed_takes_no_com
             conn.execute("UPDATE requests SET status = ? WHERE id = ?", (status, req.id))
         resp = await post(app, "/api/sessions/s1/compact")
         assert resp.status_code == 409 and resp.json()["code"] == "session.has_request_running", status
+
+
+# --- the user must confirm repeating after an uncertain outcome (server side, not per tab) --------
+
+
+def age_last_control(db, session_id, minutes):
+    from datetime import datetime, timedelta, timezone
+    then = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
+    with db._get_connection() as conn:
+        conn.execute("UPDATE session_control_events SET at = ? WHERE session_id = ?", (then, session_id))
+
+
+OK_ANSWER = {"ok": True, "page": {"sent": "/compact", "needs_confirmation": False}}
+
+
+@pytest.mark.asyncio
+async def test_after_an_uncertain_outcome_a_repeat_needs_the_explicit_confirmation(env):
+    app, db = env
+    await start(app, "claude", "s1", "claude-code")
+    control = db.begin_session_control("s1", "human:p", "/compact")
+    db.settle_session_control(control, "uncertain")
+    blocked = await post(app, "/api/sessions/s1/compact", bridge_answer=OK_ANSWER)
+    assert blocked.status_code == 409 and blocked.json()["code"] == "session.control_uncertain"
+    assert blocked.json()["params"]["control_id"] == control
+    assert [row["state"] for row in db.list_session_controls("s1")] == ["uncertain"]      # nothing was sent
+    blocked_effort = await post(app, "/api/sessions/s1/effort", {"level": "low"})
+    assert blocked_effort.status_code == 409 and blocked_effort.json()["code"] == "session.control_uncertain"
+    ok = await post(app, "/api/sessions/s1/compact", {"confirm_uncertain": True}, bridge_answer=OK_ANSWER)
+    assert ok.status_code == 200
+    again = await post(app, "/api/sessions/s1/compact", bridge_answer=OK_ANSWER)           # the last row is sent now
+    assert again.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_an_old_uncertain_outcome_or_another_state_asks_for_nothing(env):
+    app, db = env
+    await start(app, "claude", "s1", "claude-code")
+    control = db.begin_session_control("s1", "human:p", "/compact")
+    db.settle_session_control(control, "uncertain")
+    age_last_control(db, "s1", 24 * 60)
+    assert (await post(app, "/api/sessions/s1/compact", bridge_answer=OK_ANSWER)).status_code == 200
+    for state in ("needs_confirmation", "refused", "sent"):
+        control = db.begin_session_control("s1", "human:p", "/compact")
+        db.settle_session_control(control, state)
+        assert (await post(app, "/api/sessions/s1/compact", bridge_answer=OK_ANSWER)).status_code == 200, state
+
+
+@pytest.mark.asyncio
+async def test_the_effort_levels_come_from_the_session_controls(env):
+    app, db = env
+    await start(app, "claude", "s1", "claude-code")
+    assert db.get_session("s1").controls["effort_levels"] == ["low", "medium", "high", "xhigh", "max", "auto"]
+    seen = []
+    ok = await post(app, "/api/sessions/s1/effort", {"level": "auto"},
+                    bridge_answer={"ok": True, "page": {"sent": "/effort auto", "needs_confirmation": False}}, seen=seen)
+    assert ok.status_code == 200 and ok.json()["command"] == "/effort auto" and seen[0]["level"] == "auto"

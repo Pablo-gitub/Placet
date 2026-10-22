@@ -37,6 +37,7 @@ from backend.app.database import (
 )
 from backend.app.session_commands import command_text, effort_levels
 from backend.app.models import (
+    ControlPayload,
     EffortPayload,
     NotificationSettings,
     ProviderUsage,
@@ -124,6 +125,9 @@ class TitlesReport(BaseModel):
     titles: Dict[str, str] = Field(default_factory=dict, max_length=500)
 
 
+
+# RF-62: an uncertain control this recent asks for an explicit confirmation before a repeat.
+UNCERTAIN_CONFIRM_WINDOW = timedelta(minutes=30)
 
 # RF-43: one "turn finished" notification per followed session at most this often.
 TURN_END_NOTIFY_GAP = 60.0
@@ -1522,7 +1526,8 @@ def create_app(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not for the bridge.")
         return db.list_sessions(agent_id=agent_id, include_ended=include_ended, include_excluded=False)
 
-    async def session_command(session_id: str, command: str, level: Optional[str], who: Principal) -> Dict[str, object]:
+    async def session_command(session_id: str, command: str, level: Optional[str], who: Principal,
+                              confirm_uncertain: bool = False) -> Dict[str, object]:
         """
         RF-62: /compact or /effort typed into a Claude Code CLI's tmux pane.
         Only a supported, open, idle session; a fixed line built here, sent
@@ -1602,6 +1607,14 @@ def create_app(
                    "session_command.agent_gone", "session_command.agent_not_in_pane",
                    "session_command.invalid",
                    "session_command.send_failed"}
+        # After an uncertain outcome the command may already have been applied: repeating it needs the
+        # user's explicit confirmation, kept here so that it holds for every tab and device.
+        last = db.last_session_control(session_id)
+        if last and last["state"] == "uncertain" and not confirm_uncertain \
+                and datetime.now(timezone.utc) - datetime.fromisoformat(last["at"]) < UNCERTAIN_CONFIRM_WINDOW:
+            raise ProductError(409, "session.control_uncertain",
+                               "The previous command's outcome is uncertain: check the session, then confirm.",
+                               {"control_id": last["id"], "command": last["command"]})
         if db.session_has_running_request(session.id):
             raise ProductError(409, "session.has_request_running",
                                "A Placet request is being delivered to or executed by this session.")
@@ -1630,12 +1643,13 @@ def create_app(
         return {"ok": True, "command": line, "control_id": control_id, "state": state}
 
     @app.post("/api/sessions/{session_id}/compact")
-    async def compact_session(session_id: str, who: Principal = Depends(principal)):
-        return await session_command(session_id, "compact", None, who)
+    async def compact_session(session_id: str, payload: Optional[ControlPayload] = None,
+                              who: Principal = Depends(principal)):
+        return await session_command(session_id, "compact", None, who, bool(payload and payload.confirm_uncertain))
 
     @app.post("/api/sessions/{session_id}/effort")
     async def set_session_effort(session_id: str, payload: EffortPayload, who: Principal = Depends(principal)):
-        return await session_command(session_id, "effort", payload.level, who)
+        return await session_command(session_id, "effort", payload.level, who, payload.confirm_uncertain)
 
     @app.post("/api/sessions/{session_id}/messages", response_model=RequestModel,
               status_code=status.HTTP_201_CREATED)
