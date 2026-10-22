@@ -26,7 +26,7 @@ describe("the missing Placet MCP warning", () => {
     render(<Home requests={[]} sessions={[{ ...base, mcp_state: "missing" }, { ...base, id: "s2", mcp_state: "configured" }]}
       usage={null} onDecide={vi.fn()} onOpenSession={vi.fn()} onTogglePin={vi.fn()} />);
     const badge = screen.getByTestId("session-mcp-s1");
-    expect(badge).toHaveAttribute("title", expect.stringContaining(i18n.t("mcp.hint")));
+    expect(badge).toHaveAttribute("title", expect.stringContaining(i18n.t("mcp.hintMissing")));
     expect(screen.queryByTestId("session-mcp-s2")).toBeNull();
   });
 
@@ -42,9 +42,34 @@ describe("the missing Placet MCP warning", () => {
 
   it("has both languages", () => {
     for (const lng of ["en", "it"]) {
-      for (const key of ["mcp.warning", "mcp.hint", "mcp.guide"]) {
+      for (const key of ["mcp.warning", "mcp.hintMissing", "mcp.hintSuspect", "mcp.guide"]) {
         expect(i18n.getFixedT(lng)(key)).not.toBe(key);
       }
     }
+  });
+});
+
+describe("the warning does not overstate what Placet knows", () => {
+  it("says what was (not) found, differently for missing and suspect, in both languages", () => {
+    for (const lng of ["en", "it"]) {
+      const t = i18n.getFixedT(lng);
+      const missing = t("mcp.hintMissing");
+      const suspect = t("mcp.hintSuspect");
+      expect(missing).not.toBe("mcp.hintMissing");
+      expect(suspect).not.toBe("mcp.hintSuspect");
+      expect(missing).not.toBe(suspect);
+      for (const text of [t("mcp.warning"), missing, suspect]) {
+        expect(text).not.toMatch(/cannot|can't|non può|impossibile/i);
+      }
+    }
+  });
+
+  it("shows the hint of its own state", () => {
+    const { rerender } = render(<Home requests={[]} sessions={[{ ...base, mcp_state: "suspect" }]}
+      usage={null} onDecide={vi.fn()} onOpenSession={vi.fn()} onTogglePin={vi.fn()} />);
+    expect(screen.getByTestId("session-mcp-s1")).toHaveAttribute("title", expect.stringContaining(i18n.t("mcp.hintSuspect")));
+    rerender(<Home requests={[]} sessions={[{ ...base, mcp_state: "missing" }]}
+      usage={null} onDecide={vi.fn()} onOpenSession={vi.fn()} onTogglePin={vi.fn()} />);
+    expect(screen.getByTestId("session-mcp-s1")).toHaveAttribute("title", expect.stringContaining(i18n.t("mcp.hintMissing")));
   });
 });

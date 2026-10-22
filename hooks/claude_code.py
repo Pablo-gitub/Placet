@@ -136,10 +136,12 @@ def build_event(event: dict, provider: str = "claude-code"):
 
 
 MCP_MISSING_CONTEXT = (
-    "Placet notice: this session's configuration has no `placet` MCP server, so the Placet tools "
-    "(placet_reply, placet_ack, placet_ask_human, placet_send_to_agent) are not available here. "
-    "Tell the user at your next reply that Placet MCP is not connected; messages from Placet "
-    "cannot be answered from this session until it is added (docs/installation.md, step 3)."
+    "Placet notice: no `placet` MCP server was found in the configurations Placet checked for this "
+    "session (it does not look at plugins or managed settings), so it may not be connected. "
+    "Check your available tools: if the Placet tools (placet_reply, placet_ack, placet_ask_human, "
+    "placet_send_to_agent) are listed, ignore this notice. If they are not, tell the user at your "
+    "next reply, because messages from Placet may not be answerable from this session until the "
+    "server is added (docs/installation.md, step 3)."
 )
 
 

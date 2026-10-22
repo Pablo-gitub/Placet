@@ -15,8 +15,9 @@
     "auto": "Auto"
   },
   "mcp": {
-    "warning": "Placet MCP non collegato",
-    "hint": "Questa sessione non può rispondere né confermare: aggiungi il server placet alla sua configurazione MCP.",
+    "warning": "Placet MCP non rilevato",
+    "hintMissing": "Non trovato nelle configurazioni che Placet controlla. Verifica la configurazione MCP del client e i suoi strumenti disponibili.",
+    "hintSuspect": "In questa sessione non è stata vista alcuna chiamata agli strumenti Placet. Verifica gli strumenti disponibili del client.",
     "guide": "Guida all'installazione"
   },
   "home": {

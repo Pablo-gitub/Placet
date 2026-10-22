@@ -1,16 +1,20 @@
 """
-RF-27: is the Placet MCP server configured for this provider? (stdlib only)
+RF-27: does the provider's configuration list the Placet MCP server? (stdlib only)
 
-Read-only look at the provider's own configuration. Only whether an entry
-named like `placet` exists is kept: no value of the files is read further,
-stored or sent, and nothing is written.
+Read-only look at the provider's own configuration files. Only whether an
+entry named like `placet` exists, and whether it is switched off, is kept: no
+other value is read, stored or sent, and nothing is written.
 
-  configured  an entry for Placet was found
-  missing     at least one configuration was read and none lists Placet
-  unknown     nothing could be read (absent or broken files, other provider)
+  configured  an enabled entry for Placet was found in the files checked
+  missing     at least one file was read and none lists Placet
+  unknown     nothing could be read (absent or broken files, other provider),
+              or the entry is switched off, so what applies is not clear
 
-"missing" can be wrong when the server comes from somewhere not looked at
-here (a plugin, managed settings): the caller words the warning accordingly.
+These describe the CONFIGURATION that was detected, never the connection: a
+configured server can still fail to start, and "missing" only means "not found
+in the files looked at" (a plugin or managed settings are not looked at). The
+connection itself is only known when a Placet MCP call is observed (backend,
+`mcp_seen_at`). The wording shown to people and agents must stay that careful.
 """
 import json
 import os
@@ -23,8 +27,25 @@ except ImportError:  # Python < 3.11
     tomllib = None
 
 
+def _placet_entries(servers):
+    """The Placet entries of an mcpServers-like table, as {name: entry}."""
+    if not isinstance(servers, dict):
+        return {}
+    return {name: entry for name, entry in servers.items() if "placet" in str(name).lower()}
+
+
+def _switched_off(entry) -> bool:
+    return isinstance(entry, dict) and (entry.get("enabled") is False or entry.get("disabled") is True)
+
+
 def _lists_placet(servers) -> bool:
-    return isinstance(servers, dict) and any("placet" in str(name).lower() for name in servers)
+    """Whether an ENABLED Placet entry is there."""
+    return any(not _switched_off(entry) for entry in _placet_entries(servers).values())
+
+
+def _lists_disabled_placet(servers) -> bool:
+    entries = _placet_entries(servers)
+    return bool(entries) and all(_switched_off(entry) for entry in entries.values())
 
 
 def _json(path: Path):
@@ -45,36 +66,44 @@ def _folders(cwd: Optional[str]) -> Iterable[Path]:
     return [folder, *folder.parents]
 
 
-def _verdict(read: int, found: bool) -> str:
+def _verdict(read: int, found: bool, off: bool = False) -> str:
+    if off:
+        return "unknown"  # an entry exists but is switched off: what applies is not clear
     if found:
         return "configured"
     return "missing" if read else "unknown"
 
 
 def _claude(cwd, home: Path) -> str:
-    read, found = 0, False
+    read, found, off = 0, False, False
     data = _json(home / ".claude.json")
     if data is not None:
         read += 1
         found = _lists_placet(data.get("mcpServers"))
+        off = _lists_disabled_placet(data.get("mcpServers"))
         projects = data.get("projects")
         for folder in _folders(cwd):
             entry = projects.get(str(folder)) if isinstance(projects, dict) else None
-            if isinstance(entry, dict) and _lists_placet(entry.get("mcpServers")):
-                found = True
+            if isinstance(entry, dict):
+                found = found or _lists_placet(entry.get("mcpServers"))
+                # Claude Code keeps the servers a user switched off in a list per project.
+                disabled = entry.get("disabledMcpServers")
+                if isinstance(disabled, list) and any("placet" in str(n).lower() for n in disabled):
+                    off = True
     for folder in _folders(cwd):
         project = _json(folder / ".mcp.json")
         if project is not None:
             read += 1
             found = found or _lists_placet(project.get("mcpServers"))
-    return _verdict(read, found)
+            off = off or _lists_disabled_placet(project.get("mcpServers"))
+    return _verdict(read, found, off)
 
 
 def _codex(cwd, home: Path, env) -> str:
     if tomllib is None:
         return "unknown"
     codex_home = Path(env.get("CODEX_HOME") or home / ".codex")
-    read, found = 0, False
+    read, found, off = 0, False, False
     paths = [codex_home / "config.toml"] + [folder / ".codex" / "config.toml" for folder in _folders(cwd)]
     for path in paths:
         try:
@@ -83,7 +112,8 @@ def _codex(cwd, home: Path, env) -> str:
             continue
         read += 1
         found = found or _lists_placet(data.get("mcp_servers"))
-    return _verdict(read, found)
+        off = off or _lists_disabled_placet(data.get("mcp_servers"))
+    return _verdict(read, found, off)
 
 
 def _antigravity(home: Path) -> str:
@@ -91,7 +121,8 @@ def _antigravity(home: Path) -> str:
     data = _json(home / ".gemini" / "config" / "mcp_config.json")
     if data is None:
         return "unknown"
-    return _verdict(1, _lists_placet(data.get("mcpServers")))
+    servers = data.get("mcpServers")
+    return _verdict(1, _lists_placet(servers), _lists_disabled_placet(servers))
 
 
 def mcp_state(provider: Optional[str], cwd: Optional[str], home: Optional[Path] = None, env=None) -> str:

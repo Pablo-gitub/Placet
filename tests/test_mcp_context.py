@@ -47,3 +47,19 @@ def test_the_hook_prints_the_context_only_when_the_server_is_missing(monkeypatch
 def test_the_hook_stays_silent_otherwise(monkeypatch, capsys, tmp_path, config):
     out, sent = run_hook(monkeypatch, capsys, tmp_path, config)
     assert out == "" and sent
+
+
+def test_the_notice_is_not_categorical():
+    from hooks.claude_code import MCP_MISSING_CONTEXT as text
+    lowered = text.lower()
+    assert "checked" in lowered and "available tools" in lowered       # where it looked, what to check
+    assert "may not be connected" in lowered
+    for categorical in ("are not available", "cannot be answered", "is not connected"):
+        assert categorical not in lowered
+
+
+def test_the_docs_have_no_literal_newlines_in_their_entries():
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    for name in ("docs/architecture.md", "docs/requirements.md", "docs/installation.md"):
+        assert "\\n- " not in (root / name).read_text(encoding="utf-8"), name

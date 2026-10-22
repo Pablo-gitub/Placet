@@ -99,3 +99,13 @@ def test_antigravity_start_events_carry_the_state_but_other_events_do_not(home, 
     assert start["mcp"] == "configured"
     stop = with_mcp_state({"event": "stop", "cwd": str(project)}, home=home)
     assert "mcp" not in stop
+
+
+def test_a_disabled_entry_is_not_called_configured_or_missing(home, project):
+    write(home / ".claude.json", {"mcpServers": {"placet": {}},
+                                  "projects": {str(project): {"disabledMcpServers": ["placet"]}}})
+    assert mcp_state("claude-code", str(project), home=home) == "unknown"
+    write(home / ".codex" / "config.toml", "[mcp_servers.placet]\ncommand = 'python'\nenabled = false\n")
+    assert mcp_state("codex", str(project), home=home) == "unknown"
+    write(home / ".codex" / "config.toml", "[mcp_servers.placet]\ncommand = 'python'\nenabled = true\n")
+    assert mcp_state("codex", str(project), home=home) == "configured"
