@@ -308,6 +308,9 @@ class SessionModel(BaseModel):
     provider: Optional[str] = None
     entrypoint: Optional[str] = None      # claude-desktop, cli, ...
     cwd: Optional[str] = None
+    # The project the session belongs to (the main repository when working in a worktree):
+    # used to group sessions and to compare folders; `cwd` stays the raw working directory.
+    project_root: Optional[str] = None
     title: Optional[str] = None
     tmux_session: Optional[str] = None
     state: str = "idle"                   # busy while a turn is running

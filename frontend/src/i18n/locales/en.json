@@ -571,7 +571,8 @@
     "nodeInstructionsTitle": "Node instructions in this project",
     "nodeInstructionsPlaceholder": "E.g. Specific role of this node in the project…",
     "saveNodeInstructions": "Save node instructions",
-    "graphWaiting": "Waiting for you"
+    "graphWaiting": "Waiting for you",
+    "graphQueued": "Queued"
   },
   "settings": {
     "title": "Settings",

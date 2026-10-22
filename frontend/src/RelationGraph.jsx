@@ -49,7 +49,13 @@ function edgePath(from, to, bend) {
   const end = { x: to.x - ux * (NODE_R + 4), y: to.y - uy * (NODE_R + 4) };
   const control = { x: (start.x + end.x) / 2 - uy * bend, y: (start.y + end.y) / 2 + ux * bend };
   const label = { x: (start.x + 2 * control.x + end.x) / 4, y: (start.y + 2 * control.y + end.y) / 4 };
-  return { d: `M ${start.x} ${start.y} Q ${control.x} ${control.y} ${end.x} ${end.y}`, label };
+  // A point of the curve just past the sender's circle, where a queued prompt rests.
+  const t = 0.16;
+  const near = {
+    x: (1 - t) ** 2 * start.x + 2 * (1 - t) * t * control.x + t * t * end.x,
+    y: (1 - t) ** 2 * start.y + 2 * (1 - t) * t * control.y + t * t * end.y,
+  };
+  return { d: `M ${start.x} ${start.y} Q ${control.x} ${control.y} ${end.x} ${end.y}`, label, near };
 }
 
 const reducedMotion = () => typeof window !== "undefined"
@@ -101,7 +107,7 @@ export default function RelationGraph({ nodes = [], relations = [], sessions = [
             <circle cx="5" cy="5" r="3.5" className="rg-reply-ring" />
           </marker>
         </defs>
-        {edges.map(({ rel, d, label }) => {
+        {edges.map(({ rel, d, label, near }) => {
           const now = activity[rel.id];
           const ball = now && now !== "executing";
           return (
@@ -117,8 +123,9 @@ export default function RelationGraph({ nodes = [], relations = [], sessions = [
             </text>
             {ball && (
               <circle data-testid={`graph-ball-${rel.id}`} r={4.5} className={`rg-ball rg-ball-${now}`}
-                {...(now === "waiting" || still ? { cx: label.x, cy: label.y } : {})}>
-                {now !== "waiting" && !still && (
+                {...(now === "queued" ? { cx: near.x, cy: near.y }
+                  : now === "waiting" || still ? { cx: label.x, cy: label.y } : {})}>
+                {now !== "waiting" && now !== "queued" && !still && (
                   <animateMotion dur="1.6s" repeatCount="indefinite" path={d} calcMode="linear"
                     keyPoints={now === "returning" ? "1;0" : "0;1"} keyTimes="0;1" />
                 )}
@@ -163,6 +170,9 @@ export default function RelationGraph({ nodes = [], relations = [], sessions = [
         <span><i className="rg-swatch rg-manual" /> {t("relations.manualShort")}</span>
         {relations.some((r) => r.reply_approval === "manual") && (
           <span data-testid="graph-legend-reply"><i className="rg-ring" /> {t("relations.replyManualShort")}</span>
+        )}
+        {Object.values(activity).includes("queued") && (
+          <span data-testid="graph-legend-queued"><i className="rg-dot rg-ball-queued" /> {t("projects.graphQueued")}</span>
         )}
         {Object.values(activity).includes("waiting") && (
           <span data-testid="graph-legend-waiting"><i className="rg-dot rg-ball-waiting" /> {t("projects.graphWaiting")}</span>

@@ -571,7 +571,8 @@
     "nodeInstructionsTitle": "Istruzioni del nodo in questo progetto",
     "nodeInstructionsPlaceholder": "Es. Ruolo specifico di questo nodo nel progetto…",
     "saveNodeInstructions": "Salva istruzioni nodo",
-    "graphWaiting": "In attesa di te"
+    "graphWaiting": "In attesa di te",
+    "graphQueued": "In coda"
   },
   "settings": {
     "title": "Impostazioni",

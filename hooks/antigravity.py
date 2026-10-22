@@ -196,6 +196,12 @@ def with_mcp_state(body: dict, home=None) -> dict:
     return body
 
 
+def with_project_root(body: dict) -> dict:
+    """The project root next to the raw cwd (a worktree reports its main repository)."""
+    root = placet_common.project_root(body.get("cwd"))
+    return {**body, "project_root": root} if root else body
+
+
 def main() -> None:
     agent = placet_common.agent_id(sys.argv)
     event_name = placet_common.option(sys.argv, "--event") or ""
@@ -210,6 +216,7 @@ def main() -> None:
     if not session_id or body is None or not placet_common.active(body.get("cwd")):
         return
     body = with_mcp_state(body)
+    body = with_project_root(body)
     try:
         spool.write_event(agent, session_id, {k: v for k, v in body.items() if v is not None})
     except Exception:
