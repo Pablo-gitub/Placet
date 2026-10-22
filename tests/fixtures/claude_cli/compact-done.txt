@@ -1,0 +1,6 @@
+❯ /compact
+  ⎿  Compacted (ctrl+o to see full summary)
+────────────────────────────────────────
+❯
+────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle)

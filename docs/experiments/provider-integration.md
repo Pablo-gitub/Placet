@@ -23,6 +23,18 @@ Laboratory material (not in the repository): debug hooks for Claude, Codex
   sent as a message is NOT executed; the agent recognizes it as an interface
   command and replies that it cannot run it. Compact / effort on the desktop:
   "at the PC only".
+- **Exp. 1d — `/effort` and `/compact` typed into a CLI in tmux (October 22, 2026, Claude Code 2.1.303,
+  disposable tmux session, one short turn first)**: WORKS, with one dialog.
+  - `/effort high` on a conversation that already has a turn opens a confirmation within about 0.2 s
+    ("Change effort level? ... This conversation is cached for the current effort level ... 1. Yes,
+    switch to high / 2. No, go back"); Escape answers "Kept effort level as auto". Nothing is applied until
+    it is confirmed. The dialog replaces the prompt box and shows no "esc to interrupt".
+  - `/effort auto` applies at once ("Effort level set to auto") and the prompt is back.
+  - `/compact` shows "Compacting conversation..." with "esc to interrupt" in the footer (the prompt box is
+    still drawn), and "Compacted" when done, about a few seconds later.
+  - The idle prompt is `❯ ` (with the dim `Try "edit <filepath> to..."` suggestion on a fresh session): the
+    `idle_patterns` of AGENTS.md match it. Trimmed captures are kept as test fixtures
+    (`tests/fixtures/claude_cli/`).
 - **Problem found — dead waiter**: the waiter of session B stopped at 07:49
   (terminated from outside while waiting, no trace in the logs) and nobody
   restarted it until the next turn: the session stayed unreachable for hours.

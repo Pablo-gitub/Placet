@@ -1,0 +1,8 @@
+❯ /compact
+· Compacting conversation… (1s · ↓ 13 tokens)
+  ⎿  Tip: Run /install-slack-app to use Claude in Slack
+    ◐ medium · /effort
+────────────────────────────────────────
+❯
+────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt
