@@ -447,12 +447,12 @@ class BridgeDaemon:
                 page = {"mime": mime, "data": base64.b64encode(data).decode("ascii")}
             elif kind == "session_command":
                 spec = self.store.session_for(job.get("agent_id") or "")
-                line = run_command(self.tmux, spec, job.get("tmux_session"), job.get("tmux_pane"),
+                line, needs_confirmation = run_command(self.tmux, spec, job.get("tmux_session"), job.get("tmux_pane"),
                                    job.get("command") or "", job.get("level"),
                                    lock=self.pane_lock(spec.name) if spec else None,
                                    identity={k: job.get(k) for k in ("tmux_server", "agent_pid", "agent_started")},
                                    procs=self.procs)
-                page = {"sent": line}
+                page = {"sent": line, "needs_confirmation": needs_confirmation}
             elif kind == "claude_renew":
                 ok = renew_claude_credentials()
                 if not ok:

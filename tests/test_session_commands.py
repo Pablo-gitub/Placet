@@ -6,6 +6,12 @@ import asyncio
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def no_settle_wait(monkeypatch):
+    """The bridge waits a moment after Enter before reading the screen: not in tests."""
+    monkeypatch.setattr("bridge.session_commands.SETTLE_SECONDS", 0)
+
 from backend.app.config import AgentSpec, PlacetConfig
 from backend.app.database import Database
 from backend.app.main import create_app
@@ -149,8 +155,9 @@ class FakeTmux:
     """Records every target an operation was aimed at: it must always be the pane id."""
 
     def __init__(self, exists=True, idle=True, typing=None, pane_session="agent-claude", type_ok=True, enter_ok=True,
-                 check_error=False, server_pid=4242):
+                 check_error=False, server_pid=4242, after="idle"):
         self.server_pid = server_pid
+        self.after = after            # what the screen shows once Enter was pressed
         self.exists, self.idle, self.typing, self.pane_session = exists, idle, typing, pane_session
         self.check_error = check_error
         self.type_ok, self.enter_ok = type_ok, enter_ok
@@ -178,6 +185,16 @@ class FakeTmux:
             from bridge.tmux_controller import TmuxCheckError
             raise TmuxCheckError("cannot list clients")
         return self.typing
+
+    def check_idle(self, target, idle_patterns, busy_patterns):
+        """The screen after Enter: idle prompt, still working, a dialog, or unreadable."""
+        from bridge.tmux_controller import IdleCheck
+        self.targets.append(("after", target))
+        return {"idle": IdleCheck(True, "empty prompt and stable screen"),
+                "busy": IdleCheck(False, "busy indicator: 'esc to interrupt'", busy_marker="esc to interrupt"),
+                "changing": IdleCheck(False, "screen is changing"),
+                "dialog": IdleCheck(False, "no empty input prompt recognized", "Apply the new effort level? [y/N]"),
+                "unreadable": IdleCheck(False, "empty screen or unreadable session")}[self.after]
 
     def send_keys(self, target, text, enter=True):
         self.targets.append(("send", target))
@@ -226,7 +243,7 @@ JOB = {"id": "j", "kind": "session_command", "agent_id": "claude", "tmux_session
 def test_the_bridge_types_only_the_fixed_command_into_the_configured_pane(env):
     tmux = FakeTmux()
     out = daemon(env, tmux).handle_job({**JOB, "text": "rm -rf /"})
-    assert out == {"ok": True, "page": {"sent": "/compact"}}
+    assert out == {"ok": True, "page": {"sent": "/compact", "needs_confirmation": False}}
     assert tmux.sent == [("%3", "/compact", True)]
     tmux = FakeTmux()
     daemon(env, tmux).handle_job({**JOB, "command": "effort", "level": "max"})
@@ -585,3 +602,63 @@ def test_the_claude_hook_reports_the_identity(monkeypatch):
     monkeypatch.setattr(claude_code.placet_common, "agent_process", lambda **k: (200, "4321"))
     payload = claude_code.build_event({"hook_event_name": "UserPromptSubmit", "cwd": "/p", "prompt": "x"})
     assert (payload["tmux_server"], payload["agent_pid"], payload["agent_started"]) == ("5151", 200, "4321")
+
+
+# --- P1.2: /effort may open a confirmation dialog; "sent" must not hide it ----------------------
+
+
+@pytest.mark.parametrize("after,needs", [("idle", False), ("busy", False), ("changing", False), ("dialog", True)])
+def test_the_screen_after_enter_decides_between_sent_and_needs_confirmation(env, after, needs):
+    tmux = FakeTmux(after=after)
+    out = daemon(env, tmux).handle_job({**JOB, "command": "effort", "level": "high"})
+    assert out == {"ok": True, "page": {"sent": "/effort high", "needs_confirmation": needs}}
+    assert len(tmux.sent) == 1                                   # typed once, never retried
+    assert ("after", "%3") in tmux.targets                       # the same stable pane
+
+
+def test_an_unreadable_screen_after_enter_is_not_claimed_as_sent(env):
+    tmux = FakeTmux(after="unreadable")
+    out = daemon(env, tmux).handle_job(JOB)
+    assert out["ok"] is False and out["error"] == "unverified"
+
+
+def test_the_bridge_waits_inside_the_lock_before_reading_the_screen(env, monkeypatch):
+    """A delivery must not type into a dialog that has not appeared yet."""
+    import threading
+    monkeypatch.setattr("bridge.session_commands.SETTLE_SECONDS", 0.3)
+    tmux = FakeTmux()
+    bridge = daemon(env, tmux)
+    worker = threading.Thread(target=bridge.handle_job, args=(JOB,))
+    worker.start()
+    for _ in range(100):
+        if tmux.sent:
+            break
+        import time
+        time.sleep(0.01)
+    assert tmux.sent and bridge.pane_lock("agent-claude").locked()      # Enter pressed, lock still held
+    worker.join(5)
+    assert not bridge.pane_lock("agent-claude").locked()
+
+
+@pytest.mark.asyncio
+async def test_a_dialog_is_reported_as_needs_confirmation_not_sent_not_uncertain(env):
+    app, db = env
+    await start(app, "claude", "s1", "claude-code")
+    resp = await post(app, "/api/sessions/s1/effort", {"level": "high"},
+                      bridge_answer={"ok": True, "page": {"sent": "/effort high", "needs_confirmation": True}})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["state"] == "needs_confirmation" and body["command"] == "/effort high"
+    assert [row["state"] for row in db.list_session_controls("s1")] == ["needs_confirmation"]
+    # It does not block the next control, and the plain case still says sent.
+    again = await post(app, "/api/sessions/s1/compact", bridge_answer={"ok": True, "page": {"sent": "/compact", "needs_confirmation": False}})
+    assert again.json()["state"] == "sent"
+
+
+@pytest.mark.asyncio
+async def test_an_unverified_enter_is_uncertain(env):
+    app, db = env
+    await start(app, "claude", "s1", "claude-code")
+    resp = await post(app, "/api/sessions/s1/compact", bridge_answer={"ok": False, "error": "unverified"})
+    assert resp.status_code == 502 and resp.json()["code"] == "session_command.uncertain"
+    assert [row["state"] for row in db.list_session_controls("s1")] == ["uncertain"]

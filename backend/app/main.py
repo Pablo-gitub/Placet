@@ -1563,10 +1563,11 @@ def create_app(
             spec = SessionSpec(name=agent.tmux_session, idle_patterns=agent.idle_patterns,
                                busy_patterns=agent.busy_patterns) if agent else None
             try:
-                return {"sent": run_command(
+                sent_, confirm_ = run_command(
                     TmuxController(), spec, session.tmux_session, session.tmux_pane, command, level,
                     identity={"tmux_server": session.tmux_server, "agent_pid": session.agent_pid,
-                              "agent_started": session.agent_started})}
+                              "agent_started": session.agent_started})
+                return {"sent": sent_, "needs_confirmation": confirm_}
             except CommandError as e:
                 raise ProductError(409, f"session_command.{e.code}", str(e)) from None
 
@@ -1581,7 +1582,8 @@ def create_app(
                   "agent_not_in_pane": (409, "The session's agent does not run in this pane."),
                   "invalid": (422, "Not a fixed session command."),
                   "send_failed": (502, "tmux refused the keys; nothing was typed."),
-                  "enter_failed": (502, "The text was typed but Enter was not sent.")}
+                  "enter_failed": (502, "The text was typed but Enter was not sent."),
+                  "unverified": (502, "Enter was sent but the screen cannot be read.")}
         # Certainly not typed: every check failed, or the job never reached the bridge. Anything
         # else (lost reply, timeout, text typed without Enter, an unexpected error) is uncertain.
         refused = {"bridge.offline", "session_command.wrong_session", "session_command.tmux_missing",
@@ -1594,7 +1596,7 @@ def create_app(
             raise ProductError(409, "session.control_pending", "A control for this session is still being sent.")
         control_id = db.begin_session_control(session_id, who.actor, line)
         try:
-            await bridge_call("session_command", params, local, errors)
+            outcome = await bridge_call("session_command", params, local, errors)
         except ProductError as e:
             if e.code in refused:
                 db.settle_session_control(control_id, "refused")
@@ -1606,9 +1608,11 @@ def create_app(
         except Exception:
             db.settle_session_control(control_id, "uncertain")
             raise
-        db.settle_session_control(control_id, "sent")
+        # A dialog is waiting for the user on the PC: neither "sent" nor uncertain, and not retried.
+        state = "needs_confirmation" if outcome.get("needs_confirmation") else "sent"
+        db.settle_session_control(control_id, state)
         notify_session(session_id)
-        return {"ok": True, "command": line, "control_id": control_id}
+        return {"ok": True, "command": line, "control_id": control_id, "state": state}
 
     @app.post("/api/sessions/{session_id}/compact")
     async def compact_session(session_id: str, who: Principal = Depends(principal)):

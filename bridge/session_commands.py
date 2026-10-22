@@ -1,6 +1,7 @@
 """RF-62: types a fixed /compact or /effort line into the pane of a Placet session."""
 import logging
 import re
+import time
 from contextlib import nullcontext
 from typing import Optional
 
@@ -12,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 # Someone typed in the pane this recently: do not add to their line.
 RECENT_INPUT_SECONDS = 15.0
+# After Enter, the time a confirmation dialog needs to appear before the screen is read.
+SETTLE_SECONDS = 1.0
 PANE_ID = re.compile(r"^%\d{1,9}$")
 
 
@@ -27,7 +30,7 @@ def _number(value) -> Optional[int]:
 
 def run_command(tmux, spec, tmux_session: Optional[str], tmux_pane: Optional[str],
                 command: str, level: Optional[str], lock=None, identity: Optional[dict] = None,
-                procs=None) -> str:
+                procs=None):
     """
     Sends the command to the session's pane and returns the line typed. The
     target is the stable pane id (%N), never a session name: a pane switch
@@ -38,7 +41,11 @@ def run_command(tmux, spec, tmux_session: Optional[str], tmux_pane: Optional[str
     tmux server and while its process lives, so the pane must also be held by the
     tmux server the session reported, and the session's own agent process (same
     pid and start time) must be alive and run under the pane's process: a tmux
-    restart that reused %N, or a ghost session, is refused. CommandError otherwise.
+    restart that reused %N, or a ghost session, is refused. Returns (line typed,
+    needs_confirmation): after Enter the screen is read once more, still under the
+    lock, because /effort may open a confirmation dialog; a screen that is neither
+    an idle prompt nor a command in progress is "needs confirmation" (on the PC),
+    an unreadable one is CommandError("unverified"). CommandError otherwise.
     """
     identity = identity or {}
     server, agent_pid, agent_started = (_number(identity.get("tmux_server")), _number(identity.get("agent_pid")),
@@ -80,4 +87,10 @@ def run_command(tmux, spec, tmux_session: Optional[str], tmux_pane: Optional[str
             raise CommandError("send_failed", "tmux refused the keys; nothing was typed.")
         if not tmux.press_enter(tmux_pane):
             raise CommandError("enter_failed", "The text was typed but Enter was not sent: check the session.")
-    return line
+        time.sleep(SETTLE_SECONDS)
+        screen = tmux.check_idle(tmux_pane, spec.idle_patterns, spec.busy_patterns)
+        if screen.idle or screen.busy_marker or screen.reason.startswith("screen is changing"):
+            return line, False          # back at the prompt, or the command is running
+        if screen.reason.startswith("empty screen"):
+            raise CommandError("unverified", "Enter was sent but the screen cannot be read: check the session.")
+        return line, True               # something else is on screen: a dialog waits for the user

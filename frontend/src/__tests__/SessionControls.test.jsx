@@ -141,6 +141,16 @@ describe("session controls menu", () => {
     }
   });
 
+  it("says to confirm on the PC when a dialog is waiting, instead of claiming success", async () => {
+    serve(200, { ok: true, command: "/effort high", state: "needs_confirmation" });
+    render(<SessionControls session={session(SUPPORTED)} />);
+    open();
+    fireEvent.click(screen.getByTestId("control-effort"));
+    expect(await screen.findByTestId("control-needs-confirmation")).toHaveTextContent(i18n.t("controls.needsConfirmation"));
+    expect(screen.queryByTestId("control-done")).toBeNull();
+    expect(screen.queryByTestId("control-error")).toBeNull();
+  });
+
   it("renders nothing for a session without control information", () => {
     const { container } = render(<SessionControls session={{ id: "s1", provider: "claude-code" }} />);
     expect(container).toBeEmptyDOMElement();
@@ -149,7 +159,7 @@ describe("session controls menu", () => {
   it("has both languages", () => {
     for (const lng of ["en", "it"]) {
       for (const key of ["controls.title", "controls.compact", "controls.effort", "controls.apply", "controls.done",
-        "controls.pcOnly", "controls.unsupported", "controls.busy", "errors.commandUserTyping", "errors.sessionBusy", "errors.commandUncertain", "errors.commandEnterFailed", "errors.commandCheckFailed", "errors.commandIdentity", "controls.effortPersists", "controls.effortDocs",
+        "controls.pcOnly", "controls.unsupported", "controls.busy", "errors.commandUserTyping", "errors.sessionBusy", "errors.commandUncertain", "errors.commandEnterFailed", "errors.commandCheckFailed", "errors.commandIdentity", "controls.effortPersists", "controls.needsConfirmation", "controls.effortDocs",
         "errors.paneStale", "errors.paneAmbiguous", "errors.controlPending", "controls.confirmRepeat"]) {
         expect(i18n.getFixedT(lng)(key)).not.toBe(key);
       }

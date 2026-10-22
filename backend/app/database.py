@@ -1964,8 +1964,8 @@ class Database:
             return cur.lastrowid
 
     def settle_session_control(self, control_id: int, state: str) -> None:
-        """sent | refused (certainly not typed) | uncertain; only a pending row changes."""
-        if state not in ("sent", "refused", "uncertain"):
+        """sent | needs_confirmation (a dialog waits on the PC) | refused | uncertain; only a pending row changes."""
+        if state not in ("sent", "needs_confirmation", "refused", "uncertain"):
             raise ValueError(state)
         with self._get_connection() as conn:
             conn.execute("UPDATE session_control_events SET state = ? WHERE id = ? AND state = 'pending'",

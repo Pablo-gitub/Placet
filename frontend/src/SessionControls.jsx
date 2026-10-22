@@ -17,6 +17,8 @@ export default function SessionControls({ session }) {
   const [level, setLevel] = useState("medium");
   const [pending, setPending] = useState(false);
   const [done, setDone] = useState(false);
+  // The command was typed but a dialog waits for the user on the PC.
+  const [needsConfirmation, setNeedsConfirmation] = useState(false);
   const [error, setError] = useState(null);
   // The last command's outcome was uncertain: it may already have been applied.
   const [uncertain, setUncertain] = useState(false);
@@ -34,7 +36,7 @@ export default function SessionControls({ session }) {
 
   const run = async (path, body) => {
     if (uncertain && !window.confirm(t("controls.confirmRepeat"))) return;
-    setPending(true); setDone(false); setError(null);
+    setPending(true); setDone(false); setNeedsConfirmation(false); setError(null);
     try {
       const res = await fetch(`/api/sessions/${encodeURIComponent(session.id)}/${path}`, {
         method: "POST",
@@ -46,7 +48,9 @@ export default function SessionControls({ session }) {
         setError(apiErrorDescriptor(data, res.status));
         setUncertain(["session_command.uncertain", "session_command.enter_failed"].includes(data?.code));
       } else {
-        setDone(true);
+        const data = await res.json().catch(() => null);
+        if (data?.state === "needs_confirmation") setNeedsConfirmation(true);
+        else setDone(true);
         setUncertain(false);
       }
     } catch {
@@ -86,6 +90,9 @@ export default function SessionControls({ session }) {
               rel="noopener noreferrer">{t("controls.effortDocs")}</a>
           </p>
           {reason && <p className="composer-note" data-testid="control-explanation">{reason}</p>}
+          {needsConfirmation && (
+            <p className="composer-note" role="status" data-testid="control-needs-confirmation">{t("controls.needsConfirmation")}</p>
+          )}
           {done && <p className="composer-note" role="status" data-testid="control-done">{t("controls.done")}</p>}
           {error && <p className="composer-note" role="alert" data-testid="control-error">{t(error.key, error.params)}</p>}
         </div>

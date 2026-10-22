@@ -25,7 +25,8 @@
     "busy": "The session is working: available when the turn ends.",
     "confirmRepeat": "The previous command may already have been applied. Send it again?",
     "effortPersists": "low, medium, high and xhigh are saved as the default for future sessions; max applies to this session only. Available levels depend on the model.",
-    "effortDocs": "Effort levels in the Claude Code documentation"
+    "effortDocs": "Effort levels in the Claude Code documentation",
+    "needsConfirmation": "Command typed, but a confirmation is waiting on the PC: confirm it there."
   },
   "home": {
     "questions": "Questions",
