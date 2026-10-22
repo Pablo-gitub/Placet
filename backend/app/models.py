@@ -307,7 +307,8 @@ class SessionMessage(BaseModel):
 
 
 def session_controls(provider: Optional[str], tmux_session: Optional[str],
-                     entrypoint: Optional[str] = None, tmux_pane: Optional[str] = None) -> Dict[str, str]:
+                     entrypoint: Optional[str] = None, tmux_pane: Optional[str] = None,
+                     identified: bool = False) -> Dict[str, str]:
     """
     RF-62: the remote controls a session offers, from its provider and how it
     runs. "supported": the genuine command can be typed into its tmux pane
@@ -319,8 +320,9 @@ def session_controls(provider: Optional[str], tmux_session: Optional[str],
         if entrypoint == "claude-desktop" or not tmux_session:
             state = "pc_only"
         else:
-            # Typing needs the stable pane id the hook reports; an older hook gives none.
-            state = "supported" if tmux_pane else "unsupported"
+            # Typing needs the stable pane id AND proof of who runs in it (tmux server, agent
+            # process), which the hook reports; an older hook gives neither.
+            state = "supported" if tmux_pane and identified else "unsupported"
     else:
         state = "unsupported"
     return {"compact": state, "effort": state}
@@ -337,6 +339,10 @@ class SessionModel(BaseModel):
     tmux_session: Optional[str] = None
     # The pane id (%N) of its terminal, reported by the hook: the stable address for RF-62.
     tmux_pane: Optional[str] = None
+    # Who runs in that pane, as the hook saw it: the tmux server pid and the agent process.
+    tmux_server: Optional[str] = None
+    agent_pid: Optional[int] = None
+    agent_started: Optional[str] = None
     state: str = "idle"                   # busy while a turn is running
     turn_request_id: Optional[int] = None
     started_at: datetime

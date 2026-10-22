@@ -458,6 +458,10 @@ class Database:
                     cursor.execute(f"ALTER TABLE sessions ADD COLUMN {col} TEXT;")
             if "tmux_pane" not in session_cols:
                 cursor.execute("ALTER TABLE sessions ADD COLUMN tmux_pane TEXT;")
+            if "tmux_server" not in session_cols:
+                cursor.execute("ALTER TABLE sessions ADD COLUMN tmux_server TEXT;")
+                cursor.execute("ALTER TABLE sessions ADD COLUMN agent_pid INTEGER;")
+                cursor.execute("ALTER TABLE sessions ADD COLUMN agent_started TEXT;")
             if "prompt_count" not in session_cols:
                 cursor.execute("ALTER TABLE sessions ADD COLUMN prompt_count INTEGER NOT NULL DEFAULT 0;")
                 cursor.execute(
@@ -1722,6 +1726,9 @@ class Database:
             title=row["title"],
             tmux_session=row["tmux_session"],
             tmux_pane=row["tmux_pane"],
+            tmux_server=row["tmux_server"],
+            agent_pid=row["agent_pid"],
+            agent_started=row["agent_started"],
             state=row["state"],
             turn_request_id=row["turn_request_id"],
             started_at=datetime.fromisoformat(row["started_at"]),
@@ -1734,7 +1741,8 @@ class Database:
             pinned=row["pinned_at"] is not None,
             reachable=reachable and row["excluded_at"] is None,
             excluded=row["excluded_at"] is not None,
-            controls=session_controls(row["provider"], row["tmux_session"], row["entrypoint"], row["tmux_pane"]),
+            controls=session_controls(row["provider"], row["tmux_session"], row["entrypoint"], row["tmux_pane"],
+                                     bool(row["tmux_server"] and row["agent_pid"] and row["agent_started"])),
             node_id=row["node_id"],
             node_name=row["node_name"] if "node_name" in row.keys() else None,
             continued_to=row["continued_to"] if "continued_to" in row.keys() else None,
@@ -1752,6 +1760,9 @@ class Database:
         tmux_session: Optional[str] = None,
         model: Optional[str] = None,
         tmux_pane: Optional[str] = None,
+        tmux_server: Optional[str] = None,
+        agent_pid: Optional[int] = None,
+        agent_started: Optional[str] = None,
     ) -> bool:
         """
         Registers a session or refreshes it. Returns False if the id is
@@ -1769,11 +1780,12 @@ class Database:
                 cursor.execute(
                     """
                     INSERT INTO sessions (id, agent_id, provider, entrypoint, cwd, title,
-                                          tmux_session, tmux_pane, model, state, started_at, last_seen_at, activity_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?, ?)
+                                          tmux_session, tmux_pane, tmux_server, agent_pid, agent_started,
+                                          model, state, started_at, last_seen_at, activity_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?, ?)
                     """,
-                    (session_id, agent_id, provider, entrypoint, cwd, title, tmux_session, tmux_pane, model,
-                     now, now, now),
+                    (session_id, agent_id, provider, entrypoint, cwd, title, tmux_session, tmux_pane,
+                     tmux_server, agent_pid, agent_started, model, now, now, now),
                 )
             else:
                 cursor.execute(
@@ -1782,10 +1794,13 @@ class Database:
                         provider = COALESCE(?, provider), entrypoint = COALESCE(?, entrypoint),
                         cwd = COALESCE(?, cwd), title = COALESCE(?, title),
                         tmux_session = COALESCE(?, tmux_session), tmux_pane = COALESCE(?, tmux_pane),
+                        tmux_server = COALESCE(?, tmux_server), agent_pid = COALESCE(?, agent_pid),
+                        agent_started = COALESCE(?, agent_started),
                         model = COALESCE(?, model), last_seen_at = ?
                     WHERE id = ?
                     """,
-                    (provider, entrypoint, cwd, title, tmux_session, tmux_pane, model, now, session_id),
+                    (provider, entrypoint, cwd, title, tmux_session, tmux_pane, tmux_server, agent_pid,
+                     agent_started, model, now, session_id),
                 )
             return True
 

@@ -27,6 +27,13 @@ class TmuxCheckError(Exception):
 
 
 @dataclass
+class PaneInfo:
+    server_pid: int
+    pane_pid: int
+    session_name: str
+
+
+@dataclass
 class IdleCheck:
     """Outcome of an idle check, with the reasons (used by calibration)."""
     idle: bool
@@ -82,16 +89,17 @@ class TmuxController:
         sessions = self.list_sessions()
         return session_name in sessions
 
-    def pane_session_name(self, pane_id: str) -> Optional[str]:
-        """The tmux session a pane (%N) belongs to now, or None if the pane is gone."""
+    def pane_info(self, pane_id: str):
+        """(server pid, the pane's process pid, tmux session name) of a pane (%N), or None if it is gone."""
         try:
             res = subprocess.run(
-                ["tmux", "display-message", "-p", "-t", pane_id, "#{session_name}"],
+                ["tmux", "display-message", "-p", "-t", pane_id, "#{pid} #{pane_pid} #{session_name}"],
                 capture_output=True, text=True, check=True, timeout=3,
             )
+            server, pane, name = res.stdout.rstrip("\n").split(" ", 2)
+            return PaneInfo(int(server), int(pane), name)
         except Exception:
             return None
-        return res.stdout.strip() or None
 
     def capture_pane(self, session_name: str) -> str:
         """Visible screen of the session's active pane."""

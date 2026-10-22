@@ -12,6 +12,7 @@ from backend.app import envelopes
 from backend.app.models import RequestModel
 from bridge.channels import ChannelError, ChannelUncertain, default_channels
 from bridge.stores import BridgeStore, LocalStore, Work
+from bridge.procs import Procs
 from bridge.session_commands import CommandError, run_command
 from bridge.tmux_controller import SessionSpec, TmuxController
 from bridge.attachments import AttachmentError
@@ -81,6 +82,7 @@ class BridgeDaemon:
         self._steer_orphans: Dict[int, float] = {}
         # One lock per tmux session: a normal delivery and a session command
         # (another thread) never type into the same terminal at once.
+        self.procs = Procs()
         self._pane_locks: Dict[str, threading.Lock] = {}
         self._pane_locks_guard = threading.Lock()
 
@@ -447,7 +449,9 @@ class BridgeDaemon:
                 spec = self.store.session_for(job.get("agent_id") or "")
                 line = run_command(self.tmux, spec, job.get("tmux_session"), job.get("tmux_pane"),
                                    job.get("command") or "", job.get("level"),
-                                   lock=self.pane_lock(spec.name) if spec else None)
+                                   lock=self.pane_lock(spec.name) if spec else None,
+                                   identity={k: job.get(k) for k in ("tmux_server", "agent_pid", "agent_started")},
+                                   procs=self.procs)
                 page = {"sent": line}
             elif kind == "claude_renew":
                 ok = renew_claude_credentials()

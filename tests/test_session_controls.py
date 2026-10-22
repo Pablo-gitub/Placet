@@ -25,10 +25,12 @@ def env(tmp_path):
     return create_app(db=db, config=CONFIG, bridge_token="tok-bridge"), db
 
 
-async def start(app, agent, session_id, provider, entrypoint=None, tmux=None, pane=None):
+async def start(app, agent, session_id, provider, entrypoint=None, tmux=None, pane=None, identity=True):
     body = {"event": "start", "provider": provider, "cwd": "/p"}
     if pane:
         body["tmux_pane"] = pane
+        if identity:
+            body.update({"tmux_server": "4242", "agent_pid": 777, "agent_started": "123456"})
     if entrypoint:
         body["entrypoint"] = entrypoint
     if tmux:
@@ -49,11 +51,12 @@ async def test_controls_follow_the_provider_and_how_it_runs(env):
     await start(app, "claude", "desktop", "claude-code", "claude-desktop")
     await start(app, "claude", "cli-plain", "claude-code", "cli")
     await start(app, "claude", "cli-old-hook", "claude-code", "cli", "work")  # tmux session known, pane not
+    await start(app, "claude", "cli-half-hook", "claude-code", "cli", "work", "%4", identity=False)  # pane, no process
     await start(app, "codex", "cx", "codex", "cli", "work2")
     await start(app, "gemini", "agy", "antigravity", "antigravity", "work3")
-    controls = {sid: db.get_session(sid).controls for sid in ("cli-tmux", "desktop", "cli-plain", "cli-old-hook", "cx", "agy")}
+    controls = {sid: db.get_session(sid).controls for sid in ("cli-tmux", "desktop", "cli-plain", "cli-old-hook", "cli-half-hook", "cx", "agy")}
     assert controls == {"cli-tmux": SUPPORTED, "desktop": PC_ONLY, "cli-plain": PC_ONLY,
-                        "cli-old-hook": UNSUPPORTED, "cx": UNSUPPORTED, "agy": UNSUPPORTED}
+                        "cli-old-hook": UNSUPPORTED, "cli-half-hook": UNSUPPORTED, "cx": UNSUPPORTED, "agy": UNSUPPORTED}
 
 
 @pytest.mark.asyncio

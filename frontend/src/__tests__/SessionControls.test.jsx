@@ -130,6 +130,17 @@ describe("session controls menu", () => {
     expect(await screen.findByTestId("control-error")).toHaveTextContent(i18n.t("errors.commandCheckFailed"));
   });
 
+  it("explains a terminal that no longer matches the session, in one message", async () => {
+    for (const code of ["server_mismatch", "agent_gone", "agent_not_in_pane", "identity_unknown"]) {
+      serve(409, { code: `session_command.${code}`, params: {}, detail: "raw" });
+      const { unmount } = render(<SessionControls session={session(SUPPORTED)} />);
+      open();
+      fireEvent.click(screen.getByTestId("control-compact"));
+      expect(await screen.findByTestId("control-error")).toHaveTextContent(i18n.t("errors.commandIdentity"));
+      unmount();
+    }
+  });
+
   it("renders nothing for a session without control information", () => {
     const { container } = render(<SessionControls session={{ id: "s1", provider: "claude-code" }} />);
     expect(container).toBeEmptyDOMElement();
@@ -138,7 +149,7 @@ describe("session controls menu", () => {
   it("has both languages", () => {
     for (const lng of ["en", "it"]) {
       for (const key of ["controls.title", "controls.compact", "controls.effort", "controls.apply", "controls.done",
-        "controls.pcOnly", "controls.unsupported", "controls.busy", "errors.commandUserTyping", "errors.sessionBusy", "errors.commandUncertain", "errors.commandEnterFailed", "errors.commandCheckFailed", "controls.effortPersists", "controls.effortDocs",
+        "controls.pcOnly", "controls.unsupported", "controls.busy", "errors.commandUserTyping", "errors.sessionBusy", "errors.commandUncertain", "errors.commandEnterFailed", "errors.commandCheckFailed", "errors.commandIdentity", "controls.effortPersists", "controls.effortDocs",
         "errors.paneStale", "errors.paneAmbiguous", "errors.controlPending", "controls.confirmRepeat"]) {
         expect(i18n.getFixedT(lng)(key)).not.toBe(key);
       }

@@ -5,6 +5,7 @@ from contextlib import nullcontext
 from typing import Optional
 
 from backend.app.session_commands import command_text
+from bridge.procs import Procs
 from bridge.tmux_controller import TmuxCheckError
 
 logger = logging.getLogger(__name__)
@@ -20,16 +21,30 @@ class CommandError(Exception):
         self.code = code
 
 
+def _number(value) -> Optional[int]:
+    return int(value) if isinstance(value, (int, str)) and str(value).isdigit() else None
+
+
 def run_command(tmux, spec, tmux_session: Optional[str], tmux_pane: Optional[str],
-                command: str, level: Optional[str], lock=None) -> str:
+                command: str, level: Optional[str], lock=None, identity: Optional[dict] = None,
+                procs=None) -> str:
     """
     Sends the command to the session's pane and returns the line typed. The
     target is the stable pane id (%N), never a session name: a pane switch
     between the checks and the send cannot redirect it. That pane must still
     belong to the tmux session configured for the agent (never one a message
     names), exist, be idle and not be typed in. `lock` serializes this with
-    normal deliveries to the same terminal. CommandError otherwise.
+    normal deliveries to the same terminal. A pane id is only unique within one
+    tmux server and while its process lives, so the pane must also be held by the
+    tmux server the session reported, and the session's own agent process (same
+    pid and start time) must be alive and run under the pane's process: a tmux
+    restart that reused %N, or a ghost session, is refused. CommandError otherwise.
     """
+    identity = identity or {}
+    server, agent_pid, agent_started = (_number(identity.get("tmux_server")), _number(identity.get("agent_pid")),
+                                        identity.get("agent_started"))
+    if server is None or agent_pid is None or not agent_started:
+        raise CommandError("identity_unknown", "The session did not report which process runs in its terminal.")
     if spec is None or tmux_session != spec.name:
         raise CommandError("wrong_session", "Not the tmux session configured for this agent.")
     if not isinstance(tmux_pane, str) or not PANE_ID.match(tmux_pane):
@@ -39,11 +54,18 @@ def run_command(tmux, spec, tmux_session: Optional[str], tmux_pane: Optional[str
     except ValueError:
         raise CommandError("invalid", "Not a fixed session command.") from None
     with lock if lock is not None else nullcontext():
-        owner = tmux.pane_session_name(tmux_pane)
-        if owner is None:
+        info = tmux.pane_info(tmux_pane)
+        if info is None:
             raise CommandError("tmux_missing", f"Pane {tmux_pane} is not running.")
-        if owner != spec.name:
+        if info.session_name != spec.name:
             raise CommandError("wrong_session", f"Pane {tmux_pane} no longer belongs to {spec.name}.")
+        if info.server_pid != server:
+            raise CommandError("server_mismatch", "tmux was restarted: this pane id belongs to another server.")
+        procs = procs or Procs()
+        if not procs.alive(agent_pid, agent_started):
+            raise CommandError("agent_gone", "The session's agent process is not running.")
+        if not procs.descends(agent_pid, info.pane_pid):
+            raise CommandError("agent_not_in_pane", "The session's agent does not run in this pane.")
         if not tmux.is_session_idle(tmux_pane, spec.idle_patterns, spec.busy_patterns):
             raise CommandError("not_idle", "The session is not at an empty prompt.")
         try:

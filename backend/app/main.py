@@ -98,6 +98,10 @@ class SessionEventPayload(BaseModel):
     tmux_session: Optional[str] = None
     # RF-62: the tmux pane id (%N) of the terminal the session runs in.
     tmux_pane: Optional[str] = Field(default=None, pattern=r"^%\d{1,9}$")
+    # ...and who runs in it: the tmux server pid, the agent process pid and its start time.
+    tmux_server: Optional[str] = Field(default=None, pattern=r"^\d{1,10}$")
+    agent_pid: Optional[int] = Field(default=None, ge=2, le=2**32)
+    agent_started: Optional[str] = Field(default=None, pattern=r"^\d{1,20}$")
     # prompt: the Placet request the prompt carries ("[Placet Request #N").
     # tool:   the request created by a Placet MCP call in this session.
     request_id: Optional[int] = None
@@ -1338,6 +1342,7 @@ def create_app(
         if not db.upsert_session(
             session_id, who.id, provider=payload.provider, entrypoint=payload.entrypoint,
             cwd=payload.cwd, title=payload.title, tmux_session=payload.tmux_session, tmux_pane=payload.tmux_pane,
+            tmux_server=payload.tmux_server, agent_pid=payload.agent_pid, agent_started=payload.agent_started,
             model=payload.model,
         ):
             raise HTTPException(status_code=404, detail="Session not found")
@@ -1545,7 +1550,9 @@ def create_app(
             raise ProductError(409, "session.pane_ambiguous", "Two sessions are equally recent in this terminal.")
         line = command_text(command, level, session.provider)
         params = {"agent_id": session.agent_id, "tmux_session": session.tmux_session,
-                  "tmux_pane": session.tmux_pane, "session_id": session.id, "command": command}
+                  "tmux_pane": session.tmux_pane, "tmux_server": session.tmux_server,
+                  "agent_pid": session.agent_pid, "agent_started": session.agent_started,
+                  "session_id": session.id, "command": command}
         if level is not None:
             params["level"] = level
 
@@ -1556,7 +1563,10 @@ def create_app(
             spec = SessionSpec(name=agent.tmux_session, idle_patterns=agent.idle_patterns,
                                busy_patterns=agent.busy_patterns) if agent else None
             try:
-                return {"sent": run_command(TmuxController(), spec, session.tmux_session, session.tmux_pane, command, level)}
+                return {"sent": run_command(
+                    TmuxController(), spec, session.tmux_session, session.tmux_pane, command, level,
+                    identity={"tmux_server": session.tmux_server, "agent_pid": session.agent_pid,
+                              "agent_started": session.agent_started})}
             except CommandError as e:
                 raise ProductError(409, f"session_command.{e.code}", str(e)) from None
 
@@ -1565,6 +1575,10 @@ def create_app(
                   "not_idle": (409, "The session is not at an empty prompt."),
                   "user_typing": (409, "Someone is typing in the session."),
                   "check_failed": (409, "tmux could not tell whether someone is typing."),
+                  "identity_unknown": (409, "The session did not report which process runs in its terminal."),
+                  "server_mismatch": (409, "tmux was restarted: this pane belongs to another server."),
+                  "agent_gone": (409, "The session's agent process is not running."),
+                  "agent_not_in_pane": (409, "The session's agent does not run in this pane."),
                   "invalid": (422, "Not a fixed session command."),
                   "send_failed": (502, "tmux refused the keys; nothing was typed."),
                   "enter_failed": (502, "The text was typed but Enter was not sent.")}
@@ -1572,6 +1586,8 @@ def create_app(
         # else (lost reply, timeout, text typed without Enter, an unexpected error) is uncertain.
         refused = {"bridge.offline", "session_command.wrong_session", "session_command.tmux_missing",
                    "session_command.not_idle", "session_command.user_typing", "session_command.check_failed",
+                   "session_command.identity_unknown", "session_command.server_mismatch",
+                   "session_command.agent_gone", "session_command.agent_not_in_pane",
                    "session_command.invalid",
                    "session_command.send_failed"}
         if db.pending_session_control(session_id) is not None:

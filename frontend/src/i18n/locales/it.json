@@ -183,7 +183,8 @@
     "paneStale": "In questo terminale ora gira un'altra sessione.",
     "paneAmbiguous": "Due sessioni sono ugualmente recenti in questo terminale: riprova dopo che una delle due agisce.",
     "controlPending": "Un controllo per questa sessione è ancora in invio.",
-    "commandCheckFailed": "Placet non è riuscito a capire se qualcuno sta scrivendo nella sessione: riprova."
+    "commandCheckFailed": "Placet non è riuscito a capire se qualcuno sta scrivendo nella sessione: riprova.",
+    "commandIdentity": "Questo terminale non corrisponde più alla sessione (tmux è stato riavviato, o il programma della sessione non gira qui). Non è stato inviato nulla."
   },
   "sessions": {
     "closed": "Chiusa",

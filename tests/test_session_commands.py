@@ -32,6 +32,8 @@ async def start(app, agent, session_id, provider, entrypoint="cli", tmux="agent-
     if tmux:
         body["tmux_session"] = tmux
         body["tmux_pane"] = pane
+        # Who runs in the pane: the tmux server, and the agent process with its start time.
+        body.update({"tmux_server": "4242", "agent_pid": 777, "agent_started": "123456"})
     async with agent_client(app, f"tok-{agent}") as client:
         assert (await client.post(f"/api/sessions/{session_id}/events", json=body)).status_code == 200
 
@@ -82,7 +84,8 @@ async def test_compact_goes_to_the_bridge_as_a_fixed_command(env):
     assert job["kind"] == "session_command" and job["command"] == "compact"
     assert job["tmux_session"] == "agent-claude" and job["agent_id"] == "claude"
     assert job["session_id"] == "s1" and job["tmux_pane"] == "%3"  # who, and the stable pane
-    assert set(job) <= {"id", "kind", "command", "level", "tmux_session", "tmux_pane", "session_id", "agent_id"}  # no free text
+    assert set(job) <= {"id", "kind", "command", "level", "tmux_session", "tmux_pane", "tmux_server", "agent_pid",
+                        "agent_started", "session_id", "agent_id"}  # no free text
     [event] = db.list_session_controls("s1")
     assert event["actor"].startswith("human") and event["command"] == "/compact" and event["state"] == "sent"
 
@@ -146,7 +149,8 @@ class FakeTmux:
     """Records every target an operation was aimed at: it must always be the pane id."""
 
     def __init__(self, exists=True, idle=True, typing=None, pane_session="agent-claude", type_ok=True, enter_ok=True,
-                 check_error=False):
+                 check_error=False, server_pid=4242):
+        self.server_pid = server_pid
         self.exists, self.idle, self.typing, self.pane_session = exists, idle, typing, pane_session
         self.check_error = check_error
         self.type_ok, self.enter_ok = type_ok, enter_ok
@@ -155,9 +159,12 @@ class FakeTmux:
     def session_exists(self, name):
         return self.exists
 
-    def pane_session_name(self, pane):
-        self.targets.append(("pane_session_name", pane))
-        return self.pane_session if self.exists else None
+    def pane_info(self, pane):
+        self.targets.append(("pane_info", pane))
+        if not self.exists:
+            return None
+        from types import SimpleNamespace
+        return SimpleNamespace(server_pid=self.server_pid, pane_pid=900, session_name=self.pane_session)
 
     def is_session_idle(self, target, idle_patterns, busy_patterns):
         self.targets.append(("idle", target))
@@ -191,13 +198,29 @@ class FakeTmux:
         return True
 
 
-def daemon(env, tmux):
+class FakeProcs:
+    """The /proc questions of the bridge: is the agent process alive (same start), is it under the pane's process."""
+
+    def __init__(self, alive=True, under_pane=True):
+        self.is_alive, self.is_under = alive, under_pane
+
+    def alive(self, pid, started):
+        return self.is_alive and (pid, started) == (777, "123456")
+
+    def descends(self, pid, ancestor):
+        return self.is_under and ancestor == 900
+
+
+def daemon(env, tmux, procs=None):
     app, db = env
-    return BridgeDaemon(db=db, config=CONFIG, tmux=tmux)
+    bridge = BridgeDaemon(db=db, config=CONFIG, tmux=tmux)
+    bridge.procs = procs or FakeProcs()
+    return bridge
 
 
 JOB = {"id": "j", "kind": "session_command", "agent_id": "claude", "tmux_session": "agent-claude",
-       "tmux_pane": "%3", "session_id": "s1", "command": "compact"}
+       "tmux_pane": "%3", "tmux_server": "4242", "agent_pid": 777, "agent_started": "123456",
+       "session_id": "s1", "command": "compact"}
 
 
 def test_the_bridge_types_only_the_fixed_command_into_the_configured_pane(env):
@@ -472,3 +495,93 @@ async def test_an_unchecked_input_is_a_refusal_not_an_uncertain_outcome(env):
     resp = await post(app, "/api/sessions/s1/compact", bridge_answer={"ok": False, "error": "check_failed"})
     assert resp.status_code == 409 and resp.json()["code"] == "session_command.check_failed"
     assert [row["state"] for row in db.list_session_controls("s1")] == ["refused"]
+
+
+# --- P1.1: a pane id is only unique within one tmux server, and only while its process lives ----
+
+
+@pytest.mark.parametrize("tmux,procs,error", [
+    (FakeTmux(server_pid=9999), None, "server_mismatch"),                    # tmux restarted: %0 is somebody else's
+    (FakeTmux(), FakeProcs(alive=False), "agent_gone"),                      # the session's process is dead (a ghost)
+    (FakeTmux(), FakeProcs(under_pane=False), "agent_not_in_pane"),          # alive, but not what runs in this pane
+])
+def test_a_reused_pane_id_or_a_dead_process_is_refused(env, tmux, procs, error):
+    out = daemon(env, tmux, procs).handle_job(JOB)
+    assert out["ok"] is False and out["error"] == error and tmux.sent == [] and tmux.typed is None
+
+
+@pytest.mark.parametrize("missing", ["tmux_server", "agent_pid", "agent_started"])
+def test_a_job_without_the_process_identity_is_refused(env, missing):
+    tmux = FakeTmux()
+    out = daemon(env, tmux).handle_job({**JOB, missing: None})
+    assert out["ok"] is False and out["error"] == "identity_unknown" and tmux.sent == []
+
+
+@pytest.mark.asyncio
+async def test_after_a_tmux_restart_the_ghost_session_cannot_type_into_the_new_occupant(env):
+    """A (closed without SessionEnd) kept %0; B now holds %0 in a new tmux server and reports no pane."""
+    app, db = env
+    await start(app, "claude", "ghost", "claude-code", pane="%0")
+    await start(app, "claude", "newcomer", "claude-code", tmux=None)       # old hook / .placet-off: no pane report
+    tmux = FakeTmux(server_pid=5151)                                        # the restarted server
+    bridge = daemon(env, tmux)
+    task = asyncio.create_task(fake_bridge(app, bridge.handle_job, polls=1))
+    await asyncio.sleep(0.05)
+    async with human_client(app) as human:
+        resp = await human.post("/api/sessions/ghost/compact")
+    await task
+    assert resp.status_code == 409 and resp.json()["code"] == "session_command.server_mismatch"
+    assert tmux.sent == [] and tmux.typed is None
+    assert [row["state"] for row in db.list_session_controls("ghost")] == ["refused"]
+
+
+# --- the hook side and /proc ------------------------------------------------------------------
+
+
+def fake_proc(root, pid, ppid, comm, starttime):
+    folder = root / str(pid)
+    folder.mkdir(parents=True)
+    (folder / "comm").write_text(comm + "\n")
+    fields = ["S", str(ppid)] + ["0"] * 17 + [str(starttime)] + ["0"] * 10
+    (folder / "stat").write_text(f"{pid} ({comm}) " + " ".join(fields) + "\n")
+
+
+def test_procs_tell_alive_from_dead_and_descendants_from_strangers(tmp_path):
+    from bridge.procs import Procs
+    root = tmp_path / "proc"
+    fake_proc(root, 900, 1, "bash", 50)         # the pane's process
+    fake_proc(root, 800, 900, "node", 60)
+    fake_proc(root, 777, 800, "claude", 70)     # the agent, under the pane
+    fake_proc(root, 555, 1, "claude", 80)       # another claude, elsewhere
+    procs = Procs(root)
+    assert procs.alive(777, "70") and not procs.alive(777, "71") and not procs.alive(123, "70")
+    assert procs.descends(777, 900) and not procs.descends(555, 900) and not procs.descends(777, 555)
+    assert procs.descends(900, 900)
+    (root / "777" / "stat").write_text("777 (claude) Z 800 " + " ".join(["0"] * 17) + " 70 " + " ".join(["0"] * 10))
+    assert not procs.alive(777, "70")           # a zombie is not running
+
+
+def test_the_hook_finds_its_agent_process_and_the_tmux_server(tmp_path, monkeypatch):
+    from hooks import placet_common
+    root = tmp_path / "proc"
+    fake_proc(root, 300, 1, "bash", 10)
+    fake_proc(root, 200, 300, "claude", 4321)
+    fake_proc(root, 100, 200, "sh", 20)         # the hook's own parent shell
+    assert placet_common.agent_process(start_pid=100, proc_root=root) == (200, "4321")
+    assert placet_common.agent_process(start_pid=300, proc_root=root) is None
+    monkeypatch.setenv("TMUX", "/tmp/tmux-1000/default,5151,0")
+    assert placet_common.tmux_server_pid() == "5151"
+    monkeypatch.setenv("TMUX", "garbage")
+    assert placet_common.tmux_server_pid() is None
+    monkeypatch.delenv("TMUX")
+    assert placet_common.tmux_server_pid() is None
+
+
+def test_the_claude_hook_reports_the_identity(monkeypatch):
+    from hooks import claude_code
+    monkeypatch.setattr(claude_code, "_tmux_session", lambda: "work")
+    monkeypatch.setenv("TMUX", "x,5151,0")
+    monkeypatch.setenv("TMUX_PANE", "%3")
+    monkeypatch.setattr(claude_code.placet_common, "agent_process", lambda **k: (200, "4321"))
+    payload = claude_code.build_event({"hook_event_name": "UserPromptSubmit", "cwd": "/p", "prompt": "x"})
+    assert (payload["tmux_server"], payload["agent_pid"], payload["agent_started"]) == ("5151", 200, "4321")
