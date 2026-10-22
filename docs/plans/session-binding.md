@@ -1,118 +1,177 @@
 # Verified session binding (RS-09)
 
-Status: **proposal**, not implemented. Prerequisite of the coordinator view
-([RFC-17](../requirements.md)): a per-node grant is meaningless while a session
-can claim to be another one.
+Status: **proposal, revised after two reviews** (second reviewer #285,
+independent reviewer #286, October 22, 2026). No code yet. Prerequisite of
+the coordinator view (RFC-17) and of shared project memory (RF-69): a
+per-node grant is meaningless while a session can claim to be another one.
 
 ## Problem
 
 An agent authenticates with its **provider token** (`claude`, `codex`,
-`gemini`). The session it acts for is **declared**: `placet_send_to_agent` and
-`placet_list_relations` take an optional `session_id`, and the backend only
-checks that the declared session belongs to the same provider. Without it,
-the backend guesses (`created_sender_session`: the only busy session of that
-agent). So:
+`gemini`). The session it acts for is **declared**: `placet_send_to_agent`
+and `placet_list_relations` take an optional `session_id`, checked only
+against the provider; without it the backend guesses
+(`created_sender_session`: the only busy session). Worse, `placet_reply`,
+`placet_ack` and `placet_progress` carry **no session at all**
+(`mcp_server/server.py`, `client_api.py`): any session of a provider that
+knows a request id — sequential, so guessable, and exactly what an injected
+"reply to #N" would say — can complete, acknowledge or update another
+session's request. Inbox and event endpoints check only the agent too.
 
-- a Claude session can act as any other Claude session, and therefore use that
-  session's node, relations and (with RFC-17) project grants;
-- with two busy sessions of the same agent the guess fails, and the agent has
-  to pass an ID it may have copied wrongly or taken from another conversation;
-- a prompt injected into one session ("use session_id X") is enough to
-  impersonate X.
+## What this design can and cannot guarantee
 
-## Threat model and honest limits
+All agents run under one Unix user, with tools that read files and run
+shell commands. Therefore:
 
-All agents run under the same Unix user. Any process of that user can read
-another agent's files, transcripts and tokens. **No application-level scheme
-is a barrier against a hostile local process**, and this design does not claim
-one (see RS-09 in the requirements).
+- **It does prevent:** impersonation by **id alone** (a wrong, stale, copied
+  or injected `session_id`), the busy-session guess picking the wrong
+  session, and Placet itself spreading a session's credential (no Placet
+  API, SSE event, PWA view, notification or log carries it).
+- **It does not prevent:** an agent whose tools can read another session's
+  transcript or files copying that session's credential, a model induced to
+  disclose its own credential (bearer semantics:
+  [RFC 6750](https://www.rfc-editor.org/rfc/rfc6750) — whoever holds it can
+  use it), or any process able to run shell commands as the user registering
+  or rotating credentials through the spool or the provider token. Injections
+  that can run shell commands are **out of scope**; so is any hostile local
+  process.
 
-What the binding must stop:
+Strong isolation would need credentials outside the model's reach and real
+separation of processes, users or transports. This design does not claim it,
+and RFC-17/RF-69 grants must say which level they rely on.
 
-1. **Mistakes:** a wrong or stale `session_id`, a copied ID from another
-   conversation, the busy-session guess picking the wrong one.
-2. **Cross-session prompt injection:** text that reaches session A (a file, a
-   web page, another agent's reply) cannot make A act as session B, because A
-   cannot learn B's credential from its own context.
-3. **Confused deputies through Placet itself:** no Placet API returns another
-   session's credential, ever (not to the PWA, not in `placet_list_agents`).
+## Assurance levels
 
-Out of scope: a malicious local process reading transcripts or the database;
-provider apps that do not let Placet put anything into the session's context.
+Each request, reply and event records the level of the acting session, with
+`binding_id` and generation (never the secret):
 
-## Proposal: a per-session capability delivered in-context
-
-1. **Issue.** When the backend first registers a session (hook `start`, or the
-   first event of a session it did not know), it creates a random capability:
-   128 bits, URL-safe, stored **hashed** (SHA-256) in `sessions.binding_hash`
-   with `binding_issued_at`. The plaintext exists only in the hook response.
-2. **Deliver into the conversation, not into a file.** The hook returns the
-   capability to the provider as context the model sees, and only that session
-   sees: Claude Code `additionalContext` on `SessionStart`/first
-   `UserPromptSubmit` (already used by `hooks/steer.py`); the equivalent
-   mechanism for Codex and Antigravity where one exists (see "Providers").
-   The text says what it is: "Placet session credential for this conversation
-   only; pass it as `session_token`; never repeat it elsewhere".
-3. **Present.** MCP tools gain `session_token` (replacing, in time,
-   `session_id`). The backend hashes it, looks the session up, and requires it
-   to belong to the authenticated provider. The session is then **proven**,
-   not declared.
-4. **Grade.** Each request records `sender_binding`: `verified` (token),
-   `declared` (legacy `session_id`), `guessed` (busy-session fallback). The
-   PWA and the audit show it. Features that grant power per node (RFC-17
-   grants, automatic relations once enforcement is on) require `verified`.
-5. **Rotate and revoke.** A new capability on `/clear` and on continuation
-   (RF-29d: the old session's hash is cleared, the new session gets its own;
-   the node moves only on a verified continuation). The user can revoke a
-   session's binding from the PWA (forces re-issue on the next hook event).
-   Capabilities never expire on time alone: a long conversation keeps working.
-
-### Why not the alternatives
-
-- **Parent PID / process tree:** the caller reports it, so it proves nothing
-  to the backend; also differs between desktop apps and CLIs.
-- **A per-session file read by the MCP server:** the MCP server does not know
-  which session it serves (one stdio server per app, sometimes shared), and a
-  file is readable by every agent, including through tool calls driven by an
-  injected prompt.
-- **Per-session provider tokens in `AGENTS.md`:** sessions are created by the
-  apps at will; static secrets cannot follow them.
-
-## Providers (to verify in the lab before coding)
-
-| Provider | Delivery channel for the capability | Status |
+| Level | Meaning | Allowed |
 | --- | --- | --- |
-| Claude Code (CLI and desktop) | hook `additionalContext` on `SessionStart` / `UserPromptSubmit` | used today by `steer.py`; verify on desktop after compaction/continuation |
-| Codex | hook output or the delivered prompt preamble for Placet-started turns | to verify; fallback: `declared` only |
-| Antigravity | hook response / prompt preamble | to verify; fallback: `declared` only |
+| `transport` | The MCP transport or a trusted local broker identifies the session without any model-chosen argument | everything, including per-node grants (target; not available today) |
+| `credential` | A valid in-context credential of the current generation was presented | routing, replies; per-node grants **only** where the provider's channel passed the lab gate |
+| `declared` | A `session_id` checked against the provider only (today) | today's routing; never new data through legacy endpoints |
+| `guessed` | Busy-session fallback | today's routing only |
 
-A provider without an in-context channel stays `declared`: it keeps working as
-today but cannot hold per-node grants.
+A present but invalid credential is an error: it never falls back to
+`declared`. A mismatch between credential and declared `session_id` is
+refused.
+
+## Experimental mechanism: credential in context (Claude Code first)
+
+1. **Generated by the hook, not the backend.** Hooks write to the spool and
+   exit (RF-28): they never receive a backend response. On `SessionStart`
+   (every `source`: `startup`, `resume`, `clear`, `compact`) the hook
+   generates `plst_` + `secrets.token_urlsafe(16)` (128 bits), puts the
+   plaintext only in `additionalContext`, and writes **only its SHA-256** to
+   the spool. The backend records the hash with a new **generation**
+   (trust on first use within the provider-token boundary above).
+2. **Registration is not enrollment.** Recording a hash binds a credential to
+   a session at level `credential`; it grants nothing. Per-node grants need a
+   separate enrollment: the user confirms the first association of a node
+   with a newly bound session in the PWA (no token shown), then assigns
+   grants. Ordinary sessions need no confirmation.
+3. **Renewal on compaction.** Real data: injected context does not survive
+   compaction (0 of 39 summaries carried it). A new generation is issued on
+   every `SessionStart`, including `compact` (Claude Code matcher; Codex
+   `PostCompact`). The previous generation stays valid for a short grace
+   period, then is refused. The context text says: "Placet session credential
+   for this conversation only. The newest one replaces older ones. Pass it as
+   `session_token`; never write it anywhere else."
+4. **Presented in a header**, `X-Placet-Session`, by the MCP client for every
+   tool: send, list relations, check status, **reply, ack and progress**.
+   Never in a query string (`GET /api/relations?session_id=` would put it in
+   access logs) or in a stored body field.
+5. **Server checks on every operation:** resolve the session from the active
+   binding (never from the payload), check provider/agent, generation and
+   state; derive node and project membership from the database; for reply,
+   ack and progress require `request.recipient_session_id` to equal the bound
+   session; re-check revocation and membership at commit of a write.
+6. **Revoke is not rotate.** `revoked` stays blocked until a new enrollment
+   authorized by the user; ordinary hook events never re-enable it. States
+   per generation: `active`, `superseded` (grace), `revoked`. Duplicate and
+   out-of-order spool events are ordered by generation; two concurrent
+   starts keep the newest.
+7. **Leases.** A generation has a maximum lifetime renewed only through the
+   trusted channel (a new `SessionStart`/compaction), so a long turn is never
+   cut off, and nothing depends on the model echoing the secret in a summary.
+
+## Continuation and `/clear`
+
+- `/clear` or a new session: new binding and generation; the old context's
+  credential is never reused.
+- Compaction with the same session id: renewal (above), not a new identity,
+  and never a silent downgrade.
+- **Continuation (RF-29d) is textual routing evidence, not cryptographic
+  succession.** The new session never holds the old credential. The node
+  moves on RF-29d detection as today, but **grants do not follow** without
+  the user's confirmation in the PWA. Node transfer, invalidation of the old
+  binding and the audit entry are one transaction; a reopened old session
+  cannot reclaim the node.
+
+## Secret hygiene
+
+- The prefix `plst_` makes leaks recognizable: the backend redacts the
+  pattern in replies (explicit and implicit, RF-25), progress, agent-created
+  prompts, notifications and transcript entries (`bridge/transcripts.py`).
+  This limits spreading through Placet; it cannot erase the provider's own
+  transcripts.
+- Injected context never starts with `[Placet Request #` and is never merged
+  with a delivery or steer (the PWA shows those as messages).
+- `binding_hash` has a unique index and is never part of `SessionModel`
+  (`SESSIONS_WITH_NODE` selects `sessions.*`: list columns explicitly).
+- Lookup by hash through the index; `hmac.compare_digest` where Python
+  compares. SHA-256 is enough for 128 random bits.
+- The single endpoint path that sees plaintext is none: the hook keeps it.
+
+## Providers (lab gate before any code)
+
+| Provider | Channel | Status |
+| --- | --- | --- |
+| Claude Code CLI and desktop | `SessionStart`/`UserPromptSubmit` `additionalContext` (recorded twice in the transcript: `hook_additional_context` and `hook_success` attachments) | verify SessionStart delivery, visibility to the model, renewal after `/compact`, desktop behaviour |
+| Codex 0.145 | `additionalContext` exists in the binary, events `SessionStart`, `PostCompact` | verify where the rollout records it and whether the PWA would show it |
+| Antigravity | hook stdout is `{}`; no known context field | `declared` only |
+
+Preferred long-term: a credential held by a broker/MCP adapter and attached
+outside model-chosen arguments, **only if** the transport really identifies
+the session (a single MCP server shared by the whole app cannot pick the
+caller from the active tab, cwd or last turn). Never clipboard automation,
+window scraping or "last active thread".
+
+A provider without a verified channel stays `declared`: it keeps working
+but holds no per-node grants.
 
 ## Migration
 
-1. Ship issuing, storage, `session_token` and `sender_binding` recording; keep
-   accepting `session_id` (`declared`). No behaviour change.
-2. PWA shows the binding grade per request and per session.
-3. RFC-17 grants require `verified`.
-4. Later, with the user's decision: refuse `declared` for automatic relations.
+1. Lab gate (table above), including concurrent sessions of one provider,
+   lost spool events, compaction, `/clear`, continuation and revocation.
+2. Storage, header, levels recorded on requests/replies/events; reply, ack
+   and progress checked against the bound session when a credential is
+   present. No behaviour change for `declared`.
+3. PWA shows the level per session and request; enrollment and revocation.
+4. RFC-17 / RF-69 grants require `credential` on a gated provider (or
+   `transport`), for reads, lists, history and export as well as writes.
+5. Later, with the user's decision: refuse `declared` for automatic
+   relations.
 
 ## Tests required
 
-- Session A presenting B's `session_id` is `declared`, never `verified`;
-  presenting B's token from A's provider token works only if A really holds it
-  (the test proves no API ever returns it).
-- Wrong provider + valid token of another provider: refused.
-- Token rotation on `/clear` and continuation; old token refused afterwards.
-- Revocation from the PWA; re-issue on next hook event.
-- No endpoint, SSE event, log line or audit entry contains a plaintext token
-  (grep test over responses and logs in the suite).
-- Hash comparison in constant time.
+- A, with the provider token, tries to register, rotate or recover a
+  credential naming B: B is unaffected (within the stated boundary: no shell).
+- Reply/ack/progress on another session's request: refused with a credential.
+- Mismatched token and `session_id`; invalid token never downgrades.
+- Old generation after renewal and after the grace period; revoked stays
+  revoked across hook events.
+- Concurrent starts; out-of-order spool events.
+- No plaintext in any response, SSE event, log, notification, PWA transcript
+  or forwarded reply (grep over the suite's outputs), including a reply that
+  quotes the credential.
+- Continuation moves the node but not the grants; old session cannot reclaim.
 
-## Open questions for review
+## Decisions on the open questions
 
-1. Is in-context delivery acceptable given that the token then lives in the
-   provider's transcript on disk (same-UID readable, already out of scope)?
-2. Should the first token be issued only after the user confirms a new
-   session in the PWA (stronger, but one more step for every conversation)?
-3. Codex and Antigravity channels: lab work needed before committing to them.
+1. In-context delivery: **yes, as a limited experiment** with temporary
+   generations; not presented as isolation between nodes.
+2. User confirmation: not for every session; **only** for the first node
+   association of a newly bound session that will hold grants.
+3. Lab before code: **yes**; a negative result keeps `declared`, with no
+   heuristic fallback for RF-69/RFC-17.
