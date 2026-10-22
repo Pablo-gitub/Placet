@@ -24,8 +24,10 @@ A `.placet-off` file in a project (or a folder containing it) keeps its sessions
 Events are written to the local queue (spool.py), which the bridge forwards
 to the backend: the hook makes no network call and returns at once.
 
-It never prints anything (UserPromptSubmit stdout would be added to the
-model's context) and always exits 0: a Placet problem must not block Claude.
+It prints nothing (UserPromptSubmit stdout would be added to the
+model's context), except one notice at SessionStart when the Placet MCP server
+is missing from the configuration (RF-27). It always exits 0: a Placet problem
+must not block Claude.
 """
 import json
 import os
@@ -133,6 +135,24 @@ def build_event(event: dict, provider: str = "claude-code"):
     return None
 
 
+MCP_MISSING_CONTEXT = (
+    "Placet notice: this session's configuration has no `placet` MCP server, so the Placet tools "
+    "(placet_reply, placet_ack, placet_ask_human, placet_send_to_agent) are not available here. "
+    "Tell the user at your next reply that Placet MCP is not connected; messages from Placet "
+    "cannot be answered from this session until it is added (docs/installation.md, step 3)."
+)
+
+
+def startup_context(payload: dict):
+    """
+    RF-27: hook output telling a Claude Code session its Placet MCP server is
+    missing. Only for a start event that read the configuration as "missing".
+    """
+    if payload.get("event") != "start" or payload.get("mcp") != "missing" or payload.get("provider") != "claude-code":
+        return None
+    return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": MCP_MISSING_CONTEXT}}
+
+
 def main() -> None:
     agent = placet_common.agent_id(sys.argv)
     if not agent:
@@ -149,6 +169,10 @@ def main() -> None:
         spool.write_event(agent, session_id, {k: v for k, v in payload.items() if v is not None})
     except Exception:
         pass
+    context = startup_context(payload)
+    if context is not None:
+        # SessionStart stdout is added to the model's context: said only when it matters.
+        print(json.dumps(context))
 
 
 if __name__ == "__main__":
