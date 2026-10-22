@@ -1564,13 +1564,15 @@ def create_app(
                   "tmux_missing": (409, "The tmux session is not running."),
                   "not_idle": (409, "The session is not at an empty prompt."),
                   "user_typing": (409, "Someone is typing in the session."),
+                  "check_failed": (409, "tmux could not tell whether someone is typing."),
                   "invalid": (422, "Not a fixed session command."),
                   "send_failed": (502, "tmux refused the keys; nothing was typed."),
                   "enter_failed": (502, "The text was typed but Enter was not sent.")}
         # Certainly not typed: every check failed, or the job never reached the bridge. Anything
         # else (lost reply, timeout, text typed without Enter, an unexpected error) is uncertain.
         refused = {"bridge.offline", "session_command.wrong_session", "session_command.tmux_missing",
-                   "session_command.not_idle", "session_command.user_typing", "session_command.invalid",
+                   "session_command.not_idle", "session_command.user_typing", "session_command.check_failed",
+                   "session_command.invalid",
                    "session_command.send_failed"}
         if db.pending_session_control(session_id) is not None:
             raise ProductError(409, "session.control_pending", "A control for this session is still being sent.")

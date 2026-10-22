@@ -145,8 +145,10 @@ async def test_bridge_failures_become_product_errors(env):
 class FakeTmux:
     """Records every target an operation was aimed at: it must always be the pane id."""
 
-    def __init__(self, exists=True, idle=True, typing=None, pane_session="agent-claude", type_ok=True, enter_ok=True):
+    def __init__(self, exists=True, idle=True, typing=None, pane_session="agent-claude", type_ok=True, enter_ok=True,
+                 check_error=False):
         self.exists, self.idle, self.typing, self.pane_session = exists, idle, typing, pane_session
+        self.check_error = check_error
         self.type_ok, self.enter_ok = type_ok, enter_ok
         self.sent, self.targets, self.typed = [], [], None
 
@@ -162,6 +164,12 @@ class FakeTmux:
         return self.idle
 
     def seconds_since_input(self, name):
+        return self.typing
+
+    def input_idle_seconds(self, name):
+        if self.check_error:
+            from bridge.tmux_controller import TmuxCheckError
+            raise TmuxCheckError("cannot list clients")
         return self.typing
 
     def send_keys(self, target, text, enter=True):
@@ -406,3 +414,61 @@ def test_rows_written_before_states_existed_count_as_sent(tmp_path):
     db = Database(path)
     db.init_db()
     assert [row["state"] for row in db.list_session_controls("s1")] == ["sent"]
+
+
+# --- P2: no client attached is not the same as "cannot check" ----------------------------------
+
+
+class _Run:
+    def __init__(self, stdout="", error=None):
+        self.stdout, self.error = stdout, error
+
+    def __call__(self, *a, **k):
+        if self.error:
+            raise self.error
+        import types
+        return types.SimpleNamespace(stdout=self.stdout, returncode=0)
+
+
+def test_input_recency_tells_no_client_from_a_failed_check(monkeypatch):
+    import subprocess
+    import time
+    from bridge.tmux_controller import TmuxCheckError, TmuxController
+    controller = TmuxController()
+    monkeypatch.setattr("bridge.tmux_controller.subprocess.run", _Run(f"{int(time.time()) - 6}\n"))
+    assert 4 <= controller.input_idle_seconds("s") <= 8
+    monkeypatch.setattr("bridge.tmux_controller.subprocess.run", _Run(""))
+    assert controller.input_idle_seconds("s") is None                  # nobody attached: nobody typing
+    monkeypatch.setattr("bridge.tmux_controller.subprocess.run", _Run(error=subprocess.CalledProcessError(1, "tmux")))
+    with pytest.raises(TmuxCheckError):
+        controller.input_idle_seconds("s")
+    monkeypatch.setattr("bridge.tmux_controller.subprocess.run", _Run(error=FileNotFoundError()))
+    with pytest.raises(TmuxCheckError):
+        controller.input_idle_seconds("s")
+    monkeypatch.setattr("bridge.tmux_controller.subprocess.run", _Run("not-a-number\n"))
+    with pytest.raises(TmuxCheckError):
+        controller.input_idle_seconds("s")
+
+
+def test_the_old_check_keeps_its_behaviour_for_normal_deliveries(monkeypatch):
+    import subprocess
+    from bridge.tmux_controller import TmuxController
+    monkeypatch.setattr("bridge.tmux_controller.subprocess.run", _Run(error=subprocess.CalledProcessError(1, "tmux")))
+    assert TmuxController().seconds_since_input("s") is None
+
+
+def test_a_command_fails_closed_when_the_input_cannot_be_checked(env):
+    tmux = FakeTmux(check_error=True)
+    out = daemon(env, tmux).handle_job(JOB)
+    assert out["ok"] is False and out["error"] == "check_failed" and tmux.sent == [] and tmux.typed is None
+    tmux = FakeTmux(typing=None)                     # no client attached: allowed
+    assert daemon(env, tmux).handle_job(JOB)["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_an_unchecked_input_is_a_refusal_not_an_uncertain_outcome(env):
+    app, db = env
+    await start(app, "claude", "s1", "claude-code")
+    resp = await post(app, "/api/sessions/s1/compact", bridge_answer={"ok": False, "error": "check_failed"})
+    assert resp.status_code == 409 and resp.json()["code"] == "session_command.check_failed"
+    assert [row["state"] for row in db.list_session_controls("s1")] == ["refused"]

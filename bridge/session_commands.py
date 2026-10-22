@@ -5,6 +5,7 @@ from contextlib import nullcontext
 from typing import Optional
 
 from backend.app.session_commands import command_text
+from bridge.tmux_controller import TmuxCheckError
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,10 @@ def run_command(tmux, spec, tmux_session: Optional[str], tmux_pane: Optional[str
             raise CommandError("wrong_session", f"Pane {tmux_pane} no longer belongs to {spec.name}.")
         if not tmux.is_session_idle(tmux_pane, spec.idle_patterns, spec.busy_patterns):
             raise CommandError("not_idle", "The session is not at an empty prompt.")
-        recent = tmux.seconds_since_input(spec.name)
+        try:
+            recent = tmux.input_idle_seconds(spec.name)   # None: no client attached, nobody typing
+        except TmuxCheckError:
+            raise CommandError("check_failed", "tmux could not tell whether someone is typing.") from None
         if isinstance(recent, (int, float)) and recent < RECENT_INPUT_SECONDS:
             raise CommandError("user_typing", "Someone is typing in the session.")
         # Two steps, so that a failure tells what happened: nothing typed (send_failed,

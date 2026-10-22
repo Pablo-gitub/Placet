@@ -113,6 +113,23 @@ describe("session controls menu", () => {
     }
   });
 
+  it("warns that some effort levels persist as the default for future sessions", () => {
+    render(<SessionControls session={session(SUPPORTED)} />);
+    open();
+    const note = screen.getByTestId("control-effort-note");
+    expect(note).toHaveTextContent(i18n.t("controls.effortPersists"));
+    expect(note.querySelector("a")).toHaveAttribute(
+      "href", "https://code.claude.com/docs/en/model-config#adjust-effort-level");
+  });
+
+  it("translates a refusal when tmux could not check the input", async () => {
+    serve(409, { code: "session_command.check_failed", params: {}, detail: "raw" });
+    render(<SessionControls session={session(SUPPORTED)} />);
+    open();
+    fireEvent.click(screen.getByTestId("control-compact"));
+    expect(await screen.findByTestId("control-error")).toHaveTextContent(i18n.t("errors.commandCheckFailed"));
+  });
+
   it("renders nothing for a session without control information", () => {
     const { container } = render(<SessionControls session={{ id: "s1", provider: "claude-code" }} />);
     expect(container).toBeEmptyDOMElement();
@@ -121,7 +138,7 @@ describe("session controls menu", () => {
   it("has both languages", () => {
     for (const lng of ["en", "it"]) {
       for (const key of ["controls.title", "controls.compact", "controls.effort", "controls.apply", "controls.done",
-        "controls.pcOnly", "controls.unsupported", "controls.busy", "errors.commandUserTyping", "errors.sessionBusy", "errors.commandUncertain", "errors.commandEnterFailed",
+        "controls.pcOnly", "controls.unsupported", "controls.busy", "errors.commandUserTyping", "errors.sessionBusy", "errors.commandUncertain", "errors.commandEnterFailed", "errors.commandCheckFailed", "controls.effortPersists", "controls.effortDocs",
         "errors.paneStale", "errors.paneAmbiguous", "errors.controlPending", "controls.confirmRepeat"]) {
         expect(i18n.getFixedT(lng)(key)).not.toBe(key);
       }

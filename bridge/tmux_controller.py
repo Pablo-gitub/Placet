@@ -22,6 +22,10 @@ DEFAULT_BUSY_PATTERNS = [
 ]
 
 
+class TmuxCheckError(Exception):
+    """tmux could not answer: what it was asked is unknown (not "nobody", not "nothing")."""
+
+
 @dataclass
 class IdleCheck:
     """Outcome of an idle check, with the reasons (used by calibration)."""
@@ -200,6 +204,28 @@ class TmuxController:
         except Exception:
             return None
         stamps = [int(v) for v in res.stdout.split() if v.strip().isdigit()]
+        if not stamps:
+            return None
+        return max(0.0, time.time() - max(stamps))
+
+    def input_idle_seconds(self, session_name: str) -> Optional[float]:
+        """
+        Seconds since a client attached to the session last sent input, or None
+        when NO client is attached (nobody can be typing). Unlike
+        seconds_since_input, a check that cannot be made (tmux fails, the output
+        makes no sense) raises TmuxCheckError instead of looking like "nobody".
+        """
+        try:
+            res = subprocess.run(
+                ["tmux", "list-clients", "-t", session_name, "-F", "#{client_activity}"],
+                capture_output=True, text=True, check=True, timeout=3,
+            )
+        except Exception as e:
+            raise TmuxCheckError(f"cannot list the clients of {session_name}: {e}") from None
+        words = res.stdout.split()
+        stamps = [int(v) for v in words if v.isdigit()]
+        if len(stamps) != len(words):
+            raise TmuxCheckError(f"unexpected list-clients output for {session_name}")
         if not stamps:
             return None
         return max(0.0, time.time() - max(stamps))

@@ -23,7 +23,9 @@
     "pcOnly": "Disponibile solo sul PC per questa sessione.",
     "unsupported": "Questo provider non ha un controllo da remoto per questa azione (Codex lo ignora; Antigravity non è verificato).",
     "busy": "La sessione sta lavorando: disponibile a fine turno.",
-    "confirmRepeat": "Il comando precedente potrebbe essere già stato applicato. Inviarlo di nuovo?"
+    "confirmRepeat": "Il comando precedente potrebbe essere già stato applicato. Inviarlo di nuovo?",
+    "effortPersists": "low, medium, high e xhigh vengono salvati come predefiniti per le sessioni future; max vale solo per questa sessione. I livelli disponibili dipendono dal modello.",
+    "effortDocs": "Livelli di effort nella documentazione di Claude Code"
   },
   "home": {
     "questions": "Domande",
@@ -180,7 +182,8 @@
     "commandEnterFailed": "Il testo è stato digitato ma non confermato: controlla la sessione.",
     "paneStale": "In questo terminale ora gira un'altra sessione.",
     "paneAmbiguous": "Due sessioni sono ugualmente recenti in questo terminale: riprova dopo che una delle due agisce.",
-    "controlPending": "Un controllo per questa sessione è ancora in invio."
+    "controlPending": "Un controllo per questa sessione è ancora in invio.",
+    "commandCheckFailed": "Placet non è riuscito a capire se qualcuno sta scrivendo nella sessione: riprova."
   },
   "sessions": {
     "closed": "Chiusa",

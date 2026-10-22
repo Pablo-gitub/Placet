@@ -80,6 +80,11 @@ export default function SessionControls({ session }) {
               {t("controls.apply")}
             </button>
           </div>
+          <p className="composer-note" data-testid="control-effort-note">
+            {t("controls.effortPersists")}{" "}
+            <a href="https://code.claude.com/docs/en/model-config#adjust-effort-level" target="_blank"
+              rel="noopener noreferrer">{t("controls.effortDocs")}</a>
+          </p>
           {reason && <p className="composer-note" data-testid="control-explanation">{reason}</p>}
           {done && <p className="composer-note" role="status" data-testid="control-done">{t("controls.done")}</p>}
           {error && <p className="composer-note" role="alert" data-testid="control-error">{t(error.key, error.params)}</p>}
