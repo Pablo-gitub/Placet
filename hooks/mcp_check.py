@@ -8,7 +8,9 @@ other value is read, stored or sent, and nothing is written.
   configured  an enabled entry for Placet was found in the files checked
   missing     at least one file was read and none lists Placet
   unknown     nothing could be read (absent or broken files, other provider),
-              or the entry is switched off, so what applies is not clear
+              or the entry is switched off, refused or still waiting for approval
+              (a project's `.mcp.json` server needs the user's approval, recorded in
+              ~/.claude.json); an "off" anywhere wins over an entry found elsewhere
 
 These describe the CONFIGURATION that was detected, never the connection: a
 configured server can still fail to start, and "missing" only means "not found
@@ -74,8 +76,21 @@ def _verdict(read: int, found: bool, off: bool = False) -> str:
     return "missing" if read else "unknown"
 
 
+def _names(value) -> set:
+    return {str(n) for n in value} if isinstance(value, list) else set()
+
+
 def _claude(cwd, home: Path) -> str:
+    """
+    Servers in ~/.claude.json (user scope, and per project) run as configured; servers
+    from a project's `.mcp.json` run only after the user approved them, which Claude Code
+    records per project in ~/.claude.json: `enabledMcpjsonServers` (approved),
+    `disabledMcpjsonServers` (refused), `enableAllProjectMcpServers`. A `.mcp.json`
+    entry refused, not approved yet, or whose approvals cannot be read, makes the
+    answer "unknown", and an `off` anywhere wins over an entry found elsewhere.
+    """
     read, found, off = 0, False, False
+    approved, refused, approve_all = set(), set(), False
     data = _json(home / ".claude.json")
     if data is not None:
         read += 1
@@ -86,16 +101,22 @@ def _claude(cwd, home: Path) -> str:
             entry = projects.get(str(folder)) if isinstance(projects, dict) else None
             if isinstance(entry, dict):
                 found = found or _lists_placet(entry.get("mcpServers"))
-                # Claude Code keeps the servers a user switched off in a list per project.
-                disabled = entry.get("disabledMcpServers")
-                if isinstance(disabled, list) and any("placet" in str(n).lower() for n in disabled):
-                    off = True
+                off = off or _lists_disabled_placet(entry.get("mcpServers"))
+                approved |= _names(entry.get("enabledMcpjsonServers"))
+                refused |= _names(entry.get("disabledMcpjsonServers"))
+                approve_all = approve_all or entry.get("enableAllProjectMcpServers") is True
     for folder in _folders(cwd):
         project = _json(folder / ".mcp.json")
-        if project is not None:
-            read += 1
-            found = found or _lists_placet(project.get("mcpServers"))
-            off = off or _lists_disabled_placet(project.get("mcpServers"))
+        if project is None:
+            continue
+        read += 1
+        for name, entry in _placet_entries(project.get("mcpServers")).items():
+            if _switched_off(entry) or name in refused:
+                off = True
+            elif approve_all or name in approved:
+                found = True
+            else:
+                off = True  # not approved yet (or the approvals are unreadable)
     return _verdict(read, found, off)
 
 

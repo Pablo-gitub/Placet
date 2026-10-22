@@ -32,12 +32,46 @@ def test_claude_global_entry_is_configured(home, project):
     assert mcp_state("claude-code", str(project), home=home) == "configured"
 
 
-def test_claude_project_entry_in_dot_claude_json_and_in_mcp_json(home, project):
+def test_claude_project_entry_in_dot_claude_json(home, project):
     write(home / ".claude.json", {"mcpServers": {}, "projects": {str(project): {"mcpServers": {"placet": {}}}}})
     assert mcp_state("claude-code", str(project), home=home) == "configured"
     write(home / ".claude.json", {"mcpServers": {}})
     assert mcp_state("claude-code", str(project), home=home) == "missing"
-    write(project.parent / ".mcp.json", {"mcpServers": {"placet": {}}})  # a folder containing the project
+
+
+def test_a_project_mcp_json_entry_counts_only_once_approved(home, project):
+    """Servers from .mcp.json run only after the user approved them (per project, in ~/.claude.json)."""
+    write(project.parent / ".mcp.json", {"mcpServers": {"placet": {}}})   # a folder containing the project
+    write(home / ".claude.json", {"mcpServers": {}})
+    assert mcp_state("claude-code", str(project), home=home) == "unknown"            # not approved yet
+    write(home / ".claude.json", {"projects": {str(project): {"enabledMcpjsonServers": ["placet"]}}})
+    assert mcp_state("claude-code", str(project), home=home) == "configured"
+    write(home / ".claude.json", {"projects": {str(project): {"enableAllProjectMcpServers": True}}})
+    assert mcp_state("claude-code", str(project), home=home) == "configured"
+    write(home / ".claude.json", {"projects": {str(project): {"disabledMcpjsonServers": ["placet"],
+                                                              "enabledMcpjsonServers": ["github"]}}})
+    assert mcp_state("claude-code", str(project), home=home) == "unknown"            # refused by the user
+    write(home / ".claude.json", {"projects": {str(project): {"enabledMcpjsonServers": ["github"]}}})
+    assert mcp_state("claude-code", str(project), home=home) == "unknown"            # approved others only
+    (home / ".claude.json").unlink()
+    assert mcp_state("claude-code", str(project), home=home) == "unknown"            # approvals unreadable
+
+
+def test_an_off_anywhere_wins_over_a_found_entry(home, project):
+    write(home / ".claude.json", {"mcpServers": {"placet": {}},
+                                  "projects": {str(project): {"disabledMcpjsonServers": ["placet"]}}})
+    write(project / ".mcp.json", {"mcpServers": {"placet": {}}})
+    assert mcp_state("claude-code", str(project), home=home) == "unknown"
+    write(home / ".claude.json", {"mcpServers": {"placet": {}}})                     # the .mcp.json copy is unapproved
+    assert mcp_state("claude-code", str(project), home=home) == "unknown"
+    (project / ".mcp.json").unlink()
+    assert mcp_state("claude-code", str(project), home=home) == "configured"
+
+
+def test_a_key_that_claude_code_does_not_write_changes_nothing(home, project):
+    """`disabledMcpServers` is not a key of the real ~/.claude.json: it must not switch an entry off."""
+    write(home / ".claude.json", {"mcpServers": {"placet": {}},
+                                  "projects": {str(project): {"disabledMcpServers": ["placet"]}}})
     assert mcp_state("claude-code", str(project), home=home) == "configured"
 
 
@@ -101,9 +135,8 @@ def test_antigravity_start_events_carry_the_state_but_other_events_do_not(home, 
     assert "mcp" not in stop
 
 
-def test_a_disabled_entry_is_not_called_configured_or_missing(home, project):
-    write(home / ".claude.json", {"mcpServers": {"placet": {}},
-                                  "projects": {str(project): {"disabledMcpServers": ["placet"]}}})
+def test_a_switched_off_entry_is_not_called_configured_or_missing(home, project):
+    write(home / ".claude.json", {"mcpServers": {"placet": {"command": "x", "disabled": True}}})
     assert mcp_state("claude-code", str(project), home=home) == "unknown"
     write(home / ".codex" / "config.toml", "[mcp_servers.placet]\ncommand = 'python'\nenabled = false\n")
     assert mcp_state("codex", str(project), home=home) == "unknown"
