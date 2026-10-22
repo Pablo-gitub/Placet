@@ -2180,3 +2180,5 @@ body.chat-open { overflow: hidden; }
 .wake-notice p { margin: 0; }
 .wake-notice button { align-self: flex-start; }
 .state-archived { color: var(--text-muted); }
+.desktop-capacity { display: flex; flex-direction: column; gap: 0.1rem; padding: 0.2rem 0.75rem; font-size: 0.75rem; color: var(--text-muted); }
+.desktop-capacity.capacity-full { color: var(--warning); }

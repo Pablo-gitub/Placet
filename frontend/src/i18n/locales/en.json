@@ -785,5 +785,9 @@
   },
   "archived": {
     "note": "Restore it in the Claude app to use it; your message will stay waiting."
+  },
+  "capacity": {
+    "line": "Claude Desktop: {{engines}}/{{cap}} sessions loaded",
+    "hint": "Wake-ups from Placet may not start: archive an inactive conversation in the app"
   }
 }

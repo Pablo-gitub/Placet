@@ -785,5 +785,9 @@
   },
   "archived": {
     "note": "Ripristinala nell'app Claude per usarla; il messaggio resterà in attesa"
+  },
+  "capacity": {
+    "line": "Claude Desktop: {{engines}}/{{cap}} sessioni caricate",
+    "hint": "I risvegli da Placet potrebbero non partire: archivia una conversazione inattiva nell'app"
   }
 }
