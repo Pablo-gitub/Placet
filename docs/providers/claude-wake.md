@@ -91,6 +91,38 @@ the notice adds that Claude Desktop reported its limit on preloaded sessions dur
 the start is not confirmed and that writing in the chat on the PC starts the session. The cause informs
 only: it never changes the delivery or the queue, and never triggers a retry or an eviction.
 
+### Conversations archived in the app
+
+Archiving a conversation in Claude Desktop stops its engine, yet Placet kept showing the session as
+waiting. Once a minute the bridge reads the app's own session records
+(`~/.config/Claude/claude-code-sessions/<account>/<org>/local_*.json`, field `isArchived`, mapped to the
+Placet session by `cliSessionId`) with the safety of `resolve()`: read only, no symlinks, plain files, at
+most 2,000 records of at most 1 MB, and a session with several records, an unreadable one or an odd id is
+left out. It reports which Placet sessions are archived and which no longer are
+(`POST /api/bridge/desktop-state`); the backend keeps `sessions.desktop_archived` for Claude Desktop
+sessions only. The PWA says "Archiviata in Claude" in the Home row and the session header instead of the
+idle state, and the session view and the wake notice say to restore it in the app, the message staying
+waiting. An archived session is never listed for a wake-up (`resolve()` refuses it as well) and "Riprova
+apertura" is refused for it; restoring it in the app clears the flag by itself.
+
+### Preventive capacity indicator
+
+The cap is not a setting Placet can read, but the numbers behind it can be counted (Linux only):
+
+- **Cap** (as observed in app 2.9939.4): `max(6, floor(total RAM / 3 GiB))`, from `/proc/meminfo`.
+- **Loaded sessions**: the user's own processes whose `/proc/<pid>/environ` has
+  `CLAUDE_CODE_ENTRYPOINT=claude-desktop`, whose command line is the bundled engine (`claude…`) with
+  `--output-format stream-json`, and that have lived at least 10 seconds (from `/proc/<pid>/stat`).
+  The app also spawns short-lived "temporary query" engines several times a minute (verified live); they
+  must not count, and a terminal `claude` session has another entrypoint.
+
+`bridge/claude_desktop_engines.py` does the counting (bounded reads, nothing signalled, never raises) and the
+bridge reports only the two numbers with the archived state, once a minute; the backend keeps the latest
+(`GET /api/claude-desktop/capacity`, human only). The Claude group of Home shows "Claude Desktop: 6/7
+sessioni caricate", in warning style at or above the cap with the hint that wake-ups from Placet may not
+start and that an inactive conversation can be archived in the app. Numbers older than three minutes are not
+shown; elsewhere than Linux nothing is reported.
+
 For `wake_unconfirmed` and `wake_failed` the session view shows one notice (opening
 requested but the session did not start listening; the message is still in
 Placet; write in the chat on the PC or retry) with the time of the last attempt and
