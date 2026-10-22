@@ -68,21 +68,6 @@ async def test_the_node_follows_even_when_the_prompt_text_lacks_the_summary(env,
     assert db.get_node(planner.id).session_id == NEW
 
 
-def test_a_transcript_past_the_first_prompt_is_not_read(tmp_path, monkeypatch):
-    """The backend uses `continues` only on the first prompt: later prompts must not pay for a read."""
-    from hooks import claude_code
-    long_session = write_transcript(tmp_path / f"{NEW}.jsonl", [user(SUMMARY)] + [user("avanti")] * 12)
-    assert continued_from_transcript(long_session) is None
-
-    big = tmp_path / "big.jsonl"
-    big.write_text(json.dumps(user(SUMMARY)) + "\n" + "x" * (claude_code.TRANSCRIPT_MAX_BYTES + 1), encoding="utf-8")
-    opened = []
-    monkeypatch.setattr(claude_code, "open", lambda *a, **k: opened.append(a) or (_ for _ in ()).throw(AssertionError),
-                        raising=False)
-    assert continued_from_transcript(str(big)) is None
-    assert opened == []  # decided from the file size, without opening it
-
-
 def test_a_short_continued_transcript_is_still_read(tmp_path):
     path = write_transcript(tmp_path / f"{NEW}.jsonl", [{"type": "summary"}, user(SUMMARY), user("continua")])
     assert continued_from_transcript(path) == OLD
@@ -152,3 +137,67 @@ def test_a_malformed_line_is_skipped_not_trusted(tmp_path):
     assert continued_from_transcript(str(path)) == OLD
     path.write_text("not json " + flat + "\n", encoding="utf-8")
     assert continued_from_transcript(str(path)) is None
+
+
+# --- realistic transcripts: the summary comes after a pile of service records -----------------
+
+
+def service_records(n=10, snapshot_bytes=300_000):
+    """What Claude Code writes before the first conversation record of a continued session."""
+    records = [
+        {"type": "custom-title", "customTitle": "Sviluppatore", "sessionId": NEW},
+        {"type": "agent-name", "agentName": "dev", "sessionId": NEW},
+        {"type": "mode", "mode": "normal", "sessionId": NEW},
+        {"type": "atis-latch", "sessionId": NEW},
+        {"type": "system", "subtype": "compact_boundary", "content": "Conversation compacted", "sessionId": NEW},
+        {"type": "file-history-snapshot", "messageId": "m1", "isSnapshotUpdate": False,
+         "snapshot": {"trackedFileBackups": {"big.txt": "x" * snapshot_bytes}}},
+    ]
+    records += [{"type": "mode", "mode": "normal", "n": i} for i in range(max(0, n - len(records)))]
+    return records
+
+
+def real_summary(text=SUMMARY):
+    return {"type": "user", "isCompactSummary": True, "isVisibleInTranscriptOnly": True, "isSidechain": False,
+            "message": {"role": "user", "content": text}}
+
+
+def test_the_summary_after_many_service_records_and_a_huge_snapshot_is_found(tmp_path):
+    path = head(tmp_path, *service_records(12), real_summary(), assistant("ok"))
+    assert (tmp_path / f"{NEW}.jsonl").stat().st_size > 256 * 1024
+    assert continued_from_transcript(path) == OLD
+
+
+def test_a_long_continued_session_is_still_recognised_from_its_head(tmp_path):
+    """The backend decides whether it is the first prompt; the hook only reads the head."""
+    path = head(tmp_path, *service_records(12), real_summary(), *[user("avanti")] * 40)
+    assert continued_from_transcript(path) == OLD
+
+
+def test_the_first_conversation_record_decides_after_the_service_ones(tmp_path):
+    ordinary = head(tmp_path, *service_records(12), user("ciao"), real_summary())
+    assert continued_from_transcript(ordinary) is None
+    first_assistant = head(tmp_path, *service_records(12), assistant("ok"), real_summary())
+    assert continued_from_transcript(first_assistant) is None
+    sidechain_first = head(tmp_path, *service_records(12), {**user("x"), "isSidechain": True}, real_summary())
+    assert continued_from_transcript(sidechain_first) == OLD   # a subagent's record is not the conversation
+
+
+def test_an_explicitly_unflagged_user_record_is_not_a_summary(tmp_path):
+    assert continued_from_transcript(head(tmp_path, {**real_summary(), "isCompactSummary": False})) is None
+
+
+def test_the_search_is_bounded(tmp_path, monkeypatch):
+    from hooks import claude_code
+    many = head(tmp_path, *[{"type": "mode", "n": i} for i in range(claude_code.TRANSCRIPT_MAX_RECORDS + 5)],
+                real_summary())
+    assert continued_from_transcript(many) is None                      # too many service records
+    monkeypatch.setattr(claude_code, "TRANSCRIPT_MAX_BYTES", 1000)
+    heavy = head(tmp_path, {"type": "file-history-snapshot", "snapshot": "x" * 5000}, real_summary())
+    assert continued_from_transcript(heavy) is None                     # the byte budget ran out first
+
+
+def test_the_hook_sends_continues_for_a_realistic_transcript(tmp_path):
+    path = head(tmp_path, *service_records(12), real_summary(), user("continua"))
+    event = {"hook_event_name": "UserPromptSubmit", "cwd": CWD, "prompt": "continua", "transcript_path": path}
+    assert build_event(event)["continues"] == OLD

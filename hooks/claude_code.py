@@ -47,13 +47,12 @@ CONTINUED_JSONL_UUID = re.compile(
 # Claude Code names MCP tools mcp__<server>__<tool>; other clients may not.
 PLACET_TOOLS = re.compile(r"(^|__|\.|/)placet_(ask_human|send_to_agent)$")
 MAX_MESSAGE_CHARS = 20000
-# RF-29d fallback: where, in the session's own transcript, a continuation
-# summary can be (it is the conversation's first message). The backend uses
-# `continues` only on a session's first prompt, and the hook payload carries no
-# such signal, so only a short transcript is read: a longer one is past it.
-TRANSCRIPT_MAX_BYTES = 256 * 1024
-TRANSCRIPT_HEAD_LINES = 5
-TRANSCRIPT_MAX_LINES = TRANSCRIPT_HEAD_LINES + 3
+# RF-29d fallback: the transcript of a continued session starts with service records
+# (title, mode, compact boundary, file-history snapshots of up to hundreds of KB)
+# and only then the summary, as the first main-conversation user record. It is read
+# line by line up to that record, with a record and a byte budget.
+TRANSCRIPT_MAX_RECORDS = 64
+TRANSCRIPT_MAX_BYTES = 1024 * 1024
 ADAPTER = "claude_code.py/2"
 
 
@@ -121,39 +120,47 @@ def _summary_text(record):
 def continued_from_transcript(path):
     """
     The session this one continues, from the head of its own transcript: the
-    conversation's first user message is a summary that starts with Claude
-    Code's continuation phrase and names the previous transcript. Only that
-    explicit reference counts: a record quoting the phrase (an assistant
-    message, a tool result, a later or pasted message) is not proof, nor is a
-    summary naming several different transcripts, nor the transcript itself.
-    None when the file is unreadable, says nothing, or is too long to be at
-    its first prompt (it is then not even opened when it is large).
+    first main-conversation record is a user record whose text starts with
+    Claude Code's continuation phrase and names the previous transcript.
+    Service records before it (title, mode, system, file-history snapshots...)
+    and a subagent's records are skipped; the first user or assistant record of
+    the main conversation decides. Only that explicit reference counts: an
+    assistant message, a tool result, a later or pasted message, a summary naming
+    several transcripts, or the transcript itself is not proof. The read is
+    bounded (records and bytes); the backend decides whether it is the first
+    prompt. None when the file is unreadable or says nothing.
     """
     if not path:
         return None
+    budget = TRANSCRIPT_MAX_BYTES
     try:
-        if os.path.getsize(path) > TRANSCRIPT_MAX_BYTES:
-            return None
         with open(path, "rb") as handle:
-            lines = handle.read(TRANSCRIPT_MAX_BYTES).decode("utf-8", errors="replace").splitlines()
+            for _ in range(TRANSCRIPT_MAX_RECORDS):
+                raw = handle.readline(budget + 1)
+                if not raw or len(raw) > budget:
+                    return None  # end of file, or the byte budget ran out
+                budget -= len(raw)
+                try:
+                    record = json.loads(raw)
+                except ValueError:
+                    continue
+                if not isinstance(record, dict) or record.get("isSidechain") or record.get("isMeta"):
+                    continue
+                kind = record.get("type")
+                if kind == "assistant":
+                    return None
+                if kind != "user":
+                    continue  # a service record
+                # The first user record of the conversation decides, whatever it says.
+                text = _summary_text(record)
+                if record.get("isCompactSummary") is False or text is None \
+                        or not text.lstrip().startswith(CONTINUED_PREFIX):
+                    return None
+                own = Path(path).stem.lower()
+                found = {u.lower() for u in CONTINUED_JSONL_UUID.findall(text)} - {own}
+                return found.pop() if len(found) == 1 else None
     except OSError:
         return None
-    if len(lines) > TRANSCRIPT_MAX_LINES:
-        return None
-    for line in lines[:TRANSCRIPT_HEAD_LINES]:
-        try:
-            record = json.loads(line)
-        except ValueError:
-            continue
-        if not isinstance(record, dict) or record.get("type") != "user":
-            continue
-        # The first user record of the conversation decides, whatever it says.
-        text = _summary_text(record)
-        if text is None or not text.lstrip().startswith(CONTINUED_PREFIX):
-            return None
-        own = Path(path).stem.lower()
-        found = {u.lower() for u in CONTINUED_JSONL_UUID.findall(text)} - {own}
-        return found.pop() if len(found) == 1 else None
     return None
 
 
