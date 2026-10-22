@@ -202,7 +202,8 @@
     "wakeInProgress": "L'apertura è stata appena richiesta: aspetta che finisca.",
     "wakeNothing": "Nessun messaggio aspetta questa sessione.",
     "wakeReachable": "La sessione sta già ascoltando.",
-    "wakeUnsupported": "Solo una sessione di Claude Desktop si può aprire così."
+    "wakeUnsupported": "Solo una sessione di Claude Desktop si può aprire così.",
+    "desktopArchived": "La conversazione è archiviata in Claude: ripristinala nell'app."
   },
   "sessions": {
     "closed": "Chiusa",
@@ -213,7 +214,8 @@
     "unreachable": "Non raggiungibile",
     "desktop": "app desktop",
     "terminal": "terminale",
-    "opened": "{{project}} · aperta {{time}}"
+    "opened": "{{project}} · aperta {{time}}",
+    "archivedInClaude": "Archiviata in Claude"
   },
   "history": {
     "title": "Storico Decisioni & Log",
@@ -780,5 +782,8 @@
     "lastAttempt": "Ultimo tentativo: {{when}}",
     "retry": "Riprova apertura",
     "capacityDenied": "Claude Desktop ha segnalato il limite delle sessioni precaricate durante questo tentativo. L'avvio non è confermato; il messaggio è ancora in Placet: scrivi un messaggio nella chat sul PC per avviarla."
+  },
+  "archived": {
+    "note": "Ripristinala nell'app Claude per usarla; il messaggio resterà in attesa"
   }
 }

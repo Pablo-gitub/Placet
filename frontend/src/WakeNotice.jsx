@@ -16,6 +16,11 @@ export default function WakeNotice({ session }) {
   if (!session || session.reachable || session.entrypoint !== "claude-desktop") return null;
   if (!["open_requested", "waiting_for_session", "wake_unconfirmed", "wake_failed"].includes(state)) return null;
 
+  // Archived in the app: not a failed opening, and asking again would do nothing.
+  if (session.desktop_archived) {
+    return <p className="composer-note" role="status" data-testid="wake-notice">{t("archived.note")}</p>;
+  }
+
   const retry = async () => {
     setPending(true);
     setError(null);

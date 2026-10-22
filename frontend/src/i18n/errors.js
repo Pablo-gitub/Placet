@@ -21,6 +21,7 @@ export function apiErrorDescriptor(body, status) {
     "session.nothing_to_wake": "errors.wakeNothing",
     "session.already_reachable": "errors.wakeReachable",
     "session.wake_unsupported": "errors.wakeUnsupported",
+    "session.desktop_archived": "errors.desktopArchived",
     "mention.ambiguous": "errors.mentionAmbiguous",
     "mention.missing": "errors.mentionMissing",
     "mention.unavailable": "errors.mentionUnavailable",
