@@ -13,6 +13,7 @@ from backend.app import envelopes
 from backend.app.models import RequestModel
 from bridge.channels import ChannelError, ChannelUncertain, default_channels
 from bridge.stores import BridgeStore, LocalStore, Work
+from bridge.claude_desktop_engines import EngineCounter
 from bridge.claude_desktop_log import WakeDiagnosis
 from bridge.procs import Procs
 from bridge.session_commands import CommandError, run_command
@@ -64,6 +65,7 @@ class BridgeDaemon:
         channels: Optional[dict] = None,
         spool=None,
         claude_waker=None,
+        engine_counter=None,
     ):
         # Direct database access (db/config) is the single-process dev mode;
         # in production pass an HttpStore.
@@ -79,6 +81,8 @@ class BridgeDaemon:
         # Accepted opens still worth looking at in the app's log: session -> attempt, last diagnosis.
         self._wake_diagnoses: dict = {}
         self._desktop_state_at = None
+        # Counts the Claude Desktop engines (Linux); the services pass one, tests do not.
+        self.engine_counter = engine_counter
         self._reconciled_at: dict = {}
         self._folders_at = -FOLDERS_EVERY_SECONDS
         self._excluded: Optional[Set[str]] = None
@@ -437,8 +441,8 @@ class BridgeDaemon:
 
     def refresh_desktop_state(self) -> None:
         """
-        Once a minute, what the Claude Desktop app itself records: which conversations are archived
-        (the app stops their engine) and which are not any more. Never raises.
+        Once a minute, what the Claude Desktop app itself shows: which conversations are archived (the
+        app stops their engine) and how many engines are loaded against the app's cap. Never raises.
         """
         now = time.monotonic()
         if self._desktop_state_at is not None and now - self._desktop_state_at < DESKTOP_STATE_EVERY_SECONDS:
@@ -447,13 +451,22 @@ class BridgeDaemon:
         try:
             states = self.claude_waker.archived_states()
         except Exception:
-            return
+            states = None
         if not isinstance(states, dict):
+            states = None
+        capacity = None
+        if self.engine_counter is not None:
+            try:
+                capacity = self.engine_counter.snapshot()
+            except Exception:
+                capacity = None
+        if states is None and capacity is None:
             return
+        states = states or {}
         archived = sorted(sid for sid, flag in states.items() if flag is True)
         not_archived = sorted(sid for sid, flag in states.items() if flag is False)
         try:
-            self.store.report_desktop_state(archived=archived, not_archived=not_archived)
+            self.store.report_desktop_state(archived=archived, not_archived=not_archived, capacity=capacity)
         except Exception as exc:
             logger.warning('Could not report the Claude Desktop state (%s).', type(exc).__name__)
 
@@ -596,4 +609,4 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     from bridge.stores import HttpStore
     from bridge.spool_forwarder import SpoolForwarder, http_sender
-    BridgeDaemon(store=HttpStore(), spool=SpoolForwarder(http_sender())).run_forever()
+    BridgeDaemon(store=HttpStore(), spool=SpoolForwarder(http_sender()), engine_counter=EngineCounter()).run_forever()

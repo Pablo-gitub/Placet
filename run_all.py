@@ -2,6 +2,7 @@ import asyncio
 import threading
 import logging
 from bridge.bridge_daemon import BridgeDaemon
+from bridge.claude_desktop_engines import EngineCounter
 
 logging.basicConfig(
     level=logging.INFO,
@@ -14,7 +15,7 @@ def start_bridge():
     logger.info("Initializing Bridge Daemon thread...")
     try:
         from bridge.spool_forwarder import SpoolForwarder, http_sender
-        daemon = BridgeDaemon(spool=SpoolForwarder(http_sender()))
+        daemon = BridgeDaemon(spool=SpoolForwarder(http_sender()), engine_counter=EngineCounter())
         daemon.run_forever()
     except Exception as e:
         logger.error(f"Bridge daemon error: {e}")

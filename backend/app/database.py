@@ -3327,6 +3327,18 @@ class Database:
                         changed.append(session_id)
         return changed
 
+    def set_desktop_capacity(self, engines: int, cap: int) -> None:
+        """The bridge's latest count of loaded Claude Desktop engines against the app's cap (numbers only)."""
+        self.set_setting("claude_desktop_capacity", json.dumps(
+            {"engines": int(engines), "cap": int(cap), "observed_at": datetime.now(timezone.utc).isoformat()}))
+
+    def get_desktop_capacity(self) -> Dict[str, Any]:
+        try:
+            value = json.loads(self.get_setting("claude_desktop_capacity") or "{}")
+        except ValueError:
+            return {}
+        return value if isinstance(value, dict) and {"engines", "cap", "observed_at"} <= set(value) else {}
+
     WAKE_CAUSES = ("warm_capacity_denied",)
 
     def report_wake_cause(self, session_id: str, cause: Optional[str], observed_at, attempt_at) -> bool:
