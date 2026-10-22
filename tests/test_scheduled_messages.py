@@ -837,5 +837,85 @@ def test_list_undelivered_results_uses_coalesce_scheduled_at(db):
     assert any(r.id == req.id for r in results)
 
 
+@pytest.mark.asyncio
+async def test_decide_request_preserves_user_schedule_when_reset_is_earlier(rel_app_and_db):
+    """Approval does not advance user scheduled_at if recipient reset is earlier."""
+    app, db = rel_app_and_db
+    a, b = await two_nodes(app, db)
+    review = db.create_relation_type("review", "")
+    db.create_relation(a.id, b.id, review.id, "manual")
+
+    async with human_client(app) as human:
+        await human.put("/api/settings/usage-guard", json={"enabled": True, "five_hour": 90, "seven_day": 95})
+        await human.put("/api/settings/deliver-at-reset", json={"enabled": True})
+
+    # Recipient reset in 1 hour
+    soon = datetime.now(timezone.utc) + timedelta(hours=1)
+    set_provider_usage(db, "codex", five=92, resets_at=soon.isoformat())
+
+    # User scheduled it for 3 days in the future
+    user_sched = datetime.now(timezone.utc) + timedelta(days=3)
+    resp = await post(app, {"target_node": "builder"})
+    req_id = resp.json()["id"]
+
+    async with human_client(app) as human:
+        sched_resp = await human.post(f"/api/requests/{req_id}/schedule", json={"scheduled_at": user_sched.isoformat()})
+        assert sched_resp.status_code == 200
+        dec_resp = await human.post(f"/api/requests/{req_id}/decision", json={"status": "APPROVED"})
+        assert dec_resp.status_code == 200
+        decided = dec_resp.json()
+        assert decided["status"] == "APPROVED"
+        assert decided["scheduled_at"] is not None
+        sched = datetime.fromisoformat(decided["scheduled_at"].replace("Z", "+00:00"))
+        # Preserved user schedule (3 days), NOT reset (1 hour)
+        assert abs((sched - user_sched).total_seconds()) < 5
+
+
+@pytest.mark.asyncio
+async def test_decide_request_postpones_to_reset_when_user_schedule_is_earlier(rel_app_and_db):
+    """Approval postpones delivery to recipient reset if user schedule is earlier."""
+    app, db = rel_app_and_db
+    a, b = await two_nodes(app, db)
+    review = db.create_relation_type("review", "")
+    db.create_relation(a.id, b.id, review.id, "manual")
+
+    async with human_client(app) as human:
+        await human.put("/api/settings/usage-guard", json={"enabled": True, "five_hour": 90, "seven_day": 95})
+        await human.put("/api/settings/deliver-at-reset", json={"enabled": True})
+
+    # Recipient reset in 3 days
+    far = datetime.now(timezone.utc) + timedelta(days=3)
+    set_provider_usage(db, "codex", five=92, resets_at=far.isoformat())
+
+    # User scheduled for 1 hour
+    user_sched = datetime.now(timezone.utc) + timedelta(hours=1)
+    resp = await post(app, {"target_node": "builder"})
+    req_id = resp.json()["id"]
+
+    async with human_client(app) as human:
+        sched_resp = await human.post(f"/api/requests/{req_id}/schedule", json={"scheduled_at": user_sched.isoformat()})
+        assert sched_resp.status_code == 200
+        dec_resp = await human.post(f"/api/requests/{req_id}/decision", json={"status": "APPROVED"})
+        assert dec_resp.status_code == 200
+        decided = dec_resp.json()
+        assert decided["status"] == "APPROVED"
+        assert decided["scheduled_at"] is not None
+        sched = datetime.fromisoformat(decided["scheduled_at"].replace("Z", "+00:00"))
+        # Postponed to reset time (3 days)
+        assert abs((sched - far).total_seconds()) < 5
+
+
+def test_update_request_decision_atomic_scheduled_at(db):
+    """update_request_decision sets APPROVED and scheduled_at atomically."""
+    future = datetime.now(timezone.utc) + timedelta(hours=2)
+    req = db.create_request(RequestCreate(sender_id="claude", recipient_id="gemini", prompt="Atomic test"))
+    updated = db.update_request_decision(req.id, RequestStatus.APPROVED, scheduled_at=future)
+    assert updated is not None
+    assert updated.status == RequestStatus.APPROVED
+    assert updated.scheduled_at is not None
+    assert db.claim_injection(req.id) is None
+
+
+
 
 

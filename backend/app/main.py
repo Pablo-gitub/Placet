@@ -1119,28 +1119,9 @@ def create_app(
             raise ProductError(409, "decision.not_pending",
                                f"Request {request_id} is no longer in PENDING state.", {"id": request_id})
 
-        updated = db.update_request_decision(
-            request_id=request_id,
-            status=decision.status,
-            edited_prompt=decision.edited_prompt,
-            selected_options=decision.selected_options,
-            custom_text=decision.custom_text,
-            actor=who.actor,
-            allow_auto_return=decision.allow_auto_return or reply_is_automatic(relation),
-            delivery_mode=decision.delivery_mode if decision.status == RequestStatus.APPROVED and req.recipient_id != "human" else None,
-            recipient_session_id=decision.recipient_session_id,
-        )
-        if updated is None:
-            # State changed between the check and the update (e.g. expired or cancelled).
-            current = db.get_request(request_id)
-            raise ProductError(
-                409, "decision.not_pending",
-                f"Request {request_id} is in {current.status.value} state, not in PENDING state.",
-                {"id": request_id},
-            )
-
         # RF-66: If approved message to an over-limit recipient and deliver_at_reset is ON:
         # schedule delivery at recipient's reset time (unless mode is "now").
+        effective_schedule = None
         if decision.status == RequestStatus.APPROVED and decision.delivery_mode != "now" and req.recipient_id != "human":
             target_id = decision.recipient_session_id or req.recipient_session_id
             target_sess = db.get_session(target_id) if target_id else None
@@ -1156,9 +1137,31 @@ def create_app(
                 if db.is_provider_over_limit(rec_provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"]):
                     rec_reset = db.provider_reset_time(rec_provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"])
                     if rec_reset is not None:
-                        sched_res = db.schedule_request(request_id, rec_reset, actor=who.actor)
-                        if sched_res is not None:
-                            updated = sched_res
+                        if req.scheduled_at is not None:
+                            effective_schedule = max(req.scheduled_at, rec_reset)
+                        else:
+                            effective_schedule = rec_reset
+
+        updated = db.update_request_decision(
+            request_id=request_id,
+            status=decision.status,
+            edited_prompt=decision.edited_prompt,
+            selected_options=decision.selected_options,
+            custom_text=decision.custom_text,
+            actor=who.actor,
+            allow_auto_return=decision.allow_auto_return or reply_is_automatic(relation),
+            delivery_mode=decision.delivery_mode if decision.status == RequestStatus.APPROVED and req.recipient_id != "human" else None,
+            recipient_session_id=decision.recipient_session_id,
+            scheduled_at=effective_schedule,
+        )
+        if updated is None:
+            # State changed between the check and the update (e.g. expired or cancelled).
+            current = db.get_request(request_id)
+            raise ProductError(
+                409, "decision.not_pending",
+                f"Request {request_id} is in {current.status.value} state, not in PENDING state.",
+                {"id": request_id},
+            )
 
         notify_change(request_id)
         return updated

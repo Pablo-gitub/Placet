@@ -920,6 +920,7 @@ class Database:
         allow_auto_return: bool = False,
         delivery_mode: Optional[str] = None,
         recipient_session_id: Optional[str] = None,
+        scheduled_at: Optional[Union[str, datetime]] = None,
     ) -> Optional[RequestModel]:
         """
         Applies the human decision (PENDING -> APPROVED/REJECTED). Returns
@@ -932,16 +933,41 @@ class Database:
             return None
 
         now = datetime.now(timezone.utc).isoformat()
+        scheduled_at_iso = _normalize_utc_iso(scheduled_at) if scheduled_at is not None else None
         placeholders = ",".join("?" for _ in allowed_sources)
         with self._get_connection() as conn:
             cursor = conn.cursor()
+            new_expires_at = None
+            if scheduled_at_iso is not None:
+                cursor.execute(
+                    "SELECT created_at, expires_at, scheduled_at FROM requests WHERE id = ?",
+                    (request_id,),
+                )
+                row = cursor.fetchone()
+                if row:
+                    try:
+                        exp_dt = datetime.fromisoformat(row["expires_at"].replace("Z", "+00:00"))
+                        base_str = row["scheduled_at"] or row["created_at"]
+                        base_dt = datetime.fromisoformat(base_str.replace("Z", "+00:00"))
+                        window = exp_dt - base_dt
+                        if window.total_seconds() < 10:
+                            window = timedelta(seconds=DEFAULT_EXPIRES_IN_SECONDS)
+                    except Exception:
+                        window = timedelta(seconds=DEFAULT_EXPIRES_IN_SECONDS)
+                    sched_dt = datetime.fromisoformat(scheduled_at_iso.replace("Z", "+00:00"))
+                    now_dt = datetime.now(timezone.utc)
+                    new_base = max(now_dt, sched_dt)
+                    new_expires_at = (new_base + window).isoformat()
+
             cursor.execute(
                 f"""
                 UPDATE requests
                 SET allow_auto_return = ?, approval = ?, status = ?, edited_prompt = ?, selected_options = ?, custom_text = ?,
                     decided_at = ?, updated_at = ?,
                     delivery_mode = COALESCE(?, delivery_mode),
-                    recipient_session_id = COALESCE(?, recipient_session_id)
+                    recipient_session_id = COALESCE(?, recipient_session_id),
+                    scheduled_at = COALESCE(?, scheduled_at),
+                    expires_at = COALESCE(?, expires_at)
                 WHERE id = ? AND status IN ({placeholders})
                 """,
                 [
@@ -955,6 +981,8 @@ class Database:
                     now,
                     delivery_mode,
                     recipient_session_id,
+                    scheduled_at_iso,
+                    new_expires_at,
                     request_id,
                     *allowed_sources,
                 ],
@@ -974,6 +1002,9 @@ class Database:
                 details["selected_options"] = selected_options
             if custom_text:
                 details["custom_text"] = custom_text
+            if scheduled_at_iso is not None:
+                details["scheduled_at"] = scheduled_at_iso
+                self._log(cursor, request_id, actor, "scheduled", {"scheduled_at": scheduled_at_iso}, at=now)
             self._log(cursor, request_id, actor, "decided", details, at=now)
         return self.get_request(request_id)
 
