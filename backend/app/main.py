@@ -91,6 +91,8 @@ class SessionEventPayload(BaseModel):
     provider: Optional[str] = None
     entrypoint: Optional[str] = None
     cwd: Optional[str] = None
+    # The project root (main repository when in a worktree), for grouping and routing only.
+    project_root: Optional[str] = Field(default=None, max_length=4096)
     model: Optional[str] = Field(default=None, max_length=100)
     title: Optional[str] = None
     tmux_session: Optional[str] = None
@@ -424,7 +426,7 @@ def create_app(
             return
         lang = db.get_background_language()
         key = "notify.queue_held_title_one" if waiting == 1 else "notify.queue_held_title"
-        web_push_later(text(key, lang, label=session_label(session.provider, session.title, session.cwd),
+        web_push_later(text(key, lang, label=session_label(session.provider, session.title, session.project_root or session.cwd),
                             count=waiting),
                        text("notify.queue_held_body", lang), f"/#/sessione/{session_id}",
                        f"queue-held-{req_id}", "high")
@@ -573,7 +575,7 @@ def create_app(
         session = db.get_session(req.sender_session_id)
         if session is None:
             return None
-        return session_label(session.provider, session.title, session.cwd) or None
+        return session_label(session.provider, session.title, session.project_root or session.cwd) or None
 
     # A followed session's turn ends: at most one quiet notification a minute each.
     turn_end_notified: Dict[str, float] = {}
@@ -591,7 +593,7 @@ def create_app(
             return
         lang = db.get_background_language()
         web_push_later(text("notify.app_review_title", lang,
-                            label=session_label(session.provider, session.title, session.cwd)),
+                            label=session_label(session.provider, session.title, session.project_root or session.cwd)),
                        text("notify.app_review_body", lang), f"/#/sessione/{session.id}",
                        f"app-review-{session.id}", "high")
 
@@ -609,11 +611,11 @@ def create_app(
             return
         turn_end_notified[session.id] = loop_time
         task = asyncio.get_running_loop().create_task(send_ntfy_turn_end(
-            session.id, session_label(session.provider, session.title, session.cwd), last_message, replace(ntfy, language=db.get_background_language())))
+            session.id, session_label(session.provider, session.title, session.project_root or session.cwd), last_message, replace(ntfy, language=db.get_background_language())))
         background_alerts.add(task)
         task.add_done_callback(background_alerts.discard)
         lang = db.get_background_language()
-        web_push_later(text("notify.turn_title", lang, label=session_label(session.provider, session.title, session.cwd)),
+        web_push_later(text("notify.turn_title", lang, label=session_label(session.provider, session.title, session.project_root or session.cwd)),
                        text("notify.turn_body", lang), f"/#/sessione/{session.id}", f"turn-{session.id}", "low")
 
     def bind_unaddressed_session(req: RequestCreate, sender_session: Optional[str]) -> RequestCreate:
@@ -629,14 +631,17 @@ def create_app(
         bridge reaches, keeps the old behaviour.
         """
         sender = db.get_session(sender_session) if sender_session else None
-        folder = sender.cwd if sender is not None and sender.cwd else None
+        # Compare project roots (the main repository when working in a worktree), real paths
+        # on both sides; a session that reports none is compared by its working directory.
+        folder_of = lambda s: os.path.realpath(s.project_root or s.cwd) if (s.project_root or s.cwd) else None  # noqa: E731
+        folder = folder_of(sender) if sender is not None else None
         # The sender is never a candidate: a session cannot receive its own request.
         others = [s for s in db.list_sessions(agent_id=req.recipient_id)
                   if s.id != sender_session and not s.excluded]
         reachable = [s for s in others if s.reachable]
         waiting = [s for s in others if not s.reachable and not s.tmux_session]
-        here = lambda pool: [s for s in pool if folder is None or s.cwd == folder]  # noqa: E731
-        brief = lambda s: {"id": s.id, "title": s.title, "cwd": s.cwd}  # noqa: E731
+        here = lambda pool: [s for s in pool if folder is None or folder_of(s) == folder]  # noqa: E731
+        brief = lambda s: {"id": s.id, "title": s.title, "cwd": s.cwd, "project_root": s.project_root}  # noqa: E731
         for pool in (here(reachable), here(waiting) if not here(reachable) else []):
             if len(pool) == 1:
                 return req.model_copy(update={"recipient_session_id": pool[0].id})
@@ -1374,7 +1379,7 @@ def create_app(
             return {"session": session_id, "event": payload.event, "duplicate": True}
         if not db.upsert_session(
             session_id, who.id, provider=payload.provider, entrypoint=payload.entrypoint,
-            cwd=payload.cwd, title=payload.title, tmux_session=payload.tmux_session,
+            cwd=payload.cwd, project_root=payload.project_root, title=payload.title, tmux_session=payload.tmux_session,
             model=payload.model,
         ):
             raise HTTPException(status_code=404, detail="Session not found")

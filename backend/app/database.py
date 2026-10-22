@@ -437,6 +437,8 @@ class Database:
             for col in ("activity_at", "pinned_at", "excluded_at", "suspended_at", "model", "continued_to"):
                 if col not in session_cols:
                     cursor.execute(f"ALTER TABLE sessions ADD COLUMN {col} TEXT;")
+            if "project_root" not in session_cols:
+                cursor.execute("ALTER TABLE sessions ADD COLUMN project_root TEXT;")
             if "prompt_count" not in session_cols:
                 cursor.execute("ALTER TABLE sessions ADD COLUMN prompt_count INTEGER NOT NULL DEFAULT 0;")
                 cursor.execute(
@@ -1698,6 +1700,7 @@ class Database:
             provider=row["provider"],
             entrypoint=row["entrypoint"],
             cwd=row["cwd"],
+            project_root=row["project_root"],
             title=row["title"],
             tmux_session=row["tmux_session"],
             state=row["state"],
@@ -1728,6 +1731,7 @@ class Database:
         title: Optional[str] = None,
         tmux_session: Optional[str] = None,
         model: Optional[str] = None,
+        project_root: Optional[str] = None,
     ) -> bool:
         """
         Registers a session or refreshes it. Returns False if the id is
@@ -1744,23 +1748,24 @@ class Database:
             if row is None:
                 cursor.execute(
                     """
-                    INSERT INTO sessions (id, agent_id, provider, entrypoint, cwd, title,
+                    INSERT INTO sessions (id, agent_id, provider, entrypoint, cwd, project_root, title,
                                           tmux_session, model, state, started_at, last_seen_at, activity_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?, ?)
                     """,
-                    (session_id, agent_id, provider, entrypoint, cwd, title, tmux_session, model, now, now, now),
+                    (session_id, agent_id, provider, entrypoint, cwd, project_root, title, tmux_session, model,
+                     now, now, now),
                 )
             else:
                 cursor.execute(
                     """
                     UPDATE sessions SET
                         provider = COALESCE(?, provider), entrypoint = COALESCE(?, entrypoint),
-                        cwd = COALESCE(?, cwd), title = COALESCE(?, title),
+                        cwd = COALESCE(?, cwd), project_root = COALESCE(?, project_root), title = COALESCE(?, title),
                         tmux_session = COALESCE(?, tmux_session), model = COALESCE(?, model),
                         last_seen_at = ?
                     WHERE id = ?
                     """,
-                    (provider, entrypoint, cwd, title, tmux_session, model, now, session_id),
+                    (provider, entrypoint, cwd, project_root, title, tmux_session, model, now, session_id),
                 )
             return True
 

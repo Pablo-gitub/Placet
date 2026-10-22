@@ -152,7 +152,7 @@ def build_event(event_name: str, payload: dict):
     common = {
         "provider": "antigravity",
         "entrypoint": "antigravity",
-        "cwd": placet_common.project_root(workspaces[0]) if workspaces else None,
+        "cwd": workspaces[0] if workspaces else None,
         "adapter": ADAPTER,
         # The model in use (RF-61), e.g. "gemini-3.8-flash-medium".
         "model": payload.get("modelName") if isinstance(payload.get("modelName"), str) else None,
@@ -188,6 +188,12 @@ def build_event(event_name: str, payload: dict):
     return None
 
 
+def with_project_root(body: dict) -> dict:
+    """The project root next to the raw cwd (a worktree reports its main repository)."""
+    root = placet_common.project_root(body.get("cwd"))
+    return {**body, "project_root": root} if root else body
+
+
 def main() -> None:
     agent = placet_common.agent_id(sys.argv)
     event_name = placet_common.option(sys.argv, "--event") or ""
@@ -201,6 +207,7 @@ def main() -> None:
     body = build_event(event_name, payload)
     if not session_id or body is None or not placet_common.active(body.get("cwd")):
         return
+    body = with_project_root(body)
     try:
         spool.write_event(agent, session_id, {k: v for k, v in body.items() if v is not None})
     except Exception:

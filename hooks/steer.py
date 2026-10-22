@@ -65,7 +65,7 @@ def main() -> None:
         spool.write_event(agent, session_id, {
             "event": "steered", "request_id": message.get("request_id"),
             "provider": placet_common.option(sys.argv, "--provider") or "claude-code",
-            "adapter": ADAPTER, "cwd": placet_common.project_root(event.get("cwd")),
+            "adapter": ADAPTER, "cwd": event.get("cwd"), "project_root": placet_common.project_root(event.get("cwd")),
         })
     except Exception:
         pass

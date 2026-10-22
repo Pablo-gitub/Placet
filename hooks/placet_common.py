@@ -66,25 +66,30 @@ GIT_TIMEOUT_SECONDS = 2.0
 
 def project_root(cwd: Optional[str]) -> Optional[str]:
     """
-    The folder that identifies the project of a session. Hooks report the
-    working directory of the moment, so working inside a linked git worktree
-    (`.worktrees/<x>`) would move the session to another folder: there the main
-    repository's root is returned. The main checkout, its subfolders, folders
-    outside git and any git failure keep the raw `cwd`.
+    The folder that identifies a session's project, for grouping sessions and
+    comparing folders: the top level of the git checkout (so `cd backend` changes
+    nothing) or, inside a linked worktree (`.worktrees/<x>`, `.claude/worktrees/<x>`),
+    the main repository's root. Real paths (symlinks resolved). Outside git, or on
+    any failure, the real path of `cwd` (or `cwd` itself if it does not exist).
+    The raw working directory is reported separately: the desktop wake-up,
+    transcripts, uploads and `.placet-off` depend on it.
     """
     if not cwd:
         return cwd
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_PREFIX")}
     try:
+        folder = os.path.realpath(cwd)
         out = subprocess.run(
-            ["git", "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"],
-            cwd=cwd, capture_output=True, text=True, timeout=GIT_TIMEOUT_SECONDS, check=True,
+            ["git", "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir"],
+            cwd=folder, capture_output=True, text=True, timeout=GIT_TIMEOUT_SECONDS, check=True, env=env,
         ).stdout.split("\n")
-        git_dir, common_dir = out[0].strip(), out[1].strip()
-    except (OSError, subprocess.SubprocessError, IndexError):
-        return cwd
-    if not git_dir or git_dir == common_dir or Path(common_dir).name != ".git":
-        return cwd  # the main checkout, or a layout not worth guessing about (bare repository)
-    return str(Path(common_dir).parent)
+        top, git_dir, common_dir = (os.path.realpath(line.strip()) for line in out[:3])
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return os.path.realpath(cwd) if os.path.exists(cwd) else cwd
+    if git_dir != common_dir and Path(common_dir).name == ".git":
+        return str(Path(common_dir).parent)   # a linked worktree: the main repository
+    return top
 
 
 def call(method: str, path: str, token: str, body=None, timeout: float = 3) -> Tuple[int, Optional[dict]]:
