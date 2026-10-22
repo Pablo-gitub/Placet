@@ -445,6 +445,10 @@ class Database:
                     "UPDATE sessions SET prompt_count = 1"
                     " WHERE activity_at > started_at OR turn_request_id IS NOT NULL OR ended_at IS NOT NULL;"
                 )
+            # RF-27: the Placet MCP connection, as the hook read it and as seen in use.
+            if "mcp_state" not in session_cols:
+                cursor.execute("ALTER TABLE sessions ADD COLUMN mcp_state TEXT;")
+                cursor.execute("ALTER TABLE sessions ADD COLUMN mcp_seen_at TEXT;")
             # RFC-02: the stable named node the session is attached to.
             if "node_id" not in session_cols:
                 cursor.execute("ALTER TABLE sessions ADD COLUMN node_id INTEGER;")
@@ -1715,6 +1719,8 @@ class Database:
             pinned=row["pinned_at"] is not None,
             reachable=reachable and row["excluded_at"] is None,
             excluded=row["excluded_at"] is not None,
+            mcp_state=row["mcp_state"],
+            mcp_seen_at=_ts(row["mcp_seen_at"]),
             node_id=row["node_id"],
             node_name=row["node_name"] if "node_name" in row.keys() else None,
             continued_to=row["continued_to"] if "continued_to" in row.keys() else None,
@@ -1907,6 +1913,33 @@ class Database:
                 cursor.execute("UPDATE sessions SET node_id = ? WHERE id = ?", (old["node_id"], new_session_id))
                 cursor.execute("UPDATE sessions SET node_id = NULL WHERE id = ?", (old_session_id,))
             return True
+
+    def set_mcp_config_state(self, session_id: str, state: str) -> None:
+        """RF-27: what the hook read at session start. A session seen using the MCP stays configured."""
+        with self._get_connection() as conn:
+            conn.execute(
+                "UPDATE sessions SET mcp_state = CASE WHEN mcp_seen_at IS NOT NULL THEN 'configured' ELSE ? END"
+                " WHERE id = ?", (state, session_id))
+
+    def mark_mcp_seen(self, session_id: Optional[str]) -> None:
+        """RF-27: a Placet MCP call carried this session: the connection works."""
+        if not session_id:
+            return
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            conn.execute("UPDATE sessions SET mcp_seen_at = ?, mcp_state = 'configured' WHERE id = ?",
+                         (now, session_id))
+
+    def suspect_mcp(self, session_id: str) -> bool:
+        """
+        RF-27: a Placet request's turn ended and the session never used the
+        MCP while the config check could not tell: suspect, once.
+        """
+        with self._get_connection() as conn:
+            cur = conn.execute(
+                "UPDATE sessions SET mcp_state = 'suspect' WHERE id = ? AND mcp_state = 'unknown'"
+                " AND mcp_seen_at IS NULL", (session_id,))
+            return cur.rowcount > 0
 
     def increment_prompt_count(self, session_id: str) -> None:
         with self._get_connection() as conn:

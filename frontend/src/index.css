@@ -689,6 +689,9 @@ fieldset.options-list {
   gap: 0.5rem;
 }
 .session-row .badge-count { background: var(--primary); color: white; }
+.session-row .badge-mcp { display: inline-flex; align-items: center; color: var(--warning); }
+.mcp-warning { margin: 0; padding: 0.35rem 0.75rem; font-size: 0.8rem; color: var(--warning); border-bottom: 1px solid var(--border-color); }
+.mcp-warning a { color: inherit; text-decoration: underline; }
 .session-row .badge-held { display: inline-flex; align-items: center; color: var(--warning); }
 .provider-chip {
   font-size: 0.68rem;
