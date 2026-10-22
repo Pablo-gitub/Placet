@@ -667,6 +667,17 @@ class Database:
                 cursor.execute("ALTER TABLE requests ADD COLUMN scheduled_at TEXT;")
             if "expires_in_seconds" not in cols:
                 cursor.execute("ALTER TABLE requests ADD COLUMN expires_in_seconds INTEGER NOT NULL DEFAULT 86400;")
+                # An old request keeps its own window (expires_at - created_at) for when it is
+                # rescheduled; without a usable one it gets the default. Runs once, with the column.
+                for row in cursor.execute("SELECT id, created_at, expires_at, scheduled_at FROM requests").fetchall():
+                    try:
+                        # The window runs from the schedule when there is one, else from creation.
+                        window = int((datetime.fromisoformat(row["expires_at"])
+                                      - datetime.fromisoformat(row["scheduled_at"] or row["created_at"])).total_seconds())
+                    except (TypeError, ValueError):
+                        continue
+                    if window > 0:
+                        conn.execute("UPDATE requests SET expires_in_seconds = ? WHERE id = ?", (window, row["id"]))
             # RFC-16: each relation has its own reply policy, initially equal to
             # its outbound policy; replies no longer depend on the reverse relation.
             rel_cols = [row["name"] for row in cursor.execute("PRAGMA table_info(relations);").fetchall()]
