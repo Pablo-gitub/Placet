@@ -8,7 +8,9 @@
     "reconnecting": "RECONNECTING…",
     "openSession": "Open a session to read its conversation and send a message.",
     "tagline": "Human Supervision & Agent Bus",
-    "settings": "Settings"
+    "settings": "Settings",
+    "hideSidebar": "Hide the left column",
+    "showSidebar": "Show the left column"
   },
   "language": {
     "label": "Language",

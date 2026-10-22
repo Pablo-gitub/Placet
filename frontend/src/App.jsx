@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import { apiErrorDescriptor } from "./i18n/errors";
 import { needsReturnApproval } from "./decisions";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { AlertCircle, CheckCircle, FolderKanban, Home as HomeIcon, MessagesSquare, Radio, Settings as SettingsIcon } from "lucide-react";
+import { AlertCircle, CheckCircle, FolderKanban, Home as HomeIcon, MessagesSquare, PanelLeftClose, PanelLeftOpen, Radio, Settings as SettingsIcon } from "lucide-react";
 import Home from "./Home";
 import History from "./History";
 import Settings from "./Settings";
@@ -12,6 +12,8 @@ import SessionView from "./SessionView";
 import { ProjectsView, ProjectDetailView } from "./Projects";
 import { requestIdFromHash, routeFromHash } from "./decisions";
 import { useWide } from "./useWide";
+
+const SIDEBAR_KEY = "placet.sidebarCollapsed";
 
 function upsert(list, item) {
   const index = list.findIndex((x) => x.id === item.id);
@@ -38,6 +40,15 @@ export default function App() {
   const [submittingId, setSubmittingId] = useState(null);
   const [feedback, setFeedback] = useState(null);
   const wide = useWide();
+  // Wide screens: the left column can be put away so the pane takes the whole width. Remembered per device.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem(SIDEBAR_KEY) === "1"; } catch { return false; }
+  });
+  const toggleSidebar = () => setSidebarCollapsed((collapsed) => {
+    const next = !collapsed;
+    try { localStorage.setItem(SIDEBAR_KEY, next ? "1" : "0"); } catch { /* private mode: it lasts until the page is reloaded */ }
+    return next;
+  });
   // On the phone a conversation takes the whole screen (and follows the keyboard).
   const inSession = route.view === "session" && !wide;
 
@@ -457,6 +468,20 @@ export default function App() {
         </div>
         {wide && navTabs}
         <div className="header-controls">
+          {wide && (
+            <button
+              type="button"
+              className="icon-button sidebar-toggle"
+              data-testid="sidebar-toggle"
+              aria-controls="sidebar"
+              aria-expanded={!sidebarCollapsed}
+              aria-label={t(sidebarCollapsed ? "app.showSidebar" : "app.hideSidebar")}
+              title={t(sidebarCollapsed ? "app.showSidebar" : "app.hideSidebar")}
+              onClick={toggleSidebar}
+            >
+              {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+            </button>
+          )}
           <div className="live-indicator" data-testid="live-indicator" title={t(connected ? "app.live" : "app.reconnecting")}>
             <Radio size={12} className={connected ? "text-emerald-400 animate-pulse" : "text-amber-400"} />
             <span className="live-label">{t(connected ? "app.live" : "app.reconnecting")}</span>
@@ -474,8 +499,8 @@ export default function App() {
       {wide ? (
         // Desktop: questions and sessions on the left, the open conversation
         // (or the history / projects) on the right.
-        <div className="workspace">
-          <aside className="sidebar" data-testid="sidebar">
+        <div className={`workspace${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
+          <aside className="sidebar" id="sidebar" data-testid="sidebar" hidden={sidebarCollapsed}>
             {homeView}
           </aside>
           <main className="pane" data-testid="pane">
