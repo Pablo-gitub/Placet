@@ -14,6 +14,26 @@
     "label": "Lingua",
     "auto": "Auto"
   },
+  "controls": {
+    "title": "Controlli sessione",
+    "compact": "Compatta",
+    "effort": "Effort",
+    "apply": "Applica",
+    "done": "Comando inviato.",
+    "pcOnly": "Disponibile solo sul PC per questa sessione.",
+    "unsupported": "Questo provider non ha un controllo da remoto per questa azione (Codex lo ignora; Antigravity non è verificato).",
+    "busy": "La sessione sta lavorando: disponibile a fine turno.",
+    "confirmRepeat": "Il comando precedente potrebbe essere già stato applicato. Inviarlo di nuovo?",
+    "effortPersists": "low, medium, high e xhigh vengono salvati come predefiniti per le sessioni future; max vale solo per questa sessione; auto cancella il livello salvato e torna al predefinito del modello. Se CLAUDE_CODE_EFFORT_LEVEL è impostata nell'ambiente è una scelta esplicita che ha la precedenza sui livelli salvati. I livelli disponibili dipendono dal modello.",
+    "effortDocs": "Livelli di effort nella documentazione di Claude Code",
+    "needsConfirmation": "Comando digitato, ma una conferma aspetta sul PC: confermalo lì."
+  },
+  "mcp": {
+    "warning": "Placet MCP non rilevato",
+    "hintMissing": "Non trovato nelle configurazioni che Placet controlla. Verifica la configurazione MCP del client e i suoi strumenti disponibili.",
+    "hintSuspect": "In questa sessione non è stata vista alcuna chiamata agli strumenti Placet. Verifica gli strumenti disponibili del client.",
+    "guide": "Guida all'installazione"
+  },
   "home": {
     "questions": "Domande",
     "emptyQuestions": "Nessuna domanda in attesa.",
@@ -109,6 +129,15 @@
     "pinSave": "Non sono riuscito a salvare la scelta.",
     "messageConnection": "Errore di connessione: messaggio non inviato.",
     "sessionClosed": "La sessione è chiusa: non puoi più scriverle.",
+    "sessionBusy": "La sessione sta lavorando: aspetta la fine del turno.",
+    "controlPcOnly": "Per questa sessione il controllo è disponibile solo sul PC.",
+    "controlUnsupported": "Questo provider non offre un controllo da remoto per questa azione.",
+    "effortInvalid": "Questo livello di effort non è accettato.",
+    "commandNotIdle": "La sessione non è a un prompt vuoto.",
+    "commandUserTyping": "Qualcuno sta scrivendo nella sessione: riprova tra poco.",
+    "commandTmuxMissing": "Il terminale della sessione non è in esecuzione.",
+    "commandWrongSession": "Non è il terminale configurato per l'agente.",
+    "commandSendFailed": "Il terminale ha rifiutato il comando.",
     "unknownAgent": "L’agente di questa sessione non è configurato. Controlla la configurazione degli agenti.",
     "mentionAmbiguous": "Menzione ambigua: seleziona nuovamente la sessione.",
     "mentionMissing": "Una menzione selezionata non è presente nel messaggio. Selezionala nuovamente o rimuovi il riferimento.",
@@ -155,7 +184,22 @@
     "invalidTimezone": "Fuso orario non valido.",
     "invalidDate": "Formato data non valido (atteso AAAA-MM-GG).",
     "invalidRange": "La data iniziale non può essere successiva alla data finale.",
-    "rangeTooLarge": "L'intervallo di date supera il limite massimo consentito."
+    "rangeTooLarge": "L'intervallo di date supera il limite massimo consentito.",
+    "commandUncertain": "Esito incerto: controlla la sessione prima di ripetere.",
+    "commandEnterFailed": "Il testo è stato digitato ma non confermato: controlla la sessione.",
+    "paneStale": "In questo terminale ora gira un'altra sessione.",
+    "paneAmbiguous": "Due sessioni sono ugualmente recenti in questo terminale: riprova dopo che una delle due agisce.",
+    "controlPending": "Un controllo per questa sessione è ancora in invio.",
+    "commandCheckFailed": "Placet non è riuscito a capire se qualcuno sta scrivendo nella sessione: riprova.",
+    "commandIdentity": "Questo terminale non corrisponde più alla sessione (tmux è stato riavviato, o il programma della sessione non gira qui). Non è stato inviato nulla.",
+    "commandExpired": "Il terminale è rimasto occupato troppo a lungo: non è stato inviato nulla.",
+    "commandBridgeOld": "Il bridge sul PC è troppo vecchio per questo comando: aggiornalo. Non è stato inviato nulla.",
+    "sessionRequestRunning": "Una richiesta Placet è in consegna o in esecuzione in questa sessione: riprova quando finisce.",
+    "bridgeNotTaken": "Il bridge sul PC non ha preso in carico il comando. Non è stato inviato nulla.",
+    "controlUncertain": "L'esito del comando precedente è incerto: controlla prima la sessione.",
+    "scheduleTimeInPast": "La data e l'ora programmate non possono essere nel passato.",
+    "scheduleTooFarAhead": "La data e l'ora programmate non possono superare 30 giorni nel futuro.",
+    "scheduleNotAllowed": "Questo messaggio non può essere programmato."
   },
   "sessions": {
     "closed": "Chiusa",
@@ -305,7 +349,9 @@
     "send": "Invia",
     "limited": "{{provider}} ha raggiunto il limite d'uso: il messaggio aspetta in Placet e parte dopo il reset delle {{time}}.",
     "noProjectsForSession": "Nessun progetto per questa sessione",
-    "projectMentionLabel": "Progetti della sessione"
+    "projectMentionLabel": "Progetti della sessione",
+    "schedule": "Programma",
+    "clearSchedule": "Rimuovi programmazione"
   },
   "chat": {
     "actions_one": "{{count}} azione",
@@ -384,7 +430,12 @@
     "markedFinished": "Segnata come terminata: la sessione riceve il prossimo messaggio.",
     "queuedNext": "Il prossimo messaggio parte senza aspettare.",
     "limited": "In attesa: {{provider}} ha raggiunto il limite d'uso, parte dopo il reset delle {{time}}",
-    "mayStillRun": "Ha già risposto, ma potrebbe essere ancora al lavoro: sbloccare la coda non lo interrompe."
+    "mayStillRun": "Ha già risposto, ma potrebbe essere ancora al lavoro: sbloccare la coda non lo interrompe.",
+    "scheduledFor": "Programmato per {{time}}",
+    "sendNow": "Invia subito",
+    "modify": "Modifica",
+    "sendNowFeedback": "Messaggio inviato subito.",
+    "scheduledFeedback": "Messaggio programmato."
   },
   "backgroundLanguage": {
     "title": "Lingua di notifiche e messaggi",
@@ -565,7 +616,8 @@
     "nodeInstructionsTitle": "Istruzioni del nodo in questo progetto",
     "nodeInstructionsPlaceholder": "Es. Ruolo specifico di questo nodo nel progetto…",
     "saveNodeInstructions": "Salva istruzioni nodo",
-    "graphWaiting": "In attesa di te"
+    "graphWaiting": "In attesa di te",
+    "graphQueued": "In coda"
   },
   "settings": {
     "title": "Impostazioni",
@@ -586,6 +638,8 @@
     "guardActive": "Ora in revisione per i consumi: {{providers}}.",
     "guardClaudeWarning": "Per Claude serve il rinnovo automatico dell'accesso: senza, dopo circa 8 ore Placet non legge più i suoi consumi e il controllo non vale per Claude.",
     "renewHint": "Rinnova l'accesso di Claude Code quando scade, senza usare il modello, così i suoi consumi restano aggiornati.",
+    "deliverAtResetTitle": "Recapita al refresh",
+    "deliverAtResetHint": "Se il destinatario o il mittente supera la soglia, programma la consegna per il reset successivo anziché bloccare in revisione manuale.",
     "save": "Salva",
     "saveError": "Salvataggio non riuscito.",
     "loadError": "Impostazioni non disponibili.",

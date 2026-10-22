@@ -136,6 +136,8 @@ class RequestCreate(BaseModel):
     expires_in_seconds: int = Field(
         DEFAULT_EXPIRES_IN_SECONDS, ge=10, le=MAX_EXPIRES_IN_SECONDS
     )
+    # RF-65: scheduled delivery time in UTC.
+    scheduled_at: Optional[datetime] = None
 
     @field_validator("options")
     @classmethod
@@ -207,6 +209,8 @@ class RequestModel(BaseModel):
     project_id: Optional[int] = None
     project_name: Optional[str] = None
     project_context: Optional[str] = None
+    # RF-65: scheduled delivery time in UTC.
+    scheduled_at: Optional[datetime] = None
     id: int
     sender_id: str
     recipient_id: str
@@ -221,6 +225,7 @@ class RequestModel(BaseModel):
     selected_options: List[str] = Field(default_factory=list)
     custom_text: Optional[str] = None
     created_at: datetime
+    expires_in_seconds: int = DEFAULT_EXPIRES_IN_SECONDS
     expires_at: Optional[datetime] = None
     decided_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
@@ -267,6 +272,14 @@ BRIDGE_PROVIDERS = ("codex", "antigravity")
 # SessionEnd only means the app unloaded the conversation (idle, restart,
 # update): it can be resumed, so the session is suspended, not ended.
 SUSPENDING_PROVIDERS = ("codex",)
+# Mapping from known agent names to their execution provider.
+AGENT_PROVIDERS = {
+    "claude": "claude-code",
+    "claude-code": "claude-code",
+    "codex": "codex",
+    "gemini": "antigravity",
+    "antigravity": "antigravity",
+}
 
 
 class SessionMention(BaseModel):
@@ -285,6 +298,16 @@ class SessionUpload(BaseModel):
 STEER_PROVIDERS = ("claude-code", "antigravity")
 
 
+class ControlPayload(BaseModel):
+    """RF-62: sent again after an uncertain outcome, the user confirms it explicitly."""
+    confirm_uncertain: bool = False
+
+
+class EffortPayload(ControlPayload):
+    """The level is checked against the provider's allowlist by the endpoint."""
+    level: str = Field(max_length=32)
+
+
 class SessionMessage(BaseModel):
     """A message the user writes to a session (RF-34)."""
     mode: Literal["queue", "now"] = "queue"
@@ -293,12 +316,43 @@ class SessionMessage(BaseModel):
     mentions: List[SessionMention] = Field(default_factory=list, max_length=20)
     # RFC-15: optional project context when sending message from PWA
     project_id: Optional[int] = None
+    # RF-65: scheduled delivery timestamp in UTC
+    scheduled_at: Optional[datetime] = None
 
     @model_validator(mode="after")
     def has_content(self):
         if not self.text.strip() and not self.attachments:
             raise ValueError("Write a message or select an attachment.")
         return self
+
+
+def session_controls(provider: Optional[str], tmux_session: Optional[str],
+                     entrypoint: Optional[str] = None, tmux_pane: Optional[str] = None,
+                     identified: bool = False) -> Dict[str, Any]:
+    """
+    RF-62: the remote controls a session offers, from its provider and how it
+    runs. "supported": the genuine command can be typed into its tmux pane
+    (Claude Code CLI); "pc_only": it exists but only at the PC (the desktop
+    app, a CLI outside tmux); "unsupported": no verified way (Codex ignores
+    the overrides of `codex queue`; Antigravity is not verified).
+    """
+    if provider == "claude-code":
+        if entrypoint == "claude-desktop" or not tmux_session:
+            state = "pc_only"
+        else:
+            # Typing needs the stable pane id AND proof of who runs in it (tmux server, agent
+            # process), which the hook reports; an older hook gives neither.
+            state = "supported" if tmux_pane and identified else "unsupported"
+    else:
+        state = "unsupported"
+    from backend.app.session_commands import effort_levels
+    return {"compact": state, "effort": state,
+            "effort_levels": list(effort_levels(provider)) if state == "supported" else []}
+
+
+class RequestSchedule(BaseModel):
+    """Payload to schedule or clear scheduled delivery of a request (RF-65)."""
+    scheduled_at: Optional[datetime] = None
 
 
 class SessionModel(BaseModel):
@@ -308,8 +362,17 @@ class SessionModel(BaseModel):
     provider: Optional[str] = None
     entrypoint: Optional[str] = None      # claude-desktop, cli, ...
     cwd: Optional[str] = None
+    # The project the session belongs to (the main repository when working in a worktree):
+    # used to group sessions and to compare folders; `cwd` stays the raw working directory.
+    project_root: Optional[str] = None
     title: Optional[str] = None
     tmux_session: Optional[str] = None
+    # The pane id (%N) of its terminal, reported by the hook: the stable address for RF-62.
+    tmux_pane: Optional[str] = None
+    # Who runs in that pane, as the hook saw it: the tmux server pid and the agent process.
+    tmux_server: Optional[str] = None
+    agent_pid: Optional[int] = None
+    agent_started: Optional[str] = None
     state: str = "idle"                   # busy while a turn is running
     turn_request_id: Optional[int] = None
     started_at: datetime
@@ -333,6 +396,14 @@ class SessionModel(BaseModel):
     # RF-29d: continued conversation pointer and prompt counter
     continued_to: Optional[str] = None
     prompt_count: int = 0
+    # RF-62: computed, never stored. compact / effort: supported | pc_only | unsupported.
+    controls: Dict[str, Any] = Field(default_factory=dict)
+    # RF-27: configured | missing | unknown (what the hook read from the
+    # provider's configuration), or suspect (a Placet turn ended with no MCP
+    # call ever made by an "unknown" session). None: never reported.
+    mcp_state: Optional[str] = None
+    # The last time this session used a Placet MCP tool.
+    mcp_seen_at: Optional[datetime] = None
 
 
 class NodeModel(BaseModel):

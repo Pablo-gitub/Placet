@@ -689,6 +689,9 @@ fieldset.options-list {
   gap: 0.5rem;
 }
 .session-row .badge-count { background: var(--primary); color: white; }
+.session-row .badge-mcp { display: inline-flex; align-items: center; color: var(--warning); }
+.mcp-warning { margin: 0; padding: 0.35rem 0.75rem; font-size: 0.8rem; color: var(--warning); border-bottom: 1px solid var(--border-color); }
+.mcp-warning a { color: inherit; text-decoration: underline; }
 .session-row .badge-held { display: inline-flex; align-items: center; color: var(--warning); }
 .provider-chip {
   font-size: 0.68rem;
@@ -942,6 +945,34 @@ body.chat-open { overflow: hidden; }
   padding: 0.6rem 0 0.2rem;
 }
 .composer-note { font-size: 0.72rem; color: var(--text-muted); margin-bottom: 0.4rem; }
+.composer-schedule {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.composer-schedule label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+}
+.composer-schedule input[type="datetime-local"] {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  border-radius: 8px;
+  padding: 0.2rem 0.5rem;
+  font: inherit;
+  font-size: 0.8rem;
+}
+.composer-schedule input[type="datetime-local"]:focus {
+  outline: none;
+  border-color: var(--primary);
+}
 .composer-row { display: flex; align-items: flex-end; gap: 0.5rem; }
 .composer textarea {
   flex: 1;
@@ -1773,6 +1804,7 @@ body.chat-open { overflow: hidden; }
 .rg-ball { stroke: var(--bg-card, var(--bg-secondary)); stroke-width: 1.5; pointer-events: none; }
 .rg-ball-delivering { fill: var(--accent); }
 .rg-ball-returning { fill: var(--primary); }
+.rg-ball-queued { fill: var(--text-muted); }
 .rg-ball-waiting { fill: var(--warning); animation: rg-wait 1.2s ease-in-out infinite alternate; }
 @keyframes rg-wait { from { opacity: 1; } to { opacity: 0.45; } }
 @media (prefers-reduced-motion: reduce) {
@@ -1780,6 +1812,7 @@ body.chat-open { overflow: hidden; }
   .rg-ball-waiting { animation: none; }
 }
 .rg-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; vertical-align: middle; margin-right: 0.3rem; background: var(--warning); }
+.rg-dot.rg-ball-queued { background: var(--text-muted); }
 
 /* Settings */
 .settings { display: flex; flex-direction: column; gap: 1rem; }
@@ -2136,3 +2169,8 @@ body.chat-open { overflow: hidden; }
 
 /* RFC-16: the latest progress update of a running request. */
 .history-progress { font-size: 0.85rem; margin-bottom: 0.6rem; color: var(--text-muted); }
+
+/* RF-62: session controls in the header */
+.session-controls { position: relative; }
+.session-controls-panel { position: absolute; right: 0; top: 100%; z-index: 20; display: flex; flex-direction: column; gap: 0.5rem; min-width: 14rem; padding: 0.6rem; background: var(--bg-card, var(--bg-secondary)); border: 1px solid var(--border-color); border-radius: 8px; }
+.session-controls-effort { display: flex; gap: 0.4rem; }

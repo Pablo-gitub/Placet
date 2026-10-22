@@ -21,7 +21,7 @@ import {
 function folderGroups(sessions) {
   const groups = new Map();
   for (const s of [...sessions].sort(byActivity)) {
-    const key = s.cwd || "";
+    const key = s.project_root || s.cwd || "";
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(s);
   }

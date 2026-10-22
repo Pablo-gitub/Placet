@@ -125,3 +125,28 @@ def test_cancel_request(temp_db):
 
     fetched = temp_db.get_request(req.id)
     assert fetched.status == RequestStatus.CANCELLED
+
+
+def test_usage_guard_config(temp_db):
+    # Default values when no settings are set
+    cfg = temp_db.usage_guard_config()
+    assert cfg == {
+        "enabled": False,
+        "five_hour": 90,
+        "seven_day": 95,
+        "deliver_at_reset": False,
+    }
+
+    # Custom settings
+    temp_db.set_setting("usage_guard_enabled", "true")
+    temp_db.set_setting("usage_guard_5h", "80")
+    temp_db.set_setting("usage_guard_7d", "85")
+    temp_db.set_setting("deliver_at_reset", "true")
+
+    cfg_updated = temp_db.usage_guard_config()
+    assert cfg_updated == {
+        "enabled": True,
+        "five_hour": 80,
+        "seven_day": 85,
+        "deliver_at_reset": True,
+    }
