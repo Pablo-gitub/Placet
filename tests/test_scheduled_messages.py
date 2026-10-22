@@ -758,6 +758,25 @@ async def test_write_to_session_rejects_mode_now_with_scheduled_at(rel_app_and_d
         assert resp.json()["code"] == "schedule.steer_conflict"
 
 
+@pytest.mark.asyncio
+async def test_decide_request_rejects_mode_now_on_already_scheduled_request(rel_app_and_db):
+    """decide_request rejects mode='now' on an already scheduled request with 422 schedule.steer_conflict."""
+    app, db = rel_app_and_db
+    session = _create_idle_session(db, agent_id="claude", provider="claude-code", session_id="sess-dec-steer")
+    future = datetime.now(timezone.utc) + timedelta(hours=1)
+    req = db.create_request(RequestCreate(
+        sender_id="human", recipient_id="claude", prompt="Scheduled steer",
+        recipient_session_id=session.id, scheduled_at=future
+    ))
+    async with human_client(app) as human:
+        resp = await human.post(
+            f"/api/requests/{req.id}/decision",
+            json={"status": "APPROVED", "delivery_mode": "now", "recipient_session_id": session.id},
+        )
+        assert resp.status_code == 422
+        assert resp.json()["code"] == "schedule.steer_conflict"
+
+
 def test_future_tmux_return_ignored_by_results_and_mark_delivered(db):
     """list_undelivered_results and mark_delivered ignore future scheduled outcomes."""
     req = db.create_request(RequestCreate(sender_id="claude", recipient_id="codex", prompt="Return test"))

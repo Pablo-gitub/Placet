@@ -1107,6 +1107,8 @@ def create_app(
                 relation = relation_of(req.sender_session_id, decision.recipient_session_id)
                 redirect = (redirect_to, relation.id if relation else None)
         if decision.status == RequestStatus.APPROVED and decision.delivery_mode == "now":
+            if req.scheduled_at is not None:
+                raise ProductError(422, "schedule.steer_conflict", "A message in 'now' mode cannot be scheduled.")
             target_id = decision.recipient_session_id or req.recipient_session_id
             target = db.get_session(target_id) if target_id else None
             if (req.question_type != QuestionType.PROMPT_REVIEW or req.recipient_id == "human"
