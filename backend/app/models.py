@@ -415,6 +415,8 @@ class SessionModel(BaseModel):
     wake_attempts: int = 0
     # Why the app did not start it, when its log says so: a closed code (warm_capacity_denied).
     wake_cause: Optional[str] = None
+    # The user archived this conversation in Claude Desktop (the app stopped its engine); read by the bridge.
+    desktop_archived: bool = False
     wake_cause_at: Optional[datetime] = None
     # When the hook last reported the configuration (each start): a use before it does not
     # prove the configuration of this start.

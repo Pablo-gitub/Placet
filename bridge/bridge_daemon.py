@@ -43,6 +43,8 @@ RECONCILE_EVERY_SECONDS = 20.0
 FOLDERS_EVERY_SECONDS = 15.0
 # A "now" message taken by the hook is confirmed by its event within this long.
 STEER_CONFIRM_SECONDS = 120.0
+# How often the app's own records (archived conversations) are read.
+DESKTOP_STATE_EVERY_SECONDS = 60.0
 # How long after an accepted Claude Desktop open the app's log is read for the cause.
 WAKE_DIAGNOSIS_SECONDS = 180.0
 # How often Codex and Antigravity titles are read (they change on rename).
@@ -76,6 +78,7 @@ class BridgeDaemon:
         self._claude_wake_at: dict = {}
         # Accepted opens still worth looking at in the app's log: session -> attempt, last diagnosis.
         self._wake_diagnoses: dict = {}
+        self._desktop_state_at = None
         self._reconciled_at: dict = {}
         self._folders_at = -FOLDERS_EVERY_SECONDS
         self._excluded: Optional[Set[str]] = None
@@ -432,6 +435,28 @@ class BridgeDaemon:
                                              'attempt_at': started_at, 'reported': False}
         return outcomes
 
+    def refresh_desktop_state(self) -> None:
+        """
+        Once a minute, what the Claude Desktop app itself records: which conversations are archived
+        (the app stops their engine) and which are not any more. Never raises.
+        """
+        now = time.monotonic()
+        if self._desktop_state_at is not None and now - self._desktop_state_at < DESKTOP_STATE_EVERY_SECONDS:
+            return
+        self._desktop_state_at = now
+        try:
+            states = self.claude_waker.archived_states()
+        except Exception:
+            return
+        if not isinstance(states, dict):
+            return
+        archived = sorted(sid for sid, flag in states.items() if flag is True)
+        not_archived = sorted(sid for sid, flag in states.items() if flag is False)
+        try:
+            self.store.report_desktop_state(archived=archived, not_archived=not_archived)
+        except Exception as exc:
+            logger.warning('Could not report the Claude Desktop state (%s).', type(exc).__name__)
+
     def diagnose_wakes(self) -> None:
         """
         For a few minutes after an accepted open, read the app's log for the cause when the session
@@ -468,6 +493,7 @@ class BridgeDaemon:
         self.refresh_titles(work.titles)
         self.refresh_usage(auto_renew=work.claude_auto_renew)
         self.diagnose_wakes()
+        self.refresh_desktop_state()
         for sid, outcome in self.wake_claude_sessions(work.claude_wake_sessions).items():
             try:
                 self.store.report_wake(sid, outcome)

@@ -94,6 +94,8 @@ class BridgeStore(Protocol):
     def report_wake(self, session_id: str, outcome: str) -> None: ...
     # Why the app did not start the session this attempt asked for: a closed code, or None.
     def report_wake_cause(self, session_id: str, cause: Optional[str], observed_at, attempt_at) -> None: ...
+    # What the Claude Desktop app records: conversations archived / no longer archived.
+    def report_desktop_state(self, archived: List[str], not_archived: List[str]) -> None: ...
     def report_usage(self, providers: List[dict]) -> None: ...
     # Takes a "now" message: {"request_id", "session_id", "provider", "text"} or None.
     def take_steer(self, request_id: int) -> Optional[dict]: ...
@@ -189,6 +191,9 @@ class LocalStore:
 
     def report_wake_cause(self, session_id: str, cause: Optional[str], observed_at, attempt_at) -> None:
         self.db.report_wake_cause(session_id, cause, observed_at, attempt_at)
+
+    def report_desktop_state(self, archived: List[str], not_archived: List[str]) -> None:
+        self.db.set_desktop_archived(archived, not_archived)
 
     def report_usage(self, providers: List[dict]) -> None:
         from backend.app.models import UsageReport
@@ -292,6 +297,10 @@ class HttpStore:
 
     def report_wake(self, session_id: str, outcome: str) -> None:
         resp = self.client.post(f"/api/bridge/sessions/{session_id}/wake", json={"outcome": outcome})
+        resp.raise_for_status()
+
+    def report_desktop_state(self, archived: List[str], not_archived: List[str]) -> None:
+        resp = self.client.post("/api/bridge/desktop-state", json={"archived": archived, "not_archived": not_archived})
         resp.raise_for_status()
 
     def report_wake_cause(self, session_id: str, cause: Optional[str], observed_at, attempt_at) -> None:

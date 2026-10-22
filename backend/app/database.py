@@ -514,6 +514,8 @@ class Database:
                 cursor.execute("ALTER TABLE sessions ADD COLUMN wake_attempts INTEGER NOT NULL DEFAULT 0;")
                 cursor.execute("ALTER TABLE sessions ADD COLUMN wake_force INTEGER NOT NULL DEFAULT 0;")
                 cursor.execute("ALTER TABLE sessions ADD COLUMN wake_alerted_at TEXT;")
+            if "desktop_archived" not in session_cols:
+                cursor.execute("ALTER TABLE sessions ADD COLUMN desktop_archived INTEGER NOT NULL DEFAULT 0;")
             if "wake_cause" not in session_cols:
                 cursor.execute("ALTER TABLE sessions ADD COLUMN wake_cause TEXT;")
                 cursor.execute("ALTER TABLE sessions ADD COLUMN wake_cause_at TEXT;")
@@ -2008,6 +2010,7 @@ class Database:
             wake_at=_ts(row["wake_at"]),
             wake_attempts=row["wake_attempts"] or 0,
             wake_cause=row["wake_cause"],
+            desktop_archived=bool(row["desktop_archived"]),
             wake_cause_at=_ts(row["wake_cause_at"]),
             mcp_checked_at=_ts(row["mcp_checked_at"]),
             node_id=row["node_id"],
@@ -3303,9 +3306,26 @@ class Database:
         """
         return [s for s in self.list_sessions()
                 if s.provider == 'claude-code' and s.entrypoint == 'claude-desktop'
+                and not s.desktop_archived
                 and not s.reachable and s.wake_state not in self.WAKE_SETTLED
                 and s.wake_attempts < self.WAKE_MAX_ATTEMPTS
                 and self.inbox_has_message(s, explicit_only=True)]
+
+    def set_desktop_archived(self, archived: List[str], not_archived: List[str]) -> List[str]:
+        """
+        What the bridge read from the Claude Desktop app: these conversations are archived, those are
+        not any more. Only Claude Desktop sessions are touched; returns the ids that changed.
+        """
+        changed: List[str] = []
+        with self._get_connection() as conn:
+            for flag, ids in ((1, archived), (0, not_archived)):
+                for session_id in ids:
+                    cur = conn.execute(
+                        "UPDATE sessions SET desktop_archived = ? WHERE id = ? AND provider = 'claude-code'"
+                        " AND entrypoint = 'claude-desktop' AND desktop_archived != ?", (flag, session_id, flag))
+                    if cur.rowcount:
+                        changed.append(session_id)
+        return changed
 
     WAKE_CAUSES = ("warm_capacity_denied",)
 
