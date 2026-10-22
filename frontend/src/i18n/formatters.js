@@ -13,3 +13,4 @@ export function formattingLocale() {
 export const formatDateTime = (value, options) => new Intl.DateTimeFormat(formattingLocale(), options).format(new Date(value));
 export const formatNumber = (value, options) => new Intl.NumberFormat(formattingLocale(), options).format(value);
 export const formatRelativeTime = (value, unit) => new Intl.RelativeTimeFormat(formattingLocale(), { numeric: "auto" }).format(value, unit);
+export const formatWhen = (value) => formatDateTime(value, { dateStyle: "short", timeStyle: "short" });

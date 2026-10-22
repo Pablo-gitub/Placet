@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { formatDateTime } from "./i18n/formatters";
+import { formatWhen } from "./i18n/formatters";
 import React from "react";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import MessageBody from "./MessageBody";
@@ -20,7 +20,7 @@ export function MessageSummary({ req }) {
       <span className={`status-badge status-${req.status.toLowerCase()}`}>
         {t(`status.${req.status}`, { defaultValue: req.status })}
       </span>
-      <time dateTime={req.created_at}>{formatDateTime(req.created_at)}</time>
+      <time dateTime={req.created_at}>{formatWhen(req.created_at)}</time>
       {/* Drawn by CSS from the attribute: the message text itself appears once, in the body. */}
       <span className="message-preview" data-preview={previewOf(req)} />
     </>

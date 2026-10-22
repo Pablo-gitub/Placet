@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowRight } from "lucide-react";
-import { formatDateTime } from "./i18n/formatters";
+import { formatWhen } from "./i18n/formatters";
 import { useWide } from "./useWide";
 import { MessageActions, MessageText } from "./MessageActions";
 
@@ -22,7 +22,7 @@ function Row({ item, sessions, wide, onOpenMessage, onChanged }) {
       </span>
       {req.project_name && <span className="message-project">{req.project_name}</span>}
       <span className={`status-badge status-${req.status.toLowerCase()}`}>{t(`status.${req.status}`, { defaultValue: req.status })}</span>
-      <time dateTime={at}>{item.due_at ? t("undelivered.due", { time: formatDateTime(at) }) : formatDateTime(at)}</time>
+      <time dateTime={at}>{item.due_at ? t("undelivered.due", { time: formatWhen(at) }) : formatWhen(at)}</time>
     </>
   );
   if (wide) {

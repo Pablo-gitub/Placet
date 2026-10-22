@@ -4,7 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import MessageBody from "./MessageBody";
 import { MessageActions, MessageText } from "./MessageActions";
 import { isUndelivered } from "./messages";
-import { formatDateTime } from "./i18n/formatters";
+import { formatWhen } from "./i18n/formatters";
 
 /** One message in full, in the right pane (or as a page on the phone): text, reply, timeline and, if it is still undelivered, its actions. */
 export default function MessageDetail({ requestId, requests = [], sessions = [], onBack, onOpenSession }) {
@@ -34,7 +34,7 @@ export default function MessageDetail({ requestId, requests = [], sessions = [],
       {req && (
         <>
           <p className="composer-note">
-            {req.sender_id} → {req.recipient_id} · {formatDateTime(req.created_at)}
+            {req.sender_id} → {req.recipient_id} · {formatWhen(req.created_at)}
           </p>
           <section className="request-section">
             <MessageText req={req} />

@@ -1,7 +1,7 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { edgeActivities, edgeSchedules } from "./graphActivity";
-import { formatDateTime } from "./i18n/formatters";
+import { formatWhen } from "./i18n/formatters";
 
 const SIZE = 320;
 const CENTER = SIZE / 2;
@@ -136,7 +136,7 @@ export default function RelationGraph({ nodes = [], relations = [], sessions = [
             {now === "scheduled" && (
               // A small clock beside the resting ball: held for its time, not stuck.
               <g data-testid={`graph-clock-${rel.id}`} className="rg-clock" transform={`translate(${near.x + 7} ${near.y - 7})`}>
-                <title>{t("projects.graphScheduledAt", { time: formatDateTime(schedules[rel.id]) })}</title>
+                <title>{t("projects.graphScheduledAt", { time: formatWhen(schedules[rel.id]) })}</title>
                 <circle r={5} />
                 <path d="M0 -3 V0 L2.5 1.5" />
               </g>

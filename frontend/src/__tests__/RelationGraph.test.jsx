@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import i18n from "../i18n";
 import RelationGraph from "../RelationGraph";
-import { formatDateTime } from "../i18n/formatters";
+import { formatWhen } from "../i18n/formatters";
 
 // The real nodes and relations of the Placet project (October 19, 2026).
 const nodes = [
@@ -172,7 +172,7 @@ describe("a request scheduled for later on the graph", () => {
     expect(ball).not.toHaveClass("rg-ball-queued");
     expect(ball.querySelector("animateMotion")).toBeNull();
     const clock = screen.getByTestId("graph-clock-1");
-    expect(clock.querySelector("title").textContent).toBe(i18n.t("projects.graphScheduledAt", { time: formatDateTime(later) }));
+    expect(clock.querySelector("title").textContent).toBe(i18n.t("projects.graphScheduledAt", { time: formatWhen(later) }));
     expect(screen.getByTestId("graph-legend-scheduled")).toHaveTextContent(i18n.t("projects.graphScheduled"));
     expect(screen.queryByTestId("graph-legend-queued")).toBeNull();
   });
