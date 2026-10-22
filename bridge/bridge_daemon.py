@@ -405,6 +405,9 @@ class BridgeDaemon:
                 continue
             self._claude_wake_at[sid] = now
             outcome = None
+            # Taken before the launcher runs: the app logs the warm-up while the link is being
+            # handed over, i.e. before the launcher returns.
+            started_epoch, started_at = time.time(), datetime.now(timezone.utc)
             try:
                 opened = (self.claude_waker.open(sid, session.get('cwd'), force=True) if session.get('force')
                           else self.claude_waker.open(sid, session.get('cwd')))
@@ -425,8 +428,8 @@ class BridgeDaemon:
             if outcome:
                 outcomes[sid] = outcome
             if outcome == 'open_requested':
-                self._wake_diagnoses[sid] = {'cwd': session.get('cwd'), 'attempt_epoch': time.time(),
-                                             'attempt_at': datetime.now(timezone.utc), 'reported': False}
+                self._wake_diagnoses[sid] = {'cwd': session.get('cwd'), 'attempt_epoch': started_epoch,
+                                             'attempt_at': started_at, 'reported': False}
         return outcomes
 
     def diagnose_wakes(self) -> None:
