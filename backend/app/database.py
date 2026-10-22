@@ -521,6 +521,9 @@ class Database:
                 # When the hook last reported the configuration (each start), to tell a use
                 # since this start from one that predates it.
                 cursor.execute("ALTER TABLE sessions ADD COLUMN mcp_checked_at TEXT;")
+            # The "suspect" heuristic (a Placet turn ended with no MCP call) is gone: a healthy session
+            # never needs one. Rows it marked go back to "unknown"; harmless to repeat.
+            cursor.execute("UPDATE sessions SET mcp_state = 'unknown' WHERE mcp_state = 'suspect';")
             # RFC-02: the stable named node the session is attached to.
             if "node_id" not in session_cols:
                 cursor.execute("ALTER TABLE sessions ADD COLUMN node_id INTEGER;")
@@ -2297,18 +2300,6 @@ class Database:
         now = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
             conn.execute("UPDATE sessions SET mcp_seen_at = ? WHERE id = ?", (now, session_id))
-
-    def suspect_mcp(self, session_id: str) -> bool:
-        """
-        RF-27: a Placet request's turn ended and, since this start, the session never used the
-        MCP while the config check could not tell: suspect, once.
-        """
-        with self._get_connection() as conn:
-            cur = conn.execute(
-                "UPDATE sessions SET mcp_state = 'suspect' WHERE id = ? AND mcp_state = 'unknown'"
-                " AND (mcp_seen_at IS NULL OR (mcp_checked_at IS NOT NULL"
-                "      AND julianday(mcp_seen_at) < julianday(mcp_checked_at)))", (session_id,))
-            return cur.rowcount > 0
 
     def increment_prompt_count(self, session_id: str) -> None:
         with self._get_connection() as conn:

@@ -14,7 +14,7 @@ export default function McpWarning({ session, compact = false }) {
   const { t } = useTranslation();
   const state = mcpWarning(session);
   if (!state) return null;
-  const hint = t(state === "suspect" ? "mcp.hintSuspect" : "mcp.hintMissing");
+  const hint = t("mcp.hintMissing");
   if (compact) {
     return (
       <span className="badge-mcp" title={`${t("mcp.warning")}. ${hint}`} data-testid={`session-mcp-${session.id}`}>

@@ -1642,8 +1642,6 @@ def create_app(
         elif payload.event == "stop":
             was_busy = session.state == "busy"
             is_placet = (session.turn_request_id is not None) or bool(db.steered_in_turn(session_id))
-            if session.turn_request_id is not None and db.suspect_mcp(session_id):
-                logger.info(f"Session {session_id} ended a Placet turn without ever using the MCP: suspect")
             db.set_session_state(session_id, "idle")
             if was_busy:
                 notify_turn_end(session, payload.last_message, is_placet=is_placet)

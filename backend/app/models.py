@@ -402,9 +402,9 @@ class SessionModel(BaseModel):
     prompt_count: int = 0
     # RF-62: computed, never stored. compact / effort: supported | pc_only | unsupported.
     controls: Dict[str, Any] = Field(default_factory=dict)
-    # RF-27: configured | missing | unknown (what the hook read from the
-    # provider's configuration), or suspect (a Placet turn ended with no MCP
-    # call ever made by an "unknown" session). None: never reported.
+    # RF-27: configured | missing | unknown, what the hook read from the provider's configuration
+    # at the latest start. None: never reported. (No inference from how a turn ended: a healthy
+    # session never needs an MCP call.)
     mcp_state: Optional[str] = None
     # The last time this session used a Placet MCP tool.
     mcp_seen_at: Optional[datetime] = None

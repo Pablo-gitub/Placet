@@ -61,28 +61,54 @@ async def test_using_the_mcp_proves_the_connection(setup):  # noqa: F811
 
 
 @pytest.mark.asyncio
-async def test_a_turn_end_without_any_mcp_call_is_suspect_only_when_the_config_is_unknown(setup):  # noqa: F811
+async def test_a_turn_end_without_any_mcp_call_proves_nothing_about_the_connection(setup):  # noqa: F811
+    """
+    A healthy session never needs an MCP call: messages from the phone are delivered by the waiter and
+    the reply is taken from the transcript, and agent requests accept implicit replies (RF-25).
+    """
     app, db = setup
     await start(app, "c1", mcp="unknown")
     await start(app, "c2", mcp="configured")
     await start(app, "c3")  # nothing reported
-    for sid in ("c1", "c2", "c3"):
+    await start(app, "c4", mcp="missing")
+    for sid in ("c1", "c2", "c3", "c4"):
         await delivered(app, sid)
         await event(app, "claude", sid, event="stop", last_message="fatto")
-    assert db.get_session("c1").mcp_state == "suspect"
-    assert db.get_session("c2").mcp_state == "configured"
-    assert db.get_session("c3").mcp_state is None
+    states = {sid: db.get_session(sid).mcp_state for sid in ("c1", "c2", "c3", "c4")}
+    assert states == {"c1": "unknown", "c2": "configured", "c3": None, "c4": "missing"}
+
+
+def test_there_is_no_turn_end_heuristic_left(setup):  # noqa: F811
+    _, db = setup
+    assert not hasattr(db, "suspect_mcp")
+
+
+def test_old_suspect_rows_become_unknown_once(tmp_path):
+    from backend.app.database import Database
+    path = str(tmp_path / "placet.db")
+    db = Database(path)
+    db.init_db()
+    now = "2026-10-22T10:00:00+00:00"
+    with db._get_connection() as conn:
+        for sid, state in (("s-suspect", "suspect"), ("s-missing", "missing"), ("s-conf", "configured"), ("s-none", None)):
+            conn.execute("INSERT INTO sessions (id, agent_id, provider, state, started_at, last_seen_at, mcp_state)"
+                         " VALUES (?, 'claude', 'claude-code', 'idle', ?, ?, ?)", (sid, now, now, state))
+    for _ in range(2):                                   # idempotent
+        reopened = Database(path)
+        reopened.init_db()
+        assert {sid: reopened.get_session(sid).mcp_state for sid in ("s-suspect", "s-missing", "s-conf", "s-none")} == {
+            "s-suspect": "unknown", "s-missing": "missing", "s-conf": "configured", "s-none": None}
 
 
 @pytest.mark.asyncio
-async def test_a_session_that_used_the_mcp_is_never_suspect(setup):  # noqa: F811
+async def test_a_session_that_used_the_mcp_keeps_its_configuration(setup):  # noqa: F811
     app, db = setup
     await start(app, mcp="unknown")
     req_id = await delivered(app)
     async with agent_client(app, "tok-claude") as claude:
         await claude.post(f"/api/requests/{req_id}/reply", json={"content": "ok"})
     await event(app, "claude", "c1", event="stop", last_message="fatto")
-    assert db.get_session("c1").mcp_state == "unknown" and db.get_session("c1").mcp_seen_at is not None   # used it: not suspect
+    assert db.get_session("c1").mcp_state == "unknown" and db.get_session("c1").mcp_seen_at is not None
 
 
 @pytest.mark.asyncio
@@ -135,7 +161,7 @@ async def test_a_use_before_this_start_does_not_hide_a_missing_configuration(set
 
 
 @pytest.mark.asyncio
-async def test_a_use_before_this_start_does_not_prove_an_unknown_session(setup):  # noqa: F811
+async def test_a_use_before_this_start_leaves_an_unknown_session_unknown(setup):  # noqa: F811
     app, db = setup
     await start(app, mcp="unknown")
     db.mark_mcp_seen("c1")
@@ -143,11 +169,11 @@ async def test_a_use_before_this_start_does_not_prove_an_unknown_session(setup):
     await start(app, mcp="unknown")                         # a new start: seen only before it
     await delivered(app)
     await event(app, "claude", "c1", event="stop", last_message="fatto")
-    assert db.get_session("c1").mcp_state == "suspect"
+    assert db.get_session("c1").mcp_state == "unknown"
 
 
 @pytest.mark.asyncio
-async def test_a_use_since_this_start_keeps_an_unknown_session_unsuspected(setup):  # noqa: F811
+async def test_a_use_since_this_start_changes_no_state(setup):  # noqa: F811
     app, db = setup
     await start(app, mcp="unknown")
     await asyncio.sleep(0.01)
