@@ -1,6 +1,7 @@
 """Shared helpers for the Placet hooks (stdlib only: hooks run with python3)."""
 import json
 import os
+import subprocess
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -58,6 +59,32 @@ def active(cwd: Optional[str]) -> bool:
     except (OSError, RuntimeError):
         return True
     return not any((current / OFF_MARKER).exists() for current in (folder, *folder.parents))
+
+
+GIT_TIMEOUT_SECONDS = 2.0
+
+
+def project_root(cwd: Optional[str]) -> Optional[str]:
+    """
+    The folder that identifies the project of a session. Hooks report the
+    working directory of the moment, so working inside a linked git worktree
+    (`.worktrees/<x>`) would move the session to another folder: there the main
+    repository's root is returned. The main checkout, its subfolders, folders
+    outside git and any git failure keep the raw `cwd`.
+    """
+    if not cwd:
+        return cwd
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"],
+            cwd=cwd, capture_output=True, text=True, timeout=GIT_TIMEOUT_SECONDS, check=True,
+        ).stdout.split("\n")
+        git_dir, common_dir = out[0].strip(), out[1].strip()
+    except (OSError, subprocess.SubprocessError, IndexError):
+        return cwd
+    if not git_dir or git_dir == common_dir or Path(common_dir).name != ".git":
+        return cwd  # the main checkout, or a layout not worth guessing about (bare repository)
+    return str(Path(common_dir).parent)
 
 
 def call(method: str, path: str, token: str, body=None, timeout: float = 3) -> Tuple[int, Optional[dict]]:

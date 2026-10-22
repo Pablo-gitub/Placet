@@ -152,7 +152,7 @@ def build_event(event_name: str, payload: dict):
     common = {
         "provider": "antigravity",
         "entrypoint": "antigravity",
-        "cwd": workspaces[0] if workspaces else None,
+        "cwd": placet_common.project_root(workspaces[0]) if workspaces else None,
         "adapter": ADAPTER,
         # The model in use (RF-61), e.g. "gemini-3.8-flash-medium".
         "model": payload.get("modelName") if isinstance(payload.get("modelName"), str) else None,
