@@ -181,4 +181,33 @@ describe("SessionView scheduled messages display and actions (RF-65)", () => {
     expect(outgoing).not.toHaveTextContent(/Programmato per|Scheduled for/);
     expect(outgoing).toHaveTextContent(/In consegna|Delivering/);
   });
+
+  it("does not render as scheduled when scheduled_at is in the past even if status is APPROVED", async () => {
+    mockFetch([[transcriptOf("s1"), latest]]);
+
+    const pastScheduledReq = {
+      id: 51,
+      sender_id: "human",
+      recipient_id: "claude",
+      recipient_session_id: "s1",
+      question_type: "message",
+      prompt: "Past scheduled",
+      status: "APPROVED",
+      scheduled_at: "2020-01-01T00:00:00Z",
+      created_at: "2020-01-01T00:00:00Z",
+    };
+
+    render(
+      <SessionView
+        sessionId="s1"
+        session={session}
+        requests={[pastScheduledReq]}
+        sessions={[session]}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByTestId("outgoing-51")).toBeInTheDocument());
+    const outgoing = screen.getByTestId("outgoing-51");
+    expect(outgoing).not.toHaveTextContent(/Programmato per|Scheduled for/);
+  });
 });

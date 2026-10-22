@@ -201,7 +201,8 @@ function Outgoing({ req, session, limitAt, onDelivery, onEdit, onSchedule }) {
   const uncertain = isUncertain(req);
   const failed = req.status === "DELIVERY_FAILED" || req.status === "EXPIRED";
   const projName = req.project_name || "";
-  const isScheduled = !!req.scheduled_at && req.status === "APPROVED";
+  // oxlint-disable-next-line react/purity
+  const isScheduled = !!req.scheduled_at && req.status === "APPROVED" && new Date(req.scheduled_at) > new Date();
   return (
     <div
       className={`msg msg-user outgoing${failed ? " failed" : ""}${uncertain ? " uncertain" : ""}`}
