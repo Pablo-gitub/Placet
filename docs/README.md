@@ -38,6 +38,7 @@ These describe observations at a point in time. Where they differ from the requi
 ## Plans
 
 - [Portability and local mode](plans/portability-and-local-mode.md): study for macOS/Windows support and a local mode without Tailscale.
+- [Verified session binding](plans/session-binding.md): proposal for RS-09, proving which session an agent acts for (prerequisite of RFC-17).
 - [Reserved commands](plans/reserved-commands.md): running approved privileged actions, such as a deploy, from the phone. Foundations, passkey enrollment and administrative transport implemented; privileged dispatch not yet.
   - [Administrative network setup](plans/admin-network-setup.md) and [administrative web setup](plans/admin-web-setup.md): the separate Tailscale transport and passkey enrollment page.
 
