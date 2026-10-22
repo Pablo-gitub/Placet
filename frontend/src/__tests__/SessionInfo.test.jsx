@@ -105,3 +105,12 @@ describe("sessionLabels disambiguation", () => {
   });
 });
 
+
+describe("project of a session working in a worktree", () => {
+  it("is the repository, not the worktree folder", async () => {
+    const { sessionProject } = await import("../sessionInfo");
+    expect(sessionProject({ cwd: "/home/p/placet/.worktrees/rf29d", project_root: "/home/p/placet" })).toBe("placet");
+    expect(sessionProject({ cwd: "/home/p/placet" })).toBe("placet");        // older sessions: the cwd
+    expect(sessionProject({})).toBeNull();
+  });
+});
