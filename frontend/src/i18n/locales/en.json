@@ -14,6 +14,11 @@
     "label": "Language",
     "auto": "Auto"
   },
+  "mcp": {
+    "warning": "Placet MCP not connected",
+    "hint": "This session cannot reply or acknowledge: add the placet server to its MCP configuration.",
+    "guide": "Installation guide"
+  },
   "home": {
     "questions": "Questions",
     "emptyQuestions": "No questions waiting.",

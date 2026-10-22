@@ -14,6 +14,11 @@
     "label": "Lingua",
     "auto": "Auto"
   },
+  "mcp": {
+    "warning": "Placet MCP non collegato",
+    "hint": "Questa sessione non può rispondere né confermare: aggiungi il server placet alla sua configurazione MCP.",
+    "guide": "Guida all'installazione"
+  },
   "home": {
     "questions": "Domande",
     "emptyQuestions": "Nessuna domanda in attesa.",
