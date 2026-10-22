@@ -3,6 +3,8 @@ RF-27 backend: what the hook reported about the Placet MCP server, and a
 second, independent signal when a delivered request's turn ends without the
 session ever having used it.
 """
+import asyncio
+
 import pytest
 
 from tests.helpers import agent_client, human_client
@@ -53,9 +55,9 @@ async def test_using_the_mcp_proves_the_connection(setup):  # noqa: F811
     async with agent_client(app, "tok-claude") as claude:
         assert (await claude.post(f"/api/requests/{req_id}/progress", json={"content": "in corso"})).status_code == 200
     session = db.get_session("c1")
-    assert session.mcp_state == "configured" and session.mcp_seen_at is not None
-    await start(app, mcp="missing")  # a later start cannot deny what was seen
-    assert db.get_session("c1").mcp_state == "configured"
+    assert session.mcp_state == "missing" and session.mcp_seen_at is not None   # the use is evidence, not configuration
+    await start(app, mcp="missing")                                            # a new start reports the configuration anew
+    assert db.get_session("c1").mcp_state == "missing" and db.get_session("c1").mcp_seen_at is not None
 
 
 @pytest.mark.asyncio
@@ -80,7 +82,7 @@ async def test_a_session_that_used_the_mcp_is_never_suspect(setup):  # noqa: F81
     async with agent_client(app, "tok-claude") as claude:
         await claude.post(f"/api/requests/{req_id}/reply", json={"content": "ok"})
     await event(app, "claude", "c1", event="stop", last_message="fatto")
-    assert db.get_session("c1").mcp_state == "configured"
+    assert db.get_session("c1").mcp_state == "unknown" and db.get_session("c1").mcp_seen_at is not None   # used it: not suspect
 
 
 @pytest.mark.asyncio
@@ -100,4 +102,84 @@ async def test_sending_a_request_from_a_session_proves_the_connection(setup):  #
         resp = await claude.post("/api/requests", json={
             "recipient_id": "human", "question_type": "confirmation", "prompt": "ok?", "sender_session_id": "c1"})
         assert resp.status_code == 201, resp.text
-    assert db.get_session("c1").mcp_state == "configured"
+    session = db.get_session("c1")
+    assert session.mcp_state == "missing" and session.mcp_seen_at is not None      # use is recorded apart
+
+
+# --- configuration and use are kept apart ----------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_each_start_records_when_the_configuration_was_checked(setup):  # noqa: F811
+    app, db = setup
+    await start(app, mcp="configured")
+    first = db.get_session("c1").mcp_checked_at
+    assert first is not None
+    await start(app, mcp="missing")
+    again = db.get_session("c1")
+    assert again.mcp_state == "missing" and again.mcp_checked_at >= first
+    await start(app, "c2")                                  # an older hook reports nothing
+    assert db.get_session("c2").mcp_checked_at is None
+
+
+@pytest.mark.asyncio
+async def test_a_use_before_this_start_does_not_hide_a_missing_configuration(setup):  # noqa: F811
+    app, db = setup
+    await start(app, mcp="configured")
+    db.mark_mcp_seen("c1")
+    await asyncio.sleep(0.01)
+    await start(app, mcp="missing")                         # restarted without the server
+    session = db.get_session("c1")
+    assert session.mcp_state == "missing"
+    assert session.mcp_seen_at < session.mcp_checked_at     # the use predates this start
+
+
+@pytest.mark.asyncio
+async def test_a_use_before_this_start_does_not_prove_an_unknown_session(setup):  # noqa: F811
+    app, db = setup
+    await start(app, mcp="unknown")
+    db.mark_mcp_seen("c1")
+    await asyncio.sleep(0.01)
+    await start(app, mcp="unknown")                         # a new start: seen only before it
+    await delivered(app)
+    await event(app, "claude", "c1", event="stop", last_message="fatto")
+    assert db.get_session("c1").mcp_state == "suspect"
+
+
+@pytest.mark.asyncio
+async def test_a_use_since_this_start_keeps_an_unknown_session_unsuspected(setup):  # noqa: F811
+    app, db = setup
+    await start(app, mcp="unknown")
+    await asyncio.sleep(0.01)
+    db.mark_mcp_seen("c1")
+    await delivered(app)
+    await event(app, "claude", "c1", event="stop", last_message="fatto")
+    assert db.get_session("c1").mcp_state == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_read_only_tools_that_carry_a_session_count_as_seen(setup):  # noqa: F811
+    app, db = setup
+    await start(app, "c1", mcp="unknown")
+    async with agent_client(app, "tok-claude") as claude:
+        assert (await claude.get("/api/agents/me/relations", params={"session_id": "c1"})).status_code == 200
+    assert db.get_session("c1").mcp_seen_at is not None
+    # placet_check_status carries a request id: the caller's own session on it is the one that used the tool.
+    await start(app, "c2", mcp="unknown")
+    req_id = (await write(app, "c2", "fai")).json()["id"]
+    await take(app, "c2")
+    await event(app, "claude", "c2", event="prompt", request_id=req_id)
+    assert db.get_session("c2").mcp_seen_at is None
+    async with agent_client(app, "tok-claude") as claude:
+        assert (await claude.get(f"/api/requests/{req_id}")).status_code == 200
+    assert db.get_session("c2").mcp_seen_at is not None
+
+
+@pytest.mark.asyncio
+async def test_a_human_or_an_unrelated_agent_reading_a_request_proves_nothing(setup):  # noqa: F811
+    app, db = setup
+    await start(app, "c1", mcp="unknown")
+    req_id = (await write(app, "c1", "fai")).json()["id"]
+    async with human_client(app) as human:
+        assert (await human.get(f"/api/requests/{req_id}")).status_code == 200
+    assert db.get_session("c1").mcp_seen_at is None
