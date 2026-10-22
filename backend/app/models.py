@@ -301,6 +301,22 @@ class SessionMessage(BaseModel):
         return self
 
 
+def session_controls(provider: Optional[str], tmux_session: Optional[str],
+                     entrypoint: Optional[str] = None) -> Dict[str, str]:
+    """
+    RF-62: the remote controls a session offers, from its provider and how it
+    runs. "supported": the genuine command can be typed into its tmux pane
+    (Claude Code CLI); "pc_only": it exists but only at the PC (the desktop
+    app, a CLI outside tmux); "unsupported": no verified way (Codex ignores
+    the overrides of `codex queue`; Antigravity is not verified).
+    """
+    if provider == "claude-code":
+        state = "supported" if tmux_session and entrypoint != "claude-desktop" else "pc_only"
+    else:
+        state = "unsupported"
+    return {"compact": state, "effort": state}
+
+
 class SessionModel(BaseModel):
     """An agent session (e.g. one Claude Code conversation), from its hooks."""
     id: str
@@ -333,6 +349,8 @@ class SessionModel(BaseModel):
     # RF-29d: continued conversation pointer and prompt counter
     continued_to: Optional[str] = None
     prompt_count: int = 0
+    # RF-62: computed, never stored. compact / effort: supported | pc_only | unsupported.
+    controls: Dict[str, str] = Field(default_factory=dict)
 
 
 class NodeModel(BaseModel):
