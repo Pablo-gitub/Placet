@@ -2628,6 +2628,8 @@ def create_app(
         # Loaded Claude Desktop engines against the app's cap: numbers only, both or neither.
         engines: Optional[int] = Field(default=None, ge=0, le=1000)
         cap: Optional[int] = Field(default=None, ge=1, le=1000)
+        # The Placet sessions the app holds loaded, a complete list; absent: the bridge could not tell.
+        loaded: Optional[List[str]] = Field(default=None, max_length=2000)
 
     @app.post("/api/bridge/desktop-state")
     async def bridge_desktop_state(body: DesktopStateReport, who: Principal = Depends(principal)):
@@ -2638,7 +2640,10 @@ def create_app(
             notify_session(session_id)
         if body.engines is not None and body.cap is not None:
             db.set_desktop_capacity(body.engines, body.cap)
-        return {"changed": changed}
+        suspended = db.apply_desktop_loaded(body.loaded) if body.loaded is not None else []
+        for session_id in suspended:
+            notify_session(session_id)
+        return {"changed": changed, "suspended": suspended}
 
     @app.get("/api/claude-desktop/capacity")
     async def claude_desktop_capacity(response: Response, who: Principal = Depends(principal)):

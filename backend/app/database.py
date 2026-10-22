@@ -516,6 +516,11 @@ class Database:
                 cursor.execute("ALTER TABLE sessions ADD COLUMN wake_alerted_at TEXT;")
             if "desktop_archived" not in session_cols:
                 cursor.execute("ALTER TABLE sessions ADD COLUMN desktop_archived INTEGER NOT NULL DEFAULT 0;")
+            if "desktop_unloaded" not in session_cols:
+                # Consecutive bridge reports that did not find the conversation loaded in Claude Desktop,
+                # and whether the suspension was made from them (only that one is undone by a loaded report).
+                cursor.execute("ALTER TABLE sessions ADD COLUMN desktop_unloaded INTEGER NOT NULL DEFAULT 0;")
+                cursor.execute("ALTER TABLE sessions ADD COLUMN desktop_suspended INTEGER NOT NULL DEFAULT 0;")
             if "wake_cause" not in session_cols:
                 cursor.execute("ALTER TABLE sessions ADD COLUMN wake_cause TEXT;")
                 cursor.execute("ALTER TABLE sessions ADD COLUMN wake_cause_at TEXT;")
@@ -3134,7 +3139,8 @@ class Database:
         """The session runs again (it started, or a turn began): neither ended nor suspended."""
         with self._get_connection() as conn:
             conn.execute(
-                "UPDATE sessions SET ended_at = NULL, suspended_at = NULL WHERE id = ?", (session_id,)
+                "UPDATE sessions SET ended_at = NULL, suspended_at = NULL, desktop_unloaded = 0,"
+                " desktop_suspended = 0 WHERE id = ?", (session_id,)
             )
 
     def suspend_session(self, session_id: str) -> None:
@@ -3326,6 +3332,38 @@ class Database:
                     if cur.rowcount:
                         changed.append(session_id)
         return changed
+
+    DESKTOP_UNLOADED_REPORTS = 2
+
+    def apply_desktop_loaded(self, loaded: List[str]) -> List[str]:
+        """
+        The Placet sessions the app holds loaded, as one complete bridge report. A Claude Desktop session
+        that is idle, has no live waiter and is missing from it for two reports in a row is suspended (its
+        messages wait, like after a SessionEnd); a loaded report resets the count and undoes a suspension
+        made here. Busy, ended, archived and suspended sessions are not counted. Returns the suspended ids.
+        """
+        held, suspended = set(loaded), []
+        for s in self.list_sessions():
+            if s.provider != 'claude-code' or s.entrypoint != 'claude-desktop':
+                continue
+            with self._get_connection() as conn:
+                if s.id in held:
+                    conn.execute("UPDATE sessions SET desktop_unloaded = 0 WHERE id = ?", (s.id,))
+                    conn.execute("UPDATE sessions SET suspended_at = NULL, desktop_suspended = 0"
+                                 " WHERE id = ? AND desktop_suspended = 1", (s.id,))
+                    continue
+                if (s.desktop_archived or s.ended_at is not None or s.suspended_at is not None
+                        or s.state != 'idle' or s.reachable):
+                    conn.execute("UPDATE sessions SET desktop_unloaded = 0 WHERE id = ?", (s.id,))
+                    continue
+                conn.execute("UPDATE sessions SET desktop_unloaded = desktop_unloaded + 1 WHERE id = ?", (s.id,))
+                count = conn.execute("SELECT desktop_unloaded FROM sessions WHERE id = ?", (s.id,)).fetchone()[0]
+            if count >= self.DESKTOP_UNLOADED_REPORTS:
+                self.suspend_session(s.id)
+                with self._get_connection() as conn:
+                    conn.execute("UPDATE sessions SET desktop_suspended = 1, desktop_unloaded = 0 WHERE id = ?", (s.id,))
+                suspended.append(s.id)
+        return suspended
 
     def set_desktop_capacity(self, engines: int, cap: int) -> None:
         """The bridge's latest count of loaded Claude Desktop engines against the app's cap (numbers only)."""
