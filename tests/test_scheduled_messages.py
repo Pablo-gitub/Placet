@@ -954,6 +954,41 @@ def test_open_request_toward_excludes_future_scheduled_approved(db):
     assert db.open_request_toward("s_codex", "claude", "s_claude") == req.id
 
 
+def test_record_reply_avoids_nested_connections(db):
+    """record_reply must not open nested database connections during its write transaction."""
+    req = db.create_request(RequestCreate(
+        sender_id="claude", recipient_id="codex", prompt="Prompt", sender_session_id="s1"
+    ))
+    db.update_request_decision(req.id, RequestStatus.APPROVED, allow_auto_return=True)
+    db.claim_injection(req.id)
+    with db._get_connection() as c:
+        c.execute("UPDATE requests SET sender_session_id = 's1' WHERE id = ?", (req.id,))
+
+    depth = 0
+    max_depth = 0
+    orig_get_conn = db._get_connection
+
+    from contextlib import contextmanager
+    @contextmanager
+    def tracked_get_conn():
+        nonlocal depth, max_depth
+        depth += 1
+        max_depth = max(max_depth, depth)
+        try:
+            with orig_get_conn() as conn:
+                yield conn
+        finally:
+            depth -= 1
+
+    db._get_connection = tracked_get_conn
+    try:
+        res = db.record_reply(req.id, "codex", "Reply content")
+        assert res is not None
+        assert max_depth <= 1, f"Expected max connection nesting depth <= 1, got {max_depth}"
+    finally:
+        db._get_connection = orig_get_conn
+
+
 @pytest.mark.asyncio
 async def test_decide_request_preserves_user_schedule_when_reset_is_earlier(rel_app_and_db):
     """Approval does not advance user scheduled_at if recipient reset is earlier."""

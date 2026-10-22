@@ -1033,6 +1033,25 @@ class Database:
         """
         now = datetime.now(timezone.utc).isoformat()
         sources = [st.value for st in _REPLYABLE]
+
+        req = self.get_request(request_id)
+        schedule_action = None
+        sender_provider = None
+        if req and req.sender_session_id and req.sender_id != "human":
+            sender_session = self.get_session(req.sender_session_id)
+            sender_provider = sender_session.provider if sender_session else None
+            cfg = self.usage_guard_config()
+            if self.is_provider_over_limit(sender_provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"]):
+                if cfg["deliver_at_reset"]:
+                    reset_time = self.provider_reset_time(sender_provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"])
+                    if reset_time is not None:
+                        scheduled_at_iso = _normalize_utc_iso(reset_time)
+                        schedule_action = ("schedule", scheduled_at_iso)
+                    else:
+                        schedule_action = ("limit", None)
+                else:
+                    schedule_action = ("limit", None)
+
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -1061,30 +1080,18 @@ class Database:
                 details["implicit"] = True
             self._log(cursor, request_id, actor or f"agent:{responder_id}", "replied", details, at=now)
 
-            req = self.get_request(request_id)
-            if req and req.sender_session_id and req.sender_id != "human":
-                sender_session = self.get_session(req.sender_session_id)
-                sender_provider = sender_session.provider if sender_session else None
-                cfg = self.usage_guard_config()
-                if self.is_provider_over_limit(sender_provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"]):
-                    if cfg["deliver_at_reset"]:
-                        reset_time = self.provider_reset_time(sender_provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"])
-                        if reset_time is not None:
-                            scheduled_at_iso = _normalize_utc_iso(reset_time)
-                            cursor.execute("UPDATE requests SET scheduled_at = ?, updated_at = ? WHERE id = ?",
-                                           (scheduled_at_iso, now, request_id))
-                            self._log(cursor, request_id, "system:limits", "scheduled",
-                                      {"scheduled_at": scheduled_at_iso, "reason": "usage"}, at=now)
-                        else:
-                            cursor.execute("UPDATE requests SET allow_auto_return = 0, updated_at = ? WHERE id = ?",
-                                           (now, request_id))
-                            self._log(cursor, request_id, "system:limits", "automation_limited",
-                                      {"reason": "usage", "provider": sender_provider}, at=now)
-                    else:
-                        cursor.execute("UPDATE requests SET allow_auto_return = 0, updated_at = ? WHERE id = ?",
-                                       (now, request_id))
-                        self._log(cursor, request_id, "system:limits", "automation_limited",
-                                  {"reason": "usage", "provider": sender_provider}, at=now)
+            if schedule_action:
+                action_type, sched_iso = schedule_action
+                if action_type == "schedule":
+                    cursor.execute("UPDATE requests SET scheduled_at = ?, updated_at = ? WHERE id = ?",
+                                   (sched_iso, now, request_id))
+                    self._log(cursor, request_id, "system:limits", "scheduled",
+                              {"scheduled_at": sched_iso, "reason": "usage"}, at=now)
+                else:
+                    cursor.execute("UPDATE requests SET allow_auto_return = 0, updated_at = ? WHERE id = ?",
+                                   (now, request_id))
+                    self._log(cursor, request_id, "system:limits", "automation_limited",
+                              {"reason": "usage", "provider": sender_provider}, at=now)
         return self.get_request(request_id)
 
     # --- Injection delivery (agent-to-agent prompts) -------------------------
