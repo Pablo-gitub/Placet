@@ -2476,7 +2476,8 @@ def create_app(
             "results": results,
             "busy_agents": sorted(set(db.busy_agents(AGENT_BUSY_TTL_SECONDS)) | set(busy)),
             "claude_wake_sessions": [
-                {"id": s.id, "cwd": s.cwd} for s in db.claude_sessions_to_wake()
+                {"id": s.id, "cwd": s.cwd, **({"force": True} if db.wake_forced(s.id) else {})}
+                for s in db.claude_sessions_to_wake()
             ],
             # Sessions the bridge wakes itself (Codex, Antigravity) with mail.
             "sessions": [
@@ -2516,6 +2517,21 @@ def create_app(
         notify_change(request_id)
         return {"request_id": request_id, "session_id": session.id, "provider": session.provider,
                 "text": envelopes.steer(claimed, language=db.get_background_language())}
+
+    class WakeReport(BaseModel):
+        outcome: Literal["open_requested", "failed"]
+
+    @app.post("/api/bridge/sessions/{session_id}/wake")
+    async def bridge_wake_report(session_id: str, body: WakeReport, who: Principal = Depends(principal)):
+        """
+        What happened to a Claude Desktop continue link: handed to the app (the launcher's rc=0 does
+        not mean the session started) or certainly not. Counts against the episode's budget.
+        """
+        require_bridge(who)
+        if not db.report_wake(session_id, body.outcome):
+            raise HTTPException(status_code=404, detail="Session not found")
+        notify_session(session_id)
+        return {"session": session_id, "outcome": body.outcome}
 
     @app.post("/api/bridge/titles")
     async def bridge_titles(payload: TitlesReport, who: Principal = Depends(principal)):

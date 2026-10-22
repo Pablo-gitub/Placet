@@ -44,7 +44,7 @@ class ClaudeDesktopWake:
             raise ValueError('Desktop session mapping missing or ambiguous')
         return matches[0]
 
-    def open(self, session_id, cwd):
+    def open(self, session_id, cwd, force=False):
         session_id = str(uuid.UUID(session_id))
         if not cwd or not active(cwd):
             return False
@@ -63,7 +63,8 @@ class ClaudeDesktopWake:
                 return False
             previous = state.read().strip()
             now = self.clock()
-            if previous and now - float(previous) < COOLDOWN_SECONDS:
+            # `force`: the user asked again; the cooldown protects against loops, not against them.
+            if previous and not force and now - float(previous) < COOLDOWN_SECONDS:
                 return False
             state.seek(0)
             state.truncate()

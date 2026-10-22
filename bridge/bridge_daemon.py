@@ -383,8 +383,13 @@ class BridgeDaemon:
                 self._steer_orphans.pop(request_id, None)
         return inserted
 
-    def wake_claude_sessions(self, sessions: List[dict]) -> None:
-        """Load only: the engine's asyncRewake hook owns all inbox delivery."""
+    def wake_claude_sessions(self, sessions: List[dict]) -> Dict[str, str]:
+        """
+        Load only: the engine's asyncRewake hook owns all inbox delivery. Returns what happened to
+        each link it tried ("open_requested" or "failed"); run_loop_step reports it, so this
+        never touches the mail or the store.
+        """
+        outcomes: Dict[str, str] = {}
         now = time.monotonic()
         current = {s['id'] for s in sessions}
         self._claude_wake_at = {k: v for k, v in self._claude_wake_at.items() if k in current}
@@ -393,12 +398,27 @@ class BridgeDaemon:
             if now - self._claude_wake_at.get(sid, -300) < 300:
                 continue
             self._claude_wake_at[sid] = now
+            outcome = None
             try:
-                if self.claude_waker.open(sid, session.get('cwd')):
+                opened = (self.claude_waker.open(sid, session.get('cwd'), force=True) if session.get('force')
+                          else self.claude_waker.open(sid, session.get('cwd')))
+                if opened:
+                    # rc=0 means the app accepted the link, not that the session started.
                     logger.info('Requested Claude conversation opening for %s; waiting for its hook.', sid)
-            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+                    outcome = 'open_requested'
+            except subprocess.SubprocessError as exc:
+                # A launcher that timed out may have handed the link over: that counts as the open.
+                logger.warning('Claude session %s: the launcher did not answer (%s); the link may have been handed over.',
+                               sid, type(exc).__name__)
+                outcome = 'open_requested'
+            except (OSError, ValueError, RuntimeError) as exc:
+                # Certainly not handed to the app (no mapping, launcher not started, link refused).
                 logger.warning('Cannot open Claude session %s (%s); mail stays pending. Open it manually.',
                                sid, type(exc).__name__)
+                outcome = 'failed'
+            if outcome:
+                outcomes[sid] = outcome
+        return outcomes
 
     def run_loop_step(self) -> int:
         # At most one injection per session per tick, outcomes first: they
@@ -408,7 +428,11 @@ class BridgeDaemon:
         self.check_folders(work.folders)
         self.refresh_titles(work.titles)
         self.refresh_usage(auto_renew=work.claude_auto_renew)
-        self.wake_claude_sessions(work.claude_wake_sessions)
+        for sid, outcome in self.wake_claude_sessions(work.claude_wake_sessions).items():
+            try:
+                self.store.report_wake(sid, outcome)
+            except Exception as exc:
+                logger.warning('Could not report the wake-up of %s (%s).', sid, type(exc).__name__)
         busy_sessions: Set[str] = set()
         busy_agents = set(work.busy_agents)
         delivered = self.process_pending_results(busy_sessions, work.results, busy_agents)

@@ -404,6 +404,11 @@ class SessionModel(BaseModel):
     mcp_state: Optional[str] = None
     # The last time this session used a Placet MCP tool.
     mcp_seen_at: Optional[datetime] = None
+    # Claude Desktop wake-up (one automatic open per episode): the stored state, the time of
+    # the last attempt and how many attempts the episode used.
+    wake_state: Optional[str] = None
+    wake_at: Optional[datetime] = None
+    wake_attempts: int = 0
 
 
 class NodeModel(BaseModel):
