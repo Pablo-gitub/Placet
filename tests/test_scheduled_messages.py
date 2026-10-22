@@ -931,6 +931,29 @@ def test_schedule_request_preserves_original_expiry_window_on_reschedule_cycles(
     assert abs((decided.expires_at - t2).total_seconds() - 3600) < 5
 
 
+def test_open_request_toward_excludes_future_scheduled_approved(db):
+    """open_request_toward returns None when incoming request is APPROVED but scheduled in the future."""
+    req = db.create_request(RequestCreate(
+        sender_id="claude", recipient_id="codex", prompt="Future task",
+        recipient_session_id="s_codex",
+    ))
+    future = datetime.now(timezone.utc) + timedelta(hours=2)
+    db.update_request_decision(req.id, RequestStatus.APPROVED, scheduled_at=future)
+    with db._get_connection() as c:
+        c.execute("UPDATE requests SET sender_session_id = ? WHERE id = ?", ("s_claude", req.id))
+
+    # s_codex checking open request toward claude:
+    # Under current code, this returns req.id (1) because it doesn't check scheduled_at!
+    # Must be None because it is scheduled in the future!
+    assert db.open_request_toward("s_codex", "claude", "s_claude") is None
+
+    # But once scheduled_at is past or None, it returns req.id:
+    past = datetime.now(timezone.utc) - timedelta(minutes=5)
+    with db._get_connection() as c:
+        c.execute("UPDATE requests SET scheduled_at = ? WHERE id = ?", (past.isoformat(), req.id))
+    assert db.open_request_toward("s_codex", "claude", "s_claude") == req.id
+
+
 @pytest.mark.asyncio
 async def test_decide_request_preserves_user_schedule_when_reset_is_earlier(rel_app_and_db):
     """Approval does not advance user scheduled_at if recipient reset is earlier."""

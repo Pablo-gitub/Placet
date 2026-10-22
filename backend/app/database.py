@@ -847,14 +847,15 @@ class Database:
         (or, without one, the agent) it now wants to write to, if any. Its
         reply belongs in placet_reply, not in a new request.
         """
+        now = datetime.now(timezone.utc).isoformat()
         sql = ("SELECT id FROM requests WHERE recipient_session_id = ?"
-               " AND status IN ('APPROVED', 'DELIVERING', 'EXECUTING') AND ")
+               " AND (status IN ('DELIVERING', 'EXECUTING') OR (status = 'APPROVED' AND (scheduled_at IS NULL OR datetime(scheduled_at) <= datetime(?)))) AND ")
         if recipient_session:
             sql += "sender_session_id = ?"
-            params = (sender_session, recipient_session)
+            params = (sender_session, now, recipient_session)
         else:
             sql += "sender_id = ?"
-            params = (sender_session, recipient_id)
+            params = (sender_session, now, recipient_id)
         with self._get_connection() as conn:
             row = conn.execute(sql + " ORDER BY id DESC LIMIT 1", params).fetchone()
             return row["id"] if row else None
