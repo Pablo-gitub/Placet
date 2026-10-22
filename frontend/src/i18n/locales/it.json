@@ -14,6 +14,16 @@
     "label": "Lingua",
     "auto": "Auto"
   },
+  "controls": {
+    "title": "Controlli sessione",
+    "compact": "Compatta",
+    "effort": "Effort",
+    "apply": "Applica",
+    "done": "Comando inviato.",
+    "pcOnly": "Disponibile solo sul PC per questa sessione.",
+    "unsupported": "Questo provider non ha un controllo da remoto per questa azione (Codex lo ignora; Antigravity non è verificato).",
+    "busy": "La sessione sta lavorando: disponibile a fine turno."
+  },
   "home": {
     "questions": "Domande",
     "emptyQuestions": "Nessuna domanda in attesa.",
@@ -109,6 +119,15 @@
     "pinSave": "Non sono riuscito a salvare la scelta.",
     "messageConnection": "Errore di connessione: messaggio non inviato.",
     "sessionClosed": "La sessione è chiusa: non puoi più scriverle.",
+    "sessionBusy": "La sessione sta lavorando: aspetta la fine del turno.",
+    "controlPcOnly": "Per questa sessione il controllo è disponibile solo sul PC.",
+    "controlUnsupported": "Questo provider non offre un controllo da remoto per questa azione.",
+    "effortInvalid": "Questo livello di effort non è accettato.",
+    "commandNotIdle": "La sessione non è a un prompt vuoto.",
+    "commandUserTyping": "Qualcuno sta scrivendo nella sessione: riprova tra poco.",
+    "commandTmuxMissing": "Il terminale della sessione non è in esecuzione.",
+    "commandWrongSession": "Non è il terminale configurato per l'agente.",
+    "commandSendFailed": "Il terminale ha rifiutato il comando.",
     "unknownAgent": "L’agente di questa sessione non è configurato. Controlla la configurazione degli agenti.",
     "mentionAmbiguous": "Menzione ambigua: seleziona nuovamente la sessione.",
     "mentionMissing": "Una menzione selezionata non è presente nel messaggio. Selezionala nuovamente o rimuovi il riferimento.",

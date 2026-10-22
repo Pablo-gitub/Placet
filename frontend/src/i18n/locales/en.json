@@ -14,6 +14,16 @@
     "label": "Language",
     "auto": "Auto"
   },
+  "controls": {
+    "title": "Session controls",
+    "compact": "Compact",
+    "effort": "Effort",
+    "apply": "Apply",
+    "done": "Command sent.",
+    "pcOnly": "Available only on the PC for this session.",
+    "unsupported": "This provider has no remote control for this (Codex ignores it; Antigravity is not verified).",
+    "busy": "The session is working: available when the turn ends."
+  },
   "home": {
     "questions": "Questions",
     "emptyQuestions": "No questions waiting.",
@@ -109,6 +119,15 @@
     "pinSave": "Unable to save your session selection.",
     "messageConnection": "Connection error: your message was not sent.",
     "sessionClosed": "This session is closed. You can no longer send messages to it.",
+    "sessionBusy": "The session is working: wait for the turn to end.",
+    "controlPcOnly": "This control is available only on the PC for this session.",
+    "controlUnsupported": "This provider offers no remote control for this.",
+    "effortInvalid": "That effort level is not accepted.",
+    "commandNotIdle": "The session is not at an empty prompt.",
+    "commandUserTyping": "Someone is typing in the session: try again in a moment.",
+    "commandTmuxMissing": "The session's terminal is not running.",
+    "commandWrongSession": "This is not the terminal configured for the agent.",
+    "commandSendFailed": "The terminal refused the command.",
     "unknownAgent": "This session has an unknown agent. Check the agent configuration.",
     "mentionAmbiguous": "Ambiguous mention. Select the target session again.",
     "mentionMissing": "A selected mention is missing from your message. Select it again or remove the reference.",

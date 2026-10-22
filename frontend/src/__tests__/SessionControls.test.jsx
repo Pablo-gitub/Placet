@@ -1,0 +1,89 @@
+import React from "react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import SessionControls from "../SessionControls";
+import i18n from "../i18n";
+
+const session = (controls, over = {}) => ({ id: "s1", provider: "claude-code", state: "idle", controls, ...over });
+const SUPPORTED = { compact: "supported", effort: "supported" };
+
+function serve(status = 200, body = { ok: true }) {
+  const calls = [];
+  global.fetch = vi.fn((url, opts = {}) => {
+    calls.push({ url, method: opts.method, body: opts.body && JSON.parse(opts.body) });
+    return Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(body) });
+  });
+  return calls;
+}
+
+const open = () => fireEvent.click(screen.getByTestId("session-controls-toggle"));
+
+describe("session controls menu", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("compacts a supported idle session", async () => {
+    const calls = serve();
+    render(<SessionControls session={session(SUPPORTED)} />);
+    open();
+    fireEvent.click(screen.getByTestId("control-compact"));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]).toMatchObject({ url: "/api/sessions/s1/compact", method: "POST" });
+    expect(await screen.findByTestId("control-done")).toBeInTheDocument();
+  });
+
+  it("sets an effort level chosen from the provider's list", async () => {
+    const calls = serve();
+    render(<SessionControls session={session(SUPPORTED)} />);
+    open();
+    const picker = screen.getByTestId("control-effort-level");
+    expect([...picker.options].map((o) => o.value)).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    fireEvent.change(picker, { target: { value: "xhigh" } });
+    fireEvent.click(screen.getByTestId("control-effort"));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]).toMatchObject({ url: "/api/sessions/s1/effort", method: "POST", body: { level: "xhigh" } });
+  });
+
+  it("is disabled with the reason when the control is PC-only or unsupported", () => {
+    const { unmount } = render(<SessionControls session={session({ compact: "pc_only", effort: "pc_only" })} />);
+    open();
+    expect(screen.getByTestId("control-compact")).toBeDisabled();
+    expect(screen.getByTestId("control-effort")).toBeDisabled();
+    expect(screen.getByTestId("control-explanation")).toHaveTextContent(i18n.t("controls.pcOnly"));
+    unmount();
+    render(<SessionControls session={session({ compact: "unsupported", effort: "unsupported" }, { provider: "codex" })} />);
+    open();
+    expect(screen.getByTestId("control-compact")).toBeDisabled();
+    expect(screen.getByTestId("control-explanation")).toHaveTextContent(i18n.t("controls.unsupported"));
+  });
+
+  it("is disabled while the session is working", () => {
+    render(<SessionControls session={session(SUPPORTED, { state: "busy" })} />);
+    open();
+    expect(screen.getByTestId("control-compact")).toBeDisabled();
+    expect(screen.getByTestId("control-explanation")).toHaveTextContent(i18n.t("controls.busy"));
+  });
+
+  it("shows a translated message when the server refuses", async () => {
+    serve(409, { code: "session_command.user_typing", params: {}, detail: "raw server text" });
+    render(<SessionControls session={session(SUPPORTED)} />);
+    open();
+    fireEvent.click(screen.getByTestId("control-compact"));
+    const error = await screen.findByTestId("control-error");
+    expect(error).toHaveTextContent(i18n.t("errors.commandUserTyping"));
+    expect(error).not.toHaveTextContent("raw server text");
+  });
+
+  it("renders nothing for a session without control information", () => {
+    const { container } = render(<SessionControls session={{ id: "s1", provider: "claude-code" }} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("has both languages", () => {
+    for (const lng of ["en", "it"]) {
+      for (const key of ["controls.title", "controls.compact", "controls.effort", "controls.apply", "controls.done",
+        "controls.pcOnly", "controls.unsupported", "controls.busy", "errors.commandUserTyping", "errors.sessionBusy"]) {
+        expect(i18n.getFixedT(lng)(key)).not.toBe(key);
+      }
+    }
+  });
+});
