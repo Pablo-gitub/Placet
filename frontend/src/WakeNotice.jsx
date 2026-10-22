@@ -32,12 +32,23 @@ export default function WakeNotice({ session }) {
     }
   };
 
+  // The app's own log gave a reason for this attempt (only a closed code is ever shown); it informs,
+  // it changes nothing. Not for a link that never reached the app.
+  const cause = session.wake_cause === "warm_capacity_denied" && state !== "wake_failed"
+    ? <p className="composer-note" data-testid="wake-cause">{t("wake.capacityDenied")}</p> : null;
+
   if (state === "open_requested" || state === "waiting_for_session") {
-    return <p className="composer-note" role="status" data-testid="wake-notice">{t("wake.waiting")}</p>;
+    return (
+      <div role="status" data-testid="wake-notice">
+        <p className="composer-note">{t("wake.waiting")}</p>
+        {cause}
+      </div>
+    );
   }
   return (
     <div className="wake-notice" role="status" data-testid="wake-notice">
       <p>{t(state === "wake_failed" ? "wake.failed" : "wake.unconfirmed")}</p>
+      {cause}
       {session.wake_at && <small>{t("wake.lastAttempt", { when: timeAgo(session.wake_at) })}</small>}
       <button type="button" data-testid="wake-retry" disabled={pending} onClick={retry}>{t("wake.retry")}</button>
       {error && <p className="composer-note" role="alert" data-testid="wake-error">{t(error.key, error.params)}</p>}
