@@ -358,6 +358,8 @@
     "noProjectsForSession": "No projects for this session",
     "projectMentionLabel": "Projects for this session",
     "schedule": "Schedule",
+    "scheduleHint": "Date and time",
+    "placeholderShort": "Write… @ to mention",
     "clearSchedule": "Clear schedule"
   },
   "chat": {

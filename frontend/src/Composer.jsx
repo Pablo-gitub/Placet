@@ -50,8 +50,24 @@ function savedMode() {
   }
 }
 
+const NARROW_QUERY = "(max-width: 480px)";
+
+/** Whether the screen is a phone in portrait: the full placeholder would not fit one line. */
+function useNarrow() {
+  const [narrow, setNarrow] = useState(() => typeof window.matchMedia === "function" && window.matchMedia(NARROW_QUERY).matches);
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return undefined;
+    const query = window.matchMedia(NARROW_QUERY);
+    const onChange = () => setNarrow(query.matches);
+    query.addEventListener?.("change", onChange);
+    return () => query.removeEventListener?.("change", onChange);
+  }, []);
+  return narrow;
+}
+
 export default function Composer({ session, sessions = [], onSend, draft, draftKey, limitAt, onSelectProject }) {
   const { t } = useTranslation();
+  const narrowScreen = useNarrow();
   // Queue (end of the turn) or Now (inside the running turn): the
   // last choice is the default on this device (RF-35).
   const [mode, setModeState] = useState(savedMode);
@@ -70,6 +86,13 @@ export default function Composer({ session, sessions = [], onSend, draft, draftK
   const [saved] = useState(() => (draft || !draftKey ? null : loadDraft(draftKey)));
   const [text, setText] = useState(draft?.text || saved?.text || "");
   const input = useRef(null);
+  // Safari before 26 has no `field-sizing: content`: grow the box to its text by hand.
+  useEffect(() => {
+    const el = input.current;
+    if (!el || window.CSS?.supports?.("field-sizing", "content")) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
+  }, [text]);
   const fileInput = useRef(null);
   const [files, setFiles] = useState([]);
   const [fileError, setFileError] = useState("");
@@ -306,15 +329,24 @@ export default function Composer({ session, sessions = [], onSend, draft, draftK
           <Clock size={16} />
           <span>{t("composer.schedule")}</span>
         </label>
-        <input
-          id="composer-schedule-input"
-          type="datetime-local"
-          data-testid="composer-schedule-input"
-          aria-label={t("composer.schedule")}
-          value={scheduledTime}
-          disabled={closed || sending}
-          onChange={(e) => setScheduledTime(e.target.value)}
-        />
+        <span className="schedule-field">
+          <input
+            id="composer-schedule-input"
+            type="datetime-local"
+            className={scheduledTime ? undefined : "empty"}
+            data-testid="composer-schedule-input"
+            aria-label={t("composer.schedule")}
+            value={scheduledTime}
+            disabled={closed || sending}
+            onChange={(e) => setScheduledTime(e.target.value)}
+          />
+          {/* An empty datetime-local is a blank box on iOS: say what it is for. */}
+          {!scheduledTime && (
+            <span className="schedule-hint" data-testid="composer-schedule-hint" aria-hidden="true">
+              {t("composer.scheduleHint")}
+            </span>
+          )}
+        </span>
         {scheduledTime && (
           <button
             type="button"
@@ -341,7 +373,7 @@ export default function Composer({ session, sessions = [], onSend, draft, draftK
               : undefined
           }
           data-testid="composer-input"
-          placeholder={t(closed ? "composer.closedPlaceholder" : "composer.placeholder")}
+          placeholder={t(closed ? "composer.closedPlaceholder" : narrowScreen ? "composer.placeholderShort" : "composer.placeholder")}
           value={text}
           rows={1}
           disabled={closed || sending}

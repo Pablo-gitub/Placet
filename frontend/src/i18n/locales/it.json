@@ -358,6 +358,8 @@
     "noProjectsForSession": "Nessun progetto per questa sessione",
     "projectMentionLabel": "Progetti della sessione",
     "schedule": "Programma",
+    "scheduleHint": "Data e ora",
+    "placeholderShort": "Scrivi… @ per citare",
     "clearSchedule": "Rimuovi programmazione"
   },
   "chat": {
