@@ -35,6 +35,41 @@ remains solely responsible for delivery. Opening the link does not guarantee
 that the waiter starts: Placet waits for a heartbeat and then for the turn's
 real events. The link may bring a window to the front.
 
+## Episodes and states (October 22, 2026)
+
+The launcher's exit code 0 means the app accepted the link, nothing more: the chat
+shows, but the engine may not start, so no hook and no waiter, and the message
+stays pending. Retrying every five minutes forever (it happened 32 times in a
+day) only reopened the chat. The attempts are now budgeted per **wake episode**,
+kept in the backend per session (`sessions.wake_state`, `wake_attempts`,
+`wake_at`), so they survive a bridge restart, an extra message or a backend delay:
+
+- One automatic open per episode. A second only if the first certainly failed
+  before the link was handed to the app (no mapping, launcher not started, link
+  refused); two such failures end the episode as `wake_failed`. A launcher that
+  timed out may have handed the link over, so it counts as the open.
+- After an accepted open, a 60-second window waits for evidence: a `SessionStart`
+  event or a fresh waiter heartbeat for that session. None: `wake_unconfirmed`, and
+  no further automatic open until the user asks.
+- An episode ends when the session becomes reachable or its pending mail is gone;
+  the next message starts a fresh one.
+
+The states are kept apart and shown in the session view: `open_requested` (the
+launcher accepted the link, for a few seconds), `waiting_for_session` (the window
+runs), `wake_unconfirmed` (no evidence), `wake_failed` (the link never reached the
+app) and `reachable`. rc=0 is never called "started"; the log keeps "Requested
+... opening". The bridge reports each outcome
+(`POST /api/bridge/sessions/{id}/wake`, from its loop: waking itself never touches
+the mail or the store).
+
+For `wake_unconfirmed` and `wake_failed` the session view shows one notice (opening
+requested but the session did not start listening; the message is still in
+Placet; write in the chat on the PC or retry) with the time of the last attempt and
+**Riprova apertura** (`POST /api/sessions/{id}/wake`, human only): a new episode, one
+automatic open that ignores the bridge's cooldown once. One needs-you push per
+episode, never repeated, and not sent (nor consumed) while that kind is off. The
+message's delivery is never marked failed: it has not happened.
+
 Every attempt, even a failed one, is spaced at least five minutes apart per
 session. The private record in `~/.cache/placet/claude-wake/` uses flock and is
 written before opening, so the limit survives a bridge restart. Message
