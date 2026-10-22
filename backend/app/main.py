@@ -618,31 +618,40 @@ def create_app(
 
     def bind_unaddressed_session(req: RequestCreate, sender_session: Optional[str]) -> RequestCreate:
         """
-        A request for an agent, without a session or node, goes to the one
-        reachable session of that agent in the sender's folder (any, when the
-        sender is unknown). Several, or none in that folder while others exist: refused with the candidates,
-        never the first idle session, which may be stale or foreign.
+        A request for an agent, without a session or node, is bound at creation
+        to a session of that agent in the sender's folder (any folder, when the
+        sender is unknown), never left for the first idle session, which may be
+        stale or foreign: the one reachable session there; else the one known
+        session there that cannot be woken now (suspended, waiter gone), which
+        gets the request when it comes back and nobody else can claim it.
+        Several, or none there while other sessions exist: refused with the
+        sessions. An agent with no session at all, or only tmux-driven ones the
+        bridge reaches, keeps the old behaviour.
         """
         sender = db.get_session(sender_session) if sender_session else None
+        folder = sender.cwd if sender is not None and sender.cwd else None
         # The sender is never a candidate: a session cannot receive its own request.
-        reachable = [s for s in db.list_sessions(agent_id=req.recipient_id)
-                     if s.reachable and s.id != sender_session]
-        candidates = [s for s in reachable if s.cwd == sender.cwd] if sender is not None and sender.cwd else reachable
-        if len(candidates) == 1:
-            return req.model_copy(update={"recipient_session_id": candidates[0].id})
-        if not reachable:
-            # Nobody to pick among (no session yet, or a tmux-driven agent):
-            # the request waits for the agent as before.
-            return req
+        others = [s for s in db.list_sessions(agent_id=req.recipient_id)
+                  if s.id != sender_session and not s.excluded]
+        reachable = [s for s in others if s.reachable]
+        waiting = [s for s in others if not s.reachable and not s.tmux_session]
+        here = lambda pool: [s for s in pool if folder is None or s.cwd == folder]  # noqa: E731
         brief = lambda s: {"id": s.id, "title": s.title, "cwd": s.cwd}  # noqa: E731
-        where = f" in {sender.cwd}" if sender is not None and sender.cwd else ""
+        for pool in (here(reachable), here(waiting) if not here(reachable) else []):
+            if len(pool) == 1:
+                return req.model_copy(update={"recipient_session_id": pool[0].id})
+        if not reachable and not waiting:
+            return req
+        candidates = here(reachable) or here(waiting)
+        where = f" in {folder}" if folder else ""
+        ambiguous = bool(reachable)
         raise ProductError(
-            409, "request.target_session_ambiguous",
-            (f"{len(candidates)} reachable {req.recipient_id} sessions{where}: " if candidates
+            409, "request.target_session_ambiguous" if ambiguous or candidates else "request.target_session_unreachable",
+            (f"{len(candidates)} {req.recipient_id} sessions{where}: " if candidates
              else f"No reachable {req.recipient_id} session{where}. ")
             + "Pass target_session (an ID from placet_list_agents), or ask the human which one. Nothing was sent.",
             {"candidates": [brief(s) for s in candidates],
-             "other_sessions": [brief(s) for s in reachable if s not in candidates]},
+             "other_sessions": [brief(s) for s in reachable + waiting if s not in candidates]},
         )
 
     def check_target_session(session_id: str, agent_id: str) -> None:

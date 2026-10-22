@@ -161,3 +161,68 @@ async def test_only_the_sender_means_no_reachable_session(env):
     resp = await send_as_claude(app, sender_session_id="me")
     assert resp.status_code == 201, resp.text
     assert resp.json()["recipient_session_id"] is None  # unbound, as before
+
+
+@pytest.mark.asyncio
+async def test_a_known_unreachable_session_of_the_folder_gets_the_request_when_it_returns(env):
+    app, db = env
+    await start(app, "codex", "mine", "codex", "/home/p/placet")
+    db.suspend_session("mine")  # known, but cannot be woken now
+    await start(app, "claude", "cl", "claude-code", "/home/p/placet")
+    resp = await send(app, sender_session_id="cl")
+    assert resp.status_code == 201 and resp.json()["recipient_session_id"] == "mine"
+    # A session of another folder waking up later cannot claim it.
+    await start(app, "codex", "foreign", "codex", "/home/p/lab")
+    async with agent_client(app, "tok-codex") as codex:
+        assert (await codex.get("/api/sessions/foreign/inbox")).status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_unreachable_sessions_only_elsewhere_refuse_with_the_known_sessions(env):
+    app, db = env
+    await start(app, "codex", "lab", "codex", "/home/p/lab")
+    db.suspend_session("lab")
+    await start(app, "claude", "cl", "claude-code", "/home/p/placet")
+    resp = await send(app, sender_session_id="cl")
+    assert resp.status_code == 409
+    body = resp.json()
+    assert body["code"] == "request.target_session_unreachable"
+    assert body["params"]["candidates"] == [] and [c["id"] for c in body["params"]["other_sessions"]] == ["lab"]
+    assert "target_session" in body["detail"]
+    assert db.list_requests() == []
+
+
+@pytest.mark.asyncio
+async def test_the_reachable_session_is_preferred_and_several_waiting_ones_are_ambiguous(env):
+    app, db = env
+    await start(app, "codex", "asleep", "codex", "/home/p/placet")
+    db.suspend_session("asleep")
+    await start(app, "codex", "awake", "codex", "/home/p/placet")
+    await start(app, "claude", "cl", "claude-code", "/home/p/placet")
+    assert (await send(app, sender_session_id="cl")).json()["recipient_session_id"] == "awake"
+    db.suspend_session("awake")
+    resp = await send(app, sender_session_id="cl")
+    assert resp.status_code == 409 and resp.json()["code"] == "request.target_session_ambiguous"
+    assert sorted(c["id"] for c in resp.json()["params"]["candidates"]) == ["asleep", "awake"]
+
+
+@pytest.mark.asyncio
+async def test_an_agent_with_no_sessions_or_only_tmux_driven_ones_keeps_the_old_behaviour(env):
+    app, db = env
+    assert (await send(app)).json()["recipient_session_id"] is None  # no session at all
+    await start(app, "claude", "cl", "claude-code", "/home/p/placet")
+    body = {"event": "start", "provider": "claude-code", "cwd": "/home/p/x", "tmux_session": "agent-claude"}
+    async with agent_client(app, "tok-claude") as claude:
+        await claude.post("/api/sessions/tm/events", json=body)
+        resp = await claude.post("/api/requests", json={"recipient_id": "claude", "prompt": "x", "sender_session_id": "cl"})
+    assert resp.status_code == 201 and resp.json()["recipient_session_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_ended_sessions_are_not_known_sessions(env):
+    app, db = env
+    await start(app, "codex", "gone", "codex", "/home/p/placet")
+    db.end_session("gone")
+    await start(app, "claude", "cl", "claude-code", "/home/p/placet")
+    resp = await send(app, sender_session_id="cl")
+    assert resp.status_code == 201 and resp.json()["recipient_session_id"] is None
