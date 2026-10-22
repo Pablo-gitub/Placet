@@ -54,6 +54,7 @@ from backend.app.models import (
     RelationModel,
     RelationTypeModel,
     SessionModel,
+    AGENT_PROVIDERS,
     BRIDGE_PROVIDERS,
     SUSPENDING_PROVIDERS,
     STEER_PROVIDERS,
@@ -1148,10 +1149,7 @@ def create_app(
                 target_sess = db.get_session(node.session_id) if node and node.session_id else None
             rec_provider = target_sess.provider if target_sess else None
             if rec_provider is None:
-                if req.recipient_id in ("claude", "claude-code"):
-                    rec_provider = "claude-code"
-                elif req.recipient_id in ("codex", "gemini"):
-                    rec_provider = req.recipient_id
+                rec_provider = AGENT_PROVIDERS.get(req.recipient_id, req.recipient_id)
 
             cfg = usage_guard()
             if cfg.get("deliver_at_reset", False) and rec_provider:

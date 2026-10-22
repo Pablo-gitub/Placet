@@ -648,6 +648,35 @@ async def test_decide_request_deliver_at_reset(rel_app_and_db):
 
 
 @pytest.mark.asyncio
+async def test_decide_request_deliver_at_reset_gemini_fallback(rel_app_and_db):
+    """When recipient_id is 'gemini' and no session exists, provider maps to 'antigravity'."""
+    app, db = rel_app_and_db
+    async with human_client(app) as human:
+        await human.put("/api/settings/usage-guard", json={"enabled": True, "five_hour": 90, "seven_day": 95})
+        await human.put("/api/settings/deliver-at-reset", json={"enabled": True})
+
+    soon = datetime.now(timezone.utc) + timedelta(hours=2)
+    set_provider_usage(db, "antigravity", five=92, resets_at=soon.isoformat())
+
+    req = db.create_request(RequestCreate(
+        sender_id="claude",
+        recipient_id="gemini",
+        prompt="Check something",
+        question_type=QuestionType.PROMPT_REVIEW,
+    ))
+    assert req.status == RequestStatus.PENDING
+
+    async with human_client(app) as human:
+        resp = await human.post(f"/api/requests/{req.id}/decision", json={"status": "APPROVED"})
+        assert resp.status_code == 200
+        decided = resp.json()
+        assert decided["status"] == "APPROVED"
+        assert decided["scheduled_at"] is not None
+        sched = datetime.fromisoformat(decided["scheduled_at"].replace("Z", "+00:00"))
+        assert abs((sched - soon).total_seconds()) < 5
+
+
+@pytest.mark.asyncio
 async def test_agent_cannot_create_scheduled_request(rel_app_and_db):
     """Agents cannot create scheduled requests via API (422 schedule.not_allowed)."""
     app, db = rel_app_and_db

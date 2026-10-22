@@ -271,6 +271,14 @@ BRIDGE_PROVIDERS = ("codex", "antigravity")
 # SessionEnd only means the app unloaded the conversation (idle, restart,
 # update): it can be resumed, so the session is suspended, not ended.
 SUSPENDING_PROVIDERS = ("codex",)
+# Mapping from known agent names to their execution provider.
+AGENT_PROVIDERS = {
+    "claude": "claude-code",
+    "claude-code": "claude-code",
+    "codex": "codex",
+    "gemini": "antigravity",
+    "antigravity": "antigravity",
+}
 
 
 class SessionMention(BaseModel):
