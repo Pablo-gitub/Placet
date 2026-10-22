@@ -58,6 +58,10 @@ HOLD_ALERT_SECONDS = 10 * 60.0
 # A turn paused (RFC-16) and not resumed for this long is flagged like an
 # unseen start: the queue stays held, only the user moves it on.
 PAUSE_UNRESUMED_SECONDS = 30 * 60.0
+# Claude Desktop wake-up: the link was just handed to the app for this long ("open_requested"),
+# then the session has until the end of the window to show evidence it started listening.
+WAKE_ACK_SECONDS = 5.0
+WAKE_WINDOW_SECONDS = 60.0
 # An agent that declared itself busy is trusted for at most this long (a
 # crashed CLI never sends "idle").
 AGENT_BUSY_TTL_SECONDS = 30 * 60
@@ -404,6 +408,11 @@ class SessionModel(BaseModel):
     mcp_state: Optional[str] = None
     # The last time this session used a Placet MCP tool.
     mcp_seen_at: Optional[datetime] = None
+    # Claude Desktop wake-up (one automatic open per episode): the stored state, the time of
+    # the last attempt and how many attempts the episode used.
+    wake_state: Optional[str] = None
+    wake_at: Optional[datetime] = None
+    wake_attempts: int = 0
     # When the hook last reported the configuration (each start): a use before it does not
     # prove the configuration of this start.
     mcp_checked_at: Optional[datetime] = None

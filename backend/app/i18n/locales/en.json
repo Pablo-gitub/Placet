@@ -61,5 +61,9 @@
   "notify.app_review_body": "Approve the plan in the Antigravity app on the PC: the work resumes from there.",
   "notify.queue_held_title": "{label}: {count} messages held, confirm if it finished",
   "notify.queue_held_title_one": "{label}: 1 message held, confirm if it finished",
-  "notify.queue_held_body": "The session's last turn end was never seen: open it and confirm."
+  "notify.queue_held_body": "The session's last turn end was never seen: open it and confirm.",
+  "notify.wake_unconfirmed_title": "{label}: the session did not start",
+  "notify.wake_unconfirmed_body": "Opening was requested, but the session did not start listening. The message is still in Placet.",
+  "notify.wake_failed_title": "{label}: could not open",
+  "notify.wake_failed_body": "Placet could not ask Claude Desktop to open the session. The message is still in Placet."
 }

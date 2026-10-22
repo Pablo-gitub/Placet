@@ -2174,3 +2174,8 @@ body.chat-open { overflow: hidden; }
 .session-controls { position: relative; }
 .session-controls-panel { position: absolute; right: 0; top: 100%; z-index: 20; display: flex; flex-direction: column; gap: 0.5rem; min-width: 14rem; padding: 0.6rem; background: var(--bg-card, var(--bg-secondary)); border: 1px solid var(--border-color); border-radius: 8px; }
 .session-controls-effort { display: flex; gap: 0.4rem; }
+
+/* Claude Desktop wake-up notice */
+.wake-notice { display: flex; flex-direction: column; gap: 0.35rem; margin: 0.5rem 0.75rem; padding: 0.6rem 0.75rem; border: 1px solid var(--warning); border-radius: 8px; font-size: 0.85rem; }
+.wake-notice p { margin: 0; }
+.wake-notice button { align-self: flex-start; }

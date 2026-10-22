@@ -30,6 +30,7 @@ import { actionLabel, groupEntries, timeOf } from "./chatEntries";
 import { providerClass, providerOf, sessionName, sessionPlace, sessionStatus } from "./sessionInfo";
 import { useTranscript } from "./useTranscript";
 import McpWarning from "./McpWarning";
+import WakeNotice from "./WakeNotice";
 import { holdsQueueUnseen, isUncertain } from "./aspects";
 import NodeControl from "./NodeControl";
 import SessionControls from "./SessionControls";
@@ -433,6 +434,7 @@ export default function SessionView({
         )}
       </div>
       <McpWarning session={session} />
+      <WakeNotice session={session} />
       {activeProjectId && (
         <div className="project-context-bar">
           <span
