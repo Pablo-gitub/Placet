@@ -702,4 +702,88 @@ async def test_agent_cannot_create_scheduled_request(rel_app_and_db):
         assert ok_resp.status_code == 201
 
 
+def test_claim_injection_rejects_future_scheduled_at(db):
+    """claim_injection must not claim requests scheduled in the future."""
+    req = db.create_request(RequestCreate(
+        sender_id="claude", recipient_id="gemini", prompt="Future injection",
+        scheduled_at=datetime.now(timezone.utc) + timedelta(hours=2),
+    ))
+    db.update_request_decision(req.id, RequestStatus.APPROVED)
+    assert db.claim_injection(req.id) is None
+    # Still APPROVED, not DELIVERING
+    assert db.get_request(req.id).status == RequestStatus.APPROVED
+
+
+def test_schedule_after_work_fetch_prevents_claim(db):
+    """Scheduling between bridge fetch and claim prevents claim_injection."""
+    req = db.create_request(RequestCreate(sender_id="claude", recipient_id="gemini", prompt="Race test"))
+    db.update_request_decision(req.id, RequestStatus.APPROVED)
+    ready = db.injections_ready()
+    assert any(r.id == req.id for r in ready)
+    # Bridge fetched it, but user schedules it before claim
+    future = datetime.now(timezone.utc) + timedelta(hours=3)
+    db.schedule_request(req.id, future, actor="human")
+    assert db.claim_injection(req.id) is None
+    assert db.get_request(req.id).status == RequestStatus.APPROVED
+
+
+def test_steer_candidates_and_claim_reject_future_scheduled_at(db):
+    """steer_candidates and claim_steer skip future scheduled requests."""
+    session = _create_idle_session(db, agent_id="gemini", provider="antigravity", session_id="sess-steer-fut")
+    with db._get_connection() as c:
+        c.execute("UPDATE sessions SET state = 'busy' WHERE id = 'sess-steer-fut'")
+    future = datetime.now(timezone.utc) + timedelta(hours=1)
+    req = db.create_request(RequestCreate(
+        sender_id="human", recipient_id="gemini", recipient_session_id=session.id,
+        prompt="Steer prompt", scheduled_at=future,
+    ))
+    db.update_request_decision(req.id, RequestStatus.APPROVED, delivery_mode="now")
+
+    assert not any(r.id == req.id for r, _ in db.steer_candidates())
+    assert db.claim_steer(req.id, session.id, "bridge") is None
+
+
+@pytest.mark.asyncio
+async def test_write_to_session_rejects_mode_now_with_scheduled_at(rel_app_and_db):
+    """write_to_session rejects mode='now' with scheduled_at with 422 schedule.steer_conflict."""
+    app, db = rel_app_and_db
+    session = _create_idle_session(db, agent_id="claude", provider="claude-code", session_id="sess-steer-rej")
+    future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    async with human_client(app) as human:
+        resp = await human.post(
+            f"/api/sessions/{session.id}/messages",
+            json={"text": "Steer me", "mode": "now", "scheduled_at": future},
+        )
+        assert resp.status_code == 422
+        assert resp.json()["code"] == "schedule.steer_conflict"
+
+
+def test_future_tmux_return_ignored_by_results_and_mark_delivered(db):
+    """list_undelivered_results and mark_delivered ignore future scheduled outcomes."""
+    req = db.create_request(RequestCreate(sender_id="claude", recipient_id="codex", prompt="Return test"))
+    db.update_request_decision(req.id, RequestStatus.APPROVED, allow_auto_return=True)
+    db.claim_injection(req.id)
+    future = datetime.now(timezone.utc) + timedelta(hours=4)
+    db.record_reply(req.id, "codex", "Done")
+    # Schedule outcome at future
+    db.schedule_request(req.id, future, actor="human")
+
+    now = datetime.now(timezone.utc)
+    results = db.list_undelivered_results(settled_before=now + timedelta(minutes=1), settled_after=now - timedelta(hours=6))
+    assert not any(r.id == req.id for r in results)
+    assert db.mark_delivered(req.id) is False
+    assert db.get_request(req.id).delivered_at is None
+
+
+def test_schedule_request_fails_after_claim(db):
+    """schedule_request returns None once the request has been claimed."""
+    req = db.create_request(RequestCreate(sender_id="claude", recipient_id="gemini", prompt="Claim test"))
+    db.update_request_decision(req.id, RequestStatus.APPROVED)
+    claimed = db.claim_injection(req.id)
+    assert claimed is not None
+    # Now in DELIVERING state
+    future = datetime.now(timezone.utc) + timedelta(hours=1)
+    assert db.schedule_request(req.id, future, actor="human") is None
+
+
 

@@ -1716,6 +1716,8 @@ def create_app(
             if block:
                 project_context = block
         if body.scheduled_at is not None:
+            if body.mode == "now":
+                raise ProductError(422, "schedule.steer_conflict", "A message in 'now' mode cannot be scheduled.")
             validate_scheduled_time(body.scheduled_at)
         cfg = usage_guard()
         rec_provider = session.provider

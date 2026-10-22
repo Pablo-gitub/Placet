@@ -1051,10 +1051,12 @@ class Database:
         now: str,
         extra_sql: str = "",
         extra_params: Sequence[Any] = (),
+        extra_where: str = "",
+        where_params: Sequence[Any] = (),
     ) -> bool:
         cursor.execute(
-            f"UPDATE requests SET status = ?, updated_at = ?{extra_sql} WHERE id = ? AND status = ?",
-            [target.value, now, *extra_params, request_id, source.value],
+            f"UPDATE requests SET status = ?, updated_at = ?{extra_sql} WHERE id = ? AND status = ?{extra_where}",
+            [target.value, now, *extra_params, request_id, source.value, *where_params],
         )
         return cursor.rowcount > 0
 
@@ -1069,6 +1071,8 @@ class Database:
                 ", delivering_since = ?, delivery_attempts = delivery_attempts + 1,"
                 " delivery_state = 'in_progress', delivery_channel = 'tmux', attempt_id = ?",
                 [now, _new_attempt()],
+                extra_where=" AND (scheduled_at IS NULL OR datetime(scheduled_at) <= datetime(?))",
+                where_params=[now],
             ):
                 return None
             cursor.execute("SELECT delivery_attempts FROM requests WHERE id = ?", (request_id,))
@@ -1381,42 +1385,42 @@ class Database:
         """
         Schedules or clears the scheduled delivery time of a request (RF-65).
         Allowed only while the request is not yet delivered:
-        status in (PENDING, APPROVED), delivered_at IS NULL, and delivery_state == 'waiting'.
+        status in (PENDING, APPROVED, COMPLETED), delivered_at IS NULL,
+        and (delivery_state IS NULL OR delivery_state = 'waiting' OR status = 'COMPLETED').
         """
         now = datetime.now(timezone.utc).isoformat()
+        scheduled_at_iso = _normalize_utc_iso(scheduled_at) if scheduled_at is not None else None
+        valid_statuses = (RequestStatus.PENDING.value, RequestStatus.APPROVED.value, RequestStatus.COMPLETED.value)
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT status, delivered_at, delivery_state FROM requests WHERE id = ?",
-                (request_id,),
+                f"""
+                UPDATE requests
+                SET scheduled_at = ?, updated_at = ?
+                WHERE id = ?
+                  AND delivered_at IS NULL
+                  AND status IN ({','.join('?' for _ in valid_statuses)})
+                  AND (delivery_state IS NULL OR delivery_state = 'waiting' OR status = ?)
+                """,
+                (
+                    scheduled_at_iso,
+                    now,
+                    request_id,
+                    *valid_statuses,
+                    RequestStatus.COMPLETED.value,
+                ),
             )
-            row = cursor.fetchone()
-            if not row:
+            if cursor.rowcount == 0:
                 return None
-            if (
-                row["status"] not in (RequestStatus.PENDING.value, RequestStatus.APPROVED.value, RequestStatus.COMPLETED.value)
-                or row["delivered_at"] is not None
-                or (row["delivery_state"] and row["delivery_state"] != "waiting" and row["status"] != RequestStatus.COMPLETED.value)
-            ):
-                return None
-
             if scheduled_at is None:
-                cursor.execute(
-                    "UPDATE requests SET scheduled_at = NULL, updated_at = ? WHERE id = ?",
-                    (now, request_id),
-                )
                 self._log(cursor, request_id, actor, "schedule_cleared", at=now)
             else:
-                scheduled_at_iso = _normalize_utc_iso(scheduled_at)
-                cursor.execute(
-                    "UPDATE requests SET scheduled_at = ?, updated_at = ? WHERE id = ?",
-                    (scheduled_at_iso, now, request_id),
-                )
                 self._log(cursor, request_id, actor, "scheduled", {"scheduled_at": scheduled_at_iso}, at=now)
         return self.get_request(request_id)
 
     def steer_candidates(self) -> List[Tuple[RequestModel, SessionModel]]:
         """'Now' messages for sessions in the middle of a turn that can take them."""
+        now = datetime.now(timezone.utc).isoformat()
         placeholders = ", ".join("?" for _ in STEER_PROVIDERS)
         with self._get_connection() as conn:
             rows = conn.execute(
@@ -1425,9 +1429,10 @@ class Database:
                 JOIN sessions s ON s.id = r.recipient_session_id
                 WHERE r.status = ? AND r.delivery_mode = 'now' AND s.state = 'busy'
                   AND s.ended_at IS NULL AND s.excluded_at IS NULL AND s.provider IN ({placeholders})
+                  AND (r.scheduled_at IS NULL OR datetime(r.scheduled_at) <= datetime(?))
                 ORDER BY r.id
                 """,
-                (RequestStatus.APPROVED.value, *STEER_PROVIDERS),
+                (RequestStatus.APPROVED.value, *STEER_PROVIDERS, now),
             ).fetchall()
         out = []
         for row in rows:
@@ -1446,6 +1451,8 @@ class Database:
                 ", delivering_since = ?, delivery_attempts = delivery_attempts + 1,"
                 " delivery_state = 'in_progress', delivery_channel = 'steer', attempt_id = ?",
                 [now, _new_attempt()],
+                extra_where=" AND (scheduled_at IS NULL OR datetime(scheduled_at) <= datetime(?))",
+                where_params=[now],
             ):
                 return None
             self._log(cursor, request_id, actor, "injection_claimed",
@@ -1691,8 +1698,8 @@ class Database:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "UPDATE requests SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL AND (sender_id = 'human' OR recipient_id = 'human' OR status != 'COMPLETED' OR allow_auto_return = 1 OR return_decision IN ('approved', 'forwarded'))",
-                (now, request_id),
+                "UPDATE requests SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL AND (sender_id = 'human' OR recipient_id = 'human' OR status != 'COMPLETED' OR allow_auto_return = 1 OR return_decision IN ('approved', 'forwarded')) AND (scheduled_at IS NULL OR datetime(scheduled_at) <= datetime(?))",
+                (now, request_id, now),
             )
             if cursor.rowcount == 0:
                 return False
@@ -1753,6 +1760,7 @@ class Database:
         Settled requests whose outcome has not reached the sender yet, oldest
         first, whose last change falls in (settled_after, settled_before].
         """
+        now = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -1762,6 +1770,7 @@ class Database:
                   -- the user's own messages: the outcome is in the conversation
                   AND sender_id != 'human'
                   AND updated_at IS NOT NULL AND updated_at <= ? AND updated_at > ?
+                  AND (scheduled_at IS NULL OR datetime(scheduled_at) <= datetime(?))
                 ORDER BY updated_at ASC
                 LIMIT ?
                 """,
@@ -1769,6 +1778,7 @@ class Database:
                     RequestStatus.PENDING.value,
                     settled_before.isoformat(),
                     settled_after.isoformat(),
+                    now,
                     limit,
                 ),
             )
@@ -3056,6 +3066,8 @@ class Database:
                     " recipient_session_id = ?, delivery_state = 'in_progress', delivery_channel = ?,"
                     " attempt_id = ?",
                     [now, session.id, "bridge" if via == "bridge" else "waiter", _new_attempt()],
+                    extra_where=" AND (scheduled_at IS NULL OR datetime(scheduled_at) <= datetime(?))",
+                    where_params=[now],
                 ):
                     continue
                 cursor.execute("SELECT delivery_attempts FROM requests WHERE id = ?", (req_id,))
