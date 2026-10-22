@@ -167,6 +167,20 @@ class Database:
             conn.execute("INSERT INTO app_settings (key, value) VALUES (?, ?)"
                          " ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
 
+    def usage_guard_config(self) -> Dict[str, Any]:
+        """Current usage guard settings from the database (or defaults)."""
+        def percent(key: str, default: int) -> int:
+            try:
+                return int(self.get_setting(key) or default)
+            except ValueError:
+                return default
+        return {
+            "enabled": self.get_setting("usage_guard_enabled") == "true",
+            "five_hour": percent("usage_guard_5h", 90),
+            "seven_day": percent("usage_guard_7d", 95),
+            "deliver_at_reset": self.get_setting("deliver_at_reset") == "true",
+        }
+
     def add_push_subscription(self, endpoint: str, p256dh: str, auth: str, user_agent: Optional[str]) -> None:
         with self._get_connection() as conn:
             conn.execute(
@@ -1004,18 +1018,10 @@ class Database:
             if req and req.sender_session_id and req.sender_id != "human":
                 sender_session = self.get_session(req.sender_session_id)
                 sender_provider = sender_session.provider if sender_session else None
-                cfg_enabled = self.get_setting("usage_guard_enabled") == "true"
-                deliver_at_reset = self.get_setting("deliver_at_reset") == "true"
-                def percent(k: str, default: int) -> int:
-                    try:
-                        return int(self.get_setting(k) or default)
-                    except ValueError:
-                        return default
-                five_hour = percent("usage_guard_5h", 90)
-                seven_day = percent("usage_guard_7d", 95)
-                if self.is_provider_over_limit(sender_provider, five_hour, seven_day, check_near_limit=cfg_enabled):
-                    if deliver_at_reset:
-                        reset_time = self.provider_reset_time(sender_provider, five_hour, seven_day, check_near_limit=cfg_enabled)
+                cfg = self.usage_guard_config()
+                if self.is_provider_over_limit(sender_provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"]):
+                    if cfg["deliver_at_reset"]:
+                        reset_time = self.provider_reset_time(sender_provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"])
                         if reset_time is not None:
                             scheduled_at_iso = _normalize_utc_iso(reset_time)
                             cursor.execute("UPDATE requests SET scheduled_at = ?, updated_at = ? WHERE id = ?",

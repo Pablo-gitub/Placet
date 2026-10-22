@@ -7,7 +7,7 @@ import contextlib
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import List, Literal, Optional, Dict, Set
+from typing import Any, List, Literal, Optional, Dict, Set
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, status, Request, Depends
 from fastapi import Path as FastAPIPath
 from fastapi.middleware.cors import CORSMiddleware
@@ -696,18 +696,8 @@ def create_app(
         response.headers["Cache-Control"] = "no-store"
         return db.get_notification_preferences()
 
-    def usage_guard() -> Dict[str, object]:
-        def percent(key: str, default: int) -> int:
-            try:
-                return int(db.get_setting(key) or default)
-            except ValueError:
-                return default
-        return {
-            "enabled": db.get_setting("usage_guard_enabled") == "true",
-            "five_hour": percent("usage_guard_5h", 90),
-            "seven_day": percent("usage_guard_7d", 95),
-            "deliver_at_reset": db.get_setting("deliver_at_reset") == "true",
-        }
+    def usage_guard() -> Dict[str, Any]:
+        return db.usage_guard_config()
 
     def usage_guarded() -> Set[str]:
         """The providers whose automatic relations are reviewed now, if the guard is on."""
