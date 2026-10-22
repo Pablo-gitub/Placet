@@ -460,15 +460,35 @@ class BridgeDaemon:
                 capacity = self.engine_counter.snapshot()
             except Exception:
                 capacity = None
-        if states is None and capacity is None:
+        loaded = self._loaded_session_ids()
+        if states is None and capacity is None and loaded is None:
             return
         states = states or {}
         archived = sorted(sid for sid, flag in states.items() if flag is True)
         not_archived = sorted(sid for sid, flag in states.items() if flag is False)
         try:
-            self.store.report_desktop_state(archived=archived, not_archived=not_archived, capacity=capacity)
+            self.store.report_desktop_state(archived=archived, not_archived=not_archived, capacity=capacity,
+                                            loaded=loaded)
         except Exception as exc:
             logger.warning('Could not report the Claude Desktop state (%s).', type(exc).__name__)
+
+    def _loaded_session_ids(self) -> Optional[List[str]]:
+        """
+        The Placet sessions the app holds loaded, or None for no claim: /proc cannot tell, an engine has no
+        valid host id, or a host id has no readable record. Nothing is guessed, so nothing gets suspended.
+        """
+        if self.engine_counter is None:
+            return None
+        try:
+            loaded = self.engine_counter.loaded()
+            mapping = self.claude_waker.local_to_cli()
+            if not isinstance(loaded, dict) or not isinstance(mapping, dict) or loaded.get('unknown'):
+                return None
+            if any(host not in mapping for host in loaded['ids']):
+                return None
+            return sorted({mapping[host] for host in loaded['ids']})
+        except Exception:
+            return None
 
     def diagnose_wakes(self) -> None:
         """

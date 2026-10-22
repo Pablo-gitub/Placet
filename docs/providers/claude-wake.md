@@ -105,6 +105,25 @@ idle state, and the session view and the wake notice say to restore it in the ap
 waiting. An archived session is never listed for a wake-up (`resolve()` refuses it as well) and "Riprova
 apertura" is refused for it; restoring it in the app clears the flag by itself.
 
+### Loaded conversations and idle sessions the app dropped
+
+An idle Claude Desktop session can lose its engine without a `SessionEnd` (the app unloads it), and Placet kept
+showing it as waiting. The bridge now also reports which Placet sessions the app really holds loaded:
+
+- Each engine counted above carries `CLAUDE_CODE_HOST_SESSION_ID=local_<uuid>` in its environment.
+  `EngineCounter.loaded()` keeps **only** that value, and only if it matches `local_<36 hex/dash>`; the rest of the
+  environment (it also holds an OAuth token) is never returned, logged or stored. Several engines with the same
+  host id (a temporary query next to the loaded one) collapse into one, and the 10 s age filter still applies.
+- `ClaudeDesktopWake.local_to_cli()` maps the host id to the Placet session id (`cliSessionId`) through the same
+  hardened record reader as `archived_states()`.
+- The list goes out with the existing `POST /api/bridge/desktop-state` as `loaded`. If `/proc` cannot tell, an
+  engine has no valid host id, or a host id has no readable record, the field is left out: no claim, nothing is
+  suspended on a guess.
+- The backend suspends a Claude Desktop session that is idle, has no live waiter, is not archived or ended and is
+  missing from two consecutive reports (`suspended_at`, like a `SessionEnd`: it stays listed and its messages
+  wait). A report that finds it loaded resets the count and undoes a suspension made this way (not one made by
+  the app's own `SessionEnd`); a `start` or `prompt` hook event resets both as well.
+
 ### Preventive capacity indicator
 
 The cap is not a setting Placet can read, but the numbers behind it can be counted (Linux only):
