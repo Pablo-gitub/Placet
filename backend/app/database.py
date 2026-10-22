@@ -1824,19 +1824,20 @@ class Database:
         first, whose last change falls in (settled_after, settled_before].
         """
         now = datetime.now(timezone.utc).isoformat()
+        later_ts = "CASE WHEN scheduled_at IS NOT NULL AND datetime(scheduled_at) > datetime(updated_at) THEN scheduled_at ELSE updated_at END"
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                """
+                f"""
                 SELECT id FROM requests
                 WHERE delivered_at IS NULL AND status != ? AND (sender_id = 'human' OR recipient_id = 'human' OR status != 'COMPLETED' OR allow_auto_return = 1 OR return_decision IN ('approved', 'forwarded'))
                   -- the user's own messages: the outcome is in the conversation
                   AND sender_id != 'human'
-                  AND coalesce(scheduled_at, updated_at) IS NOT NULL
-                  AND datetime(coalesce(scheduled_at, updated_at)) <= datetime(?)
-                  AND datetime(coalesce(scheduled_at, updated_at)) > datetime(?)
+                  AND ({later_ts}) IS NOT NULL
+                  AND datetime({later_ts}) <= datetime(?)
+                  AND datetime({later_ts}) > datetime(?)
                   AND (scheduled_at IS NULL OR datetime(scheduled_at) <= datetime(?))
-                ORDER BY datetime(coalesce(scheduled_at, updated_at)) ASC
+                ORDER BY datetime({later_ts}) ASC
                 LIMIT ?
                 """,
                 (

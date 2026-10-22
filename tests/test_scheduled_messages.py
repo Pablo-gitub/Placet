@@ -837,6 +837,41 @@ def test_list_undelivered_results_uses_coalesce_scheduled_at(db):
     assert any(r.id == req.id for r in results)
 
 
+def test_list_undelivered_results_uses_later_of_scheduled_at_and_updated_at(db):
+    """A request scheduled long ago (7h ago) but completed 1m ago must be returned within the 6h window."""
+    req = db.create_request(RequestCreate(sender_id="claude", recipient_id="codex", prompt="Prompt"))
+    db.update_request_decision(req.id, RequestStatus.APPROVED, allow_auto_return=True)
+    db.claim_injection(req.id)
+    db.record_reply(req.id, "codex", "Completed recently")
+
+    now = datetime.now(timezone.utc)
+    seven_hours_ago = (now - timedelta(hours=7)).isoformat()
+    one_min_ago = (now - timedelta(minutes=1)).isoformat()
+    with db._get_connection() as c:
+        c.execute("UPDATE requests SET scheduled_at = ?, updated_at = ? WHERE id = ?",
+                  (seven_hours_ago, one_min_ago, req.id))
+
+    # 6 hour window ending at now
+    results = db.list_undelivered_results(
+        settled_before=now,
+        settled_after=now - timedelta(hours=6),
+    )
+    assert any(r.id == req.id for r in results)
+
+    # And a request scheduled 30s ago but completed 2s ago must NOT be returned if grace cutoff is 10s ago
+    two_secs_ago = (now - timedelta(seconds=2)).isoformat()
+    thirty_secs_ago = (now - timedelta(seconds=30)).isoformat()
+    with db._get_connection() as c:
+        c.execute("UPDATE requests SET scheduled_at = ?, updated_at = ? WHERE id = ?",
+                  (thirty_secs_ago, two_secs_ago, req.id))
+
+    results_grace = db.list_undelivered_results(
+        settled_before=now - timedelta(seconds=10),
+        settled_after=now - timedelta(hours=6),
+    )
+    assert not any(r.id == req.id for r in results_grace)
+
+
 @pytest.mark.asyncio
 async def test_decide_request_preserves_user_schedule_when_reset_is_earlier(rel_app_and_db):
     """Approval does not advance user scheduled_at if recipient reset is earlier."""
