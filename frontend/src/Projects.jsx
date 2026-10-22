@@ -887,6 +887,8 @@ export function ProjectDetailView({ projectId, sessions: propSessions, requests 
 
   return (
     <div className="project-detail-view" data-testid="project-detail-view">
+      {/* The diagram goes beside the project only if this container is wide: in a half-width pane it stacks. */}
+      <div className="project-detail-container">
       <div className="project-detail-layout">
       <div className="project-detail-main">
       <div className="project-detail-nav">
@@ -1179,6 +1181,7 @@ export function ProjectDetailView({ projectId, sessions: propSessions, requests 
         <RelationGraph nodes={project.nodes} relations={project.relations} sessions={sessions} requests={requests}
           projectId={projectId} onOpenSession={onOpenSession} />
       </aside>
+      </div>
       </div>
 
       {editingProject && (

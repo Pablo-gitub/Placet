@@ -8,7 +8,9 @@
     "reconnecting": "RECONNECTING…",
     "openSession": "Open a session to read its conversation and send a message.",
     "tagline": "Human Supervision & Agent Bus",
-    "settings": "Settings"
+    "settings": "Settings",
+    "hideSidebar": "Hide the left column",
+    "showSidebar": "Show the left column"
   },
   "language": {
     "label": "Language",
@@ -356,6 +358,8 @@
     "noProjectsForSession": "No projects for this session",
     "projectMentionLabel": "Projects for this session",
     "schedule": "Schedule",
+    "scheduleHint": "Date and time",
+    "placeholderShort": "Write… @ to mention",
     "clearSchedule": "Clear schedule"
   },
   "chat": {
