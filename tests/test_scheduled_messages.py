@@ -786,4 +786,56 @@ def test_schedule_request_fails_after_claim(db):
     assert db.schedule_request(req.id, future, actor="human") is None
 
 
+def test_create_request_expires_at_based_on_scheduled_at(db):
+    """create_request sets expires_at = (scheduled_at or now) + window."""
+    now = datetime.now(timezone.utc)
+    future = now + timedelta(days=3)
+    req = db.create_request(RequestCreate(
+        sender_id="claude", recipient_id="gemini", prompt="Long wait",
+        expires_in_seconds=7200, scheduled_at=future,
+    ))
+    assert req.expires_at >= future + timedelta(seconds=7195)
+    assert req.expires_at <= future + timedelta(seconds=7205)
+
+
+def test_schedule_request_recalculates_expires_at(db):
+    """schedule_request extends expires_at to maintain the original window from scheduled_at."""
+    req = db.create_request(RequestCreate(
+        sender_id="claude", recipient_id="gemini", prompt="Reschedule test",
+        expires_in_seconds=3600,
+    ))
+    original_window = (req.expires_at - req.created_at).total_seconds()
+    assert 3590 <= original_window <= 3610
+
+    future = datetime.now(timezone.utc) + timedelta(days=5)
+    resched = db.schedule_request(req.id, future, actor="human")
+    assert resched is not None
+    assert resched.expires_at >= future + timedelta(seconds=3595)
+    assert resched.expires_at <= future + timedelta(seconds=3605)
+
+
+def test_list_undelivered_results_uses_coalesce_scheduled_at(db):
+    """list_undelivered_results compares age against coalesce(scheduled_at, updated_at)."""
+    req = db.create_request(RequestCreate(sender_id="claude", recipient_id="codex", prompt="Old result"))
+    db.update_request_decision(req.id, RequestStatus.APPROVED, allow_auto_return=True)
+    db.claim_injection(req.id)
+    db.record_reply(req.id, "codex", "Finished long ago")
+
+    # Simulate request updated 2 days ago, but scheduled for delivery 1 minute ago
+    now = datetime.now(timezone.utc)
+    two_days_ago = (now - timedelta(days=2)).isoformat()
+    one_min_ago = (now - timedelta(minutes=1)).isoformat()
+    with db._get_connection() as c:
+        c.execute("UPDATE requests SET updated_at = ?, scheduled_at = ? WHERE id = ?",
+                  (two_days_ago, one_min_ago, req.id))
+
+    # 6 hour window ending at now
+    results = db.list_undelivered_results(
+        settled_before=now,
+        settled_after=now - timedelta(hours=6),
+    )
+    assert any(r.id == req.id for r in results)
+
+
+
 

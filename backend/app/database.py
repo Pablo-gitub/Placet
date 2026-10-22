@@ -29,6 +29,7 @@ from backend.app.models import (
     ProjectDetailModel,
     ProjectRelationDetail,
     WAITER_TTL_SECONDS,
+    DEFAULT_EXPIRES_IN_SECONDS,
     is_settled,
 )
 
@@ -696,8 +697,13 @@ class Database:
 
     def create_request(self, req: RequestCreate, actor: Optional[str] = None) -> RequestModel:
         now = datetime.now(timezone.utc)
-        expires_at = now + timedelta(seconds=req.expires_in_seconds)
         scheduled_at = _normalize_utc_iso(getattr(req, "scheduled_at", None))
+        base_time = now
+        if scheduled_at is not None:
+            sched_dt = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
+            if sched_dt > now:
+                base_time = sched_dt
+        expires_at = base_time + timedelta(seconds=req.expires_in_seconds)
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -1388,15 +1394,40 @@ class Database:
         status in (PENDING, APPROVED, COMPLETED), delivered_at IS NULL,
         and (delivery_state IS NULL OR delivery_state = 'waiting' OR status = 'COMPLETED').
         """
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
         scheduled_at_iso = _normalize_utc_iso(scheduled_at) if scheduled_at is not None else None
         valid_statuses = (RequestStatus.PENDING.value, RequestStatus.APPROVED.value, RequestStatus.COMPLETED.value)
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
+                "SELECT created_at, expires_at, scheduled_at FROM requests WHERE id = ?",
+                (request_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            try:
+                exp_dt = datetime.fromisoformat(row["expires_at"].replace("Z", "+00:00"))
+                base_str = row["scheduled_at"] or row["created_at"]
+                base_dt = datetime.fromisoformat(base_str.replace("Z", "+00:00"))
+                window = exp_dt - base_dt
+                if window.total_seconds() < 10:
+                    window = timedelta(seconds=DEFAULT_EXPIRES_IN_SECONDS)
+            except Exception:
+                window = timedelta(seconds=DEFAULT_EXPIRES_IN_SECONDS)
+
+            if scheduled_at_iso is None:
+                new_expires_at = (now + window).isoformat()
+            else:
+                sched_dt = datetime.fromisoformat(scheduled_at_iso.replace("Z", "+00:00"))
+                new_base = max(now, sched_dt)
+                new_expires_at = (new_base + window).isoformat()
+
+            cursor.execute(
                 f"""
                 UPDATE requests
-                SET scheduled_at = ?, updated_at = ?
+                SET scheduled_at = ?, expires_at = ?, updated_at = ?
                 WHERE id = ?
                   AND delivered_at IS NULL
                   AND status IN ({','.join('?' for _ in valid_statuses)})
@@ -1404,7 +1435,8 @@ class Database:
                 """,
                 (
                     scheduled_at_iso,
-                    now,
+                    new_expires_at,
+                    now_iso,
                     request_id,
                     *valid_statuses,
                     RequestStatus.COMPLETED.value,
@@ -1413,9 +1445,9 @@ class Database:
             if cursor.rowcount == 0:
                 return None
             if scheduled_at is None:
-                self._log(cursor, request_id, actor, "schedule_cleared", at=now)
+                self._log(cursor, request_id, actor, "schedule_cleared", at=now_iso)
             else:
-                self._log(cursor, request_id, actor, "scheduled", {"scheduled_at": scheduled_at_iso}, at=now)
+                self._log(cursor, request_id, actor, "scheduled", {"scheduled_at": scheduled_at_iso}, at=now_iso)
         return self.get_request(request_id)
 
     def steer_candidates(self) -> List[Tuple[RequestModel, SessionModel]]:
@@ -1769,9 +1801,11 @@ class Database:
                 WHERE delivered_at IS NULL AND status != ? AND (sender_id = 'human' OR recipient_id = 'human' OR status != 'COMPLETED' OR allow_auto_return = 1 OR return_decision IN ('approved', 'forwarded'))
                   -- the user's own messages: the outcome is in the conversation
                   AND sender_id != 'human'
-                  AND updated_at IS NOT NULL AND updated_at <= ? AND updated_at > ?
+                  AND coalesce(scheduled_at, updated_at) IS NOT NULL
+                  AND datetime(coalesce(scheduled_at, updated_at)) <= datetime(?)
+                  AND datetime(coalesce(scheduled_at, updated_at)) > datetime(?)
                   AND (scheduled_at IS NULL OR datetime(scheduled_at) <= datetime(?))
-                ORDER BY updated_at ASC
+                ORDER BY datetime(coalesce(scheduled_at, updated_at)) ASC
                 LIMIT ?
                 """,
                 (
