@@ -442,6 +442,10 @@ def create_app(
         for req_id in db.long_pauses():
             notify_change(req_id)
             alert(req_id, "paused_long")
+        # Claude Desktop wake-up: windows that ended without evidence, episodes that are over.
+        swept = db.settle_wake_episodes()
+        for session_id in swept["unconfirmed"] + swept["ended"]:
+            notify_session(session_id)
         # Switched off, nothing is marked: turning it on later still alerts.
         if db.get_notification_preferences().get("queue_held", True):
             for req_id, session_id, waiting in db.held_queues_to_alert():
@@ -1545,6 +1549,7 @@ def create_app(
             db.reopen_session(session_id)
         if payload.event == "start":
             db.set_session_state(session_id, "idle")
+            db.wake_evidence(session_id)  # a desktop wake-up got its evidence: the session started
             if payload.mcp is not None:
                 db.set_mcp_config_state(session_id, payload.mcp)
             if payload.start_source == "clear":
@@ -1674,6 +1679,7 @@ def create_app(
             try:
                 expire_and_notify()
                 db.touch_waiter(session_id)
+                db.wake_evidence(session_id)  # the waiter is listening: a pending wake-up is over
                 if first:
                     notify_session(session_id)  # now reachable
                     first = False

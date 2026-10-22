@@ -58,6 +58,10 @@ HOLD_ALERT_SECONDS = 10 * 60.0
 # A turn paused (RFC-16) and not resumed for this long is flagged like an
 # unseen start: the queue stays held, only the user moves it on.
 PAUSE_UNRESUMED_SECONDS = 30 * 60.0
+# Claude Desktop wake-up: the link was just handed to the app for this long ("open_requested"),
+# then the session has until the end of the window to show evidence it started listening.
+WAKE_ACK_SECONDS = 5.0
+WAKE_WINDOW_SECONDS = 60.0
 # An agent that declared itself busy is trusted for at most this long (a
 # crashed CLI never sends "idle").
 AGENT_BUSY_TTL_SECONDS = 30 * 60

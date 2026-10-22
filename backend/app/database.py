@@ -12,6 +12,8 @@ from backend.app.models import (
     HOLD_ALERT_SECONDS,
     PAUSE_UNRESUMED_SECONDS,
     START_UNCONFIRMED_SECONDS,
+    WAKE_ACK_SECONDS,
+    WAKE_WINDOW_SECONDS,
     session_controls,
     OPEN_STATUSES,
     RequestCreate,
@@ -1929,6 +1931,20 @@ class Database:
     # --- Agent sessions (registered by CLI / desktop app hooks) --------------
 
     @staticmethod
+    def _effective_wake_state(stored: Optional[str], at: Optional[datetime]) -> Optional[str]:
+        """
+        What the stored wake-up state means now: a link handed to the app is "open_requested" for a
+        moment, then "waiting_for_session" while the window for evidence runs, then "wake_unconfirmed"
+        (the sweep makes that permanent). rc=0 is never "started".
+        """
+        if stored != "open_requested" or at is None:
+            return stored
+        age = (datetime.now(timezone.utc) - at).total_seconds()
+        if age < WAKE_ACK_SECONDS:
+            return "open_requested"
+        return "waiting_for_session" if age < WAKE_WINDOW_SECONDS else "wake_unconfirmed"
+
+    @staticmethod
     def _row_to_session(row: sqlite3.Row, waiter_ttl_seconds: float) -> SessionModel:
         waiter = _ts(row["waiter_seen_at"])
         # A session can be woken when its waiter listens (Claude Code), or
@@ -1967,7 +1983,7 @@ class Database:
                                      bool(row["tmux_server"] and row["agent_pid"] and row["agent_started"])),
             mcp_state=row["mcp_state"],
             mcp_seen_at=_ts(row["mcp_seen_at"]),
-            wake_state=row["wake_state"],
+            wake_state=Database._effective_wake_state(row["wake_state"], _ts(row["wake_at"])),
             wake_at=_ts(row["wake_at"]),
             wake_attempts=row["wake_attempts"] or 0,
             node_id=row["node_id"],
@@ -3274,6 +3290,48 @@ class Database:
                 and not s.reachable and s.wake_state not in self.WAKE_SETTLED
                 and s.wake_attempts < self.WAKE_MAX_ATTEMPTS
                 and self.inbox_has_message(s, explicit_only=True)]
+
+    def wake_evidence(self, session_id: str) -> bool:
+        """
+        The session showed it is listening (a SessionStart, a waiter heartbeat): the episode is over and
+        the next message gets a fresh one. True if there was an episode to end.
+        """
+        with self._get_connection() as conn:
+            cur = conn.execute(
+                "UPDATE sessions SET wake_state = 'reachable', wake_attempts = 0, wake_force = 0,"
+                " wake_alerted_at = NULL WHERE id = ? AND (wake_attempts > 0 OR wake_state IN"
+                " ('open_requested', 'wake_unconfirmed', 'wake_failed'))", (session_id,))
+            return cur.rowcount > 0
+
+    def settle_wake_episodes(self) -> Dict[str, List[str]]:
+        """
+        Sweep: an accepted open that got no evidence within the window becomes "wake_unconfirmed"
+        (listed once, for the notification); an episode ends when its session is reachable or its
+        pending mail is gone, so the next message starts a new one.
+        """
+        now_dt = datetime.now(timezone.utc)
+        cutoff = (now_dt - timedelta(seconds=WAKE_WINDOW_SECONDS)).isoformat()
+        unconfirmed: List[str] = []
+        ended: List[str] = []
+        with self._get_connection() as conn:
+            for row in conn.execute(
+                    "SELECT id FROM sessions WHERE wake_state = 'open_requested' AND wake_at <= ?", (cutoff,)).fetchall():
+                conn.execute("UPDATE sessions SET wake_state = 'wake_unconfirmed' WHERE id = ?", (row["id"],))
+                unconfirmed.append(row["id"])
+            active = [r["id"] for r in conn.execute(
+                "SELECT id FROM sessions WHERE wake_attempts > 0 OR wake_state IN"
+                " ('open_requested', 'wake_unconfirmed', 'wake_failed')").fetchall()]
+        for session_id in active:
+            session = self.get_session(session_id)
+            if session is None:
+                continue
+            if session.reachable or not self.inbox_has_message(session, explicit_only=True):
+                with self._get_connection() as conn:
+                    conn.execute(
+                        "UPDATE sessions SET wake_state = ?, wake_attempts = 0, wake_force = 0, wake_alerted_at = NULL"
+                        " WHERE id = ?", ("reachable" if session.reachable else None, session_id))
+                ended.append(session_id)
+        return {"unconfirmed": [s for s in unconfirmed if s not in ended], "ended": ended}
 
     def wake_forced(self, session_id: str) -> bool:
         with self._get_connection() as conn:
