@@ -1773,6 +1773,7 @@ body.chat-open { overflow: hidden; }
 .rg-ball { stroke: var(--bg-card, var(--bg-secondary)); stroke-width: 1.5; pointer-events: none; }
 .rg-ball-delivering { fill: var(--accent); }
 .rg-ball-returning { fill: var(--primary); }
+.rg-ball-queued { fill: var(--text-muted); }
 .rg-ball-waiting { fill: var(--warning); animation: rg-wait 1.2s ease-in-out infinite alternate; }
 @keyframes rg-wait { from { opacity: 1; } to { opacity: 0.45; } }
 @media (prefers-reduced-motion: reduce) {
@@ -1780,6 +1781,7 @@ body.chat-open { overflow: hidden; }
   .rg-ball-waiting { animation: none; }
 }
 .rg-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; vertical-align: middle; margin-right: 0.3rem; background: var(--warning); }
+.rg-dot.rg-ball-queued { background: var(--text-muted); }
 
 /* Settings */
 .settings { display: flex; flex-direction: column; gap: 1rem; }

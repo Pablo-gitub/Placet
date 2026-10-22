@@ -171,6 +171,7 @@ def build_event(event: dict, provider: str = "claude-code"):
         "provider": provider,
         "entrypoint": os.environ.get("CLAUDE_CODE_ENTRYPOINT") if provider == "claude-code" else provider,
         "cwd": event.get("cwd"),
+        "project_root": placet_common.project_root(event.get("cwd")),
         "adapter": ADAPTER,
         "title": event.get("session_title"),
         # On every event: a session may predate its first SessionStart hook.
