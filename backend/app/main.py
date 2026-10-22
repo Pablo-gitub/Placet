@@ -103,6 +103,8 @@ class SessionEventPayload(BaseModel):
     start_source: Optional[str] = Field(None, max_length=32)
     # RF-29d: UUID of the session being continued
     continues: Optional[str] = None
+    # RF-27 (start): does the provider's configuration list the Placet MCP server?
+    mcp: Optional[Literal["configured", "missing", "unknown"]] = None
     # RFC-16: the turn ended but the work goes on (stop), or this turn
     # continues it (prompt): an Antigravity background task or plan review.
     pause: Optional[Literal["background_task", "app_review"]] = None
@@ -858,6 +860,7 @@ def create_app(
         # hook links it too, but must not be the only way.
         if sender_session and db.link_sender_session(created.id, sender_session, who.id):
             created = db.get_request(created.id)
+            db.mark_mcp_seen(sender_session)  # RF-27: a Placet MCP call came from this session
 
         # RFC-04/05: the relation between the two nodes decides the policy.
         by_relation = False
@@ -1120,6 +1123,7 @@ def create_app(
         if req.status not in (RequestStatus.DELIVERING, RequestStatus.EXECUTING):
             raise ProductError(409, "request.not_running",
                                f"Request {request_id} is {req.status.value}: progress applies only while it runs.")
+        db.mark_mcp_seen(req.recipient_session_id)
         text_ = payload.content.strip()
         db.set_progress(request_id, text_)
         db.log_event(request_id, who.actor, "progress", {"content": text_})
@@ -1153,6 +1157,7 @@ def create_app(
                 detail=f"Request {request_id} is in {req.status.value} state, not in APPROVED, DELIVERING or EXECUTING state.",
             )
 
+        db.mark_mcp_seen(req.recipient_session_id)
         completed = db.record_reply(
             request_id=request_id,
             responder_id=who.id,
@@ -1258,7 +1263,9 @@ def create_app(
         """The recipient confirms it received an injected prompt (placet_ack)."""
         require_agent(who)
         expire_and_notify()
-        return ack_request(who, request_id, via="mcp")
+        acked = ack_request(who, request_id, via="mcp")
+        db.mark_mcp_seen(acked.recipient_session_id)
+        return acked
 
     @app.post("/api/agents/me/state")
     async def agent_state(payload: AgentStatePayload, who: Principal = Depends(principal)):
@@ -1347,6 +1354,8 @@ def create_app(
             db.reopen_session(session_id)
         if payload.event == "start":
             db.set_session_state(session_id, "idle")
+            if payload.mcp is not None:
+                db.set_mcp_config_state(session_id, payload.mcp)
             if payload.start_source == "clear":
                 result["node_id"] = db.reattach_after_clear(session_id)
         elif payload.event == "prompt":
@@ -1402,6 +1411,8 @@ def create_app(
         elif payload.event == "stop":
             was_busy = session.state == "busy"
             is_placet = (session.turn_request_id is not None) or bool(db.steered_in_turn(session_id))
+            if session.turn_request_id is not None and db.suspect_mcp(session_id):
+                logger.info(f"Session {session_id} ended a Placet turn without ever using the MCP: suspect")
             db.set_session_state(session_id, "idle")
             if was_busy:
                 notify_turn_end(session, payload.last_message, is_placet=is_placet)

@@ -333,6 +333,12 @@ class SessionModel(BaseModel):
     # RF-29d: continued conversation pointer and prompt counter
     continued_to: Optional[str] = None
     prompt_count: int = 0
+    # RF-27: configured | missing | unknown (what the hook read from the
+    # provider's configuration), or suspect (a Placet turn ended with no MCP
+    # call ever made by an "unknown" session). None: never reported.
+    mcp_state: Optional[str] = None
+    # The last time this session used a Placet MCP tool.
+    mcp_seen_at: Optional[datetime] = None
 
 
 class NodeModel(BaseModel):
