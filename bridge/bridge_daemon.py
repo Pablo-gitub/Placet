@@ -2,6 +2,7 @@ import base64
 import time
 import logging
 import subprocess
+import contextlib
 import threading
 from typing import Dict, List, Optional, Set
 
@@ -78,12 +79,25 @@ class BridgeDaemon:
         self._claude_usage: Optional[dict] = None
         # "now" messages left for a turn that ended, and since when (monotonic)
         self._steer_orphans: Dict[int, float] = {}
+        # One lock per tmux session: a normal delivery and a session command
+        # (another thread) never type into the same terminal at once.
+        self._pane_locks: Dict[str, threading.Lock] = {}
+        self._pane_locks_guard = threading.Lock()
+
+    def pane_lock(self, tmux_session: str) -> threading.Lock:
+        with self._pane_locks_guard:
+            return self._pane_locks.setdefault(tmux_session, threading.Lock())
 
     def format_injection_envelope(self, req: RequestModel, ack_mode: str = "mcp") -> str:
         return envelopes.injection(req, ack_mode=ack_mode, channel="tmux", language=self.language)
 
     def format_result_envelope(self, req: RequestModel) -> str:
         return envelopes.outcome(req, channel="tmux", language=self.language)
+
+    def _agent_lock(self, agent_id: str):
+        """The lock of the agent's tmux session (a no-op when it is not configured)."""
+        spec = self.store.session_for(agent_id)
+        return self.pane_lock(spec.name) if spec else contextlib.nullcontext()
 
     def _session_ready(
         self, agent_id: str, busy_sessions: Set[str], busy_agents: Set[str]
@@ -130,19 +144,20 @@ class BridgeDaemon:
             busy_agents = set(work.busy_agents) if busy_agents is None else busy_agents
         delivered = 0
         for req in results:
-            spec = self._session_ready(req.sender_id, busy_sessions, busy_agents)
-            if spec is None:
-                continue
-            # Claim first: if a long-poll delivered it meanwhile, skip.
-            if not self.store.claim_delivery(req.id):
-                continue
-            logger.info(f"Delivering outcome of request #{req.id} to session {spec.name}...")
-            if self.tmux.send_keys(spec.name, self.format_result_envelope(req), enter=True):
-                busy_sessions.add(spec.name)
-                delivered += 1
-            else:
-                self.store.release_delivery(req.id)
-                logger.error(f"Could not deliver outcome of request #{req.id} to {spec.name}.")
+            with self._agent_lock(req.sender_id):
+                spec = self._session_ready(req.sender_id, busy_sessions, busy_agents)
+                if spec is None:
+                    continue
+                # Claim first: if a long-poll delivered it meanwhile, skip.
+                if not self.store.claim_delivery(req.id):
+                    continue
+                logger.info(f"Delivering outcome of request #{req.id} to session {spec.name}...")
+                if self.tmux.send_keys(spec.name, self.format_result_envelope(req), enter=True):
+                    busy_sessions.add(spec.name)
+                    delivered += 1
+                else:
+                    self.store.release_delivery(req.id)
+                    logger.error(f"Could not deliver outcome of request #{req.id} to {spec.name}.")
         return delivered
 
     def process_pending_injections(
@@ -165,22 +180,23 @@ class BridgeDaemon:
             busy_agents = set(work.busy_agents) if busy_agents is None else busy_agents
         processed = 0
         for req in injections:
-            spec = self._session_ready(req.recipient_id, busy_sessions, busy_agents)
-            if spec is None:
-                continue
-            if not self.store.claim_injection(req.id):
-                logger.info(f"Request #{req.id} is no longer APPROVED, skipping.")
-                continue
-            logger.info(f"Injecting request #{req.id} into session {spec.name}...")
-            envelope = self.format_injection_envelope(req, spec.ack_mode)
-            if not self.tmux.send_keys(spec.name, envelope, enter=True):
-                self.store.release_injection(req.id)
-                logger.error(f"Could not inject request #{req.id} into {spec.name}.")
-                continue
-            busy_sessions.add(spec.name)
-            if spec.ack_mode == "none":
-                self.store.confirm_injection(req.id)
-            processed += 1
+            with self._agent_lock(req.recipient_id):
+                spec = self._session_ready(req.recipient_id, busy_sessions, busy_agents)
+                if spec is None:
+                    continue
+                if not self.store.claim_injection(req.id):
+                    logger.info(f"Request #{req.id} is no longer APPROVED, skipping.")
+                    continue
+                logger.info(f"Injecting request #{req.id} into session {spec.name}...")
+                envelope = self.format_injection_envelope(req, spec.ack_mode)
+                if not self.tmux.send_keys(spec.name, envelope, enter=True):
+                    self.store.release_injection(req.id)
+                    logger.error(f"Could not inject request #{req.id} into {spec.name}.")
+                    continue
+                busy_sessions.add(spec.name)
+                if spec.ack_mode == "none":
+                    self.store.confirm_injection(req.id)
+                processed += 1
         return processed
 
     def process_session_mail(self, sessions: List[dict]) -> int:
@@ -428,8 +444,10 @@ class BridgeDaemon:
                 )
                 page = {"mime": mime, "data": base64.b64encode(data).decode("ascii")}
             elif kind == "session_command":
-                line = run_command(self.tmux, self.store.session_for(job.get("agent_id") or ""),
-                                   job.get("tmux_session"), job.get("command") or "", job.get("level"))
+                spec = self.store.session_for(job.get("agent_id") or "")
+                line = run_command(self.tmux, spec, job.get("tmux_session"), job.get("tmux_pane"),
+                                   job.get("command") or "", job.get("level"),
+                                   lock=self.pane_lock(spec.name) if spec else None)
                 page = {"sent": line}
             elif kind == "claude_renew":
                 ok = renew_claude_credentials()

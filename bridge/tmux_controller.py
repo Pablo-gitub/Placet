@@ -78,6 +78,17 @@ class TmuxController:
         sessions = self.list_sessions()
         return session_name in sessions
 
+    def pane_session_name(self, pane_id: str) -> Optional[str]:
+        """The tmux session a pane (%N) belongs to now, or None if the pane is gone."""
+        try:
+            res = subprocess.run(
+                ["tmux", "display-message", "-p", "-t", pane_id, "#{session_name}"],
+                capture_output=True, text=True, check=True, timeout=3,
+            )
+        except Exception:
+            return None
+        return res.stdout.strip() or None
+
     def capture_pane(self, session_name: str) -> str:
         """Visible screen of the session's active pane."""
         try:

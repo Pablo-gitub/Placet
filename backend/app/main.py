@@ -96,6 +96,8 @@ class SessionEventPayload(BaseModel):
     model: Optional[str] = Field(default=None, max_length=100)
     title: Optional[str] = None
     tmux_session: Optional[str] = None
+    # RF-62: the tmux pane id (%N) of the terminal the session runs in.
+    tmux_pane: Optional[str] = Field(default=None, pattern=r"^%\d{1,9}$")
     # prompt: the Placet request the prompt carries ("[Placet Request #N").
     # tool:   the request created by a Placet MCP call in this session.
     request_id: Optional[int] = None
@@ -1335,7 +1337,7 @@ def create_app(
             return {"session": session_id, "event": payload.event, "duplicate": True}
         if not db.upsert_session(
             session_id, who.id, provider=payload.provider, entrypoint=payload.entrypoint,
-            cwd=payload.cwd, title=payload.title, tmux_session=payload.tmux_session,
+            cwd=payload.cwd, title=payload.title, tmux_session=payload.tmux_session, tmux_pane=payload.tmux_pane,
             model=payload.model,
         ):
             raise HTTPException(status_code=404, detail="Session not found")
@@ -1533,8 +1535,17 @@ def create_app(
                                {"levels": list(effort_levels(session.provider))})
         if session.state != "idle":
             raise ProductError(409, "session.busy", "The session is working: wait for the turn to end.")
+        # The pane must still be this session's: a later session in the same pane
+        # (a new conversation, a resume) makes this one stale, a tie is ambiguous.
+        occupants = db.pane_occupants(session.tmux_pane)
+        if not occupants or occupants[0].id != session.id:
+            raise ProductError(409, "session.pane_stale", "Another session now runs in this terminal.",
+                               {"current": occupants[0].id if occupants else None})
+        if len(occupants) > 1 and occupants[1].last_seen_at == occupants[0].last_seen_at:
+            raise ProductError(409, "session.pane_ambiguous", "Two sessions are equally recent in this terminal.")
         line = command_text(command, level, session.provider)
-        params = {"agent_id": session.agent_id, "tmux_session": session.tmux_session, "command": command}
+        params = {"agent_id": session.agent_id, "tmux_session": session.tmux_session,
+                  "tmux_pane": session.tmux_pane, "session_id": session.id, "command": command}
         if level is not None:
             params["level"] = level
 
@@ -1545,7 +1556,7 @@ def create_app(
             spec = SessionSpec(name=agent.tmux_session, idle_patterns=agent.idle_patterns,
                                busy_patterns=agent.busy_patterns) if agent else None
             try:
-                return {"sent": run_command(TmuxController(), spec, session.tmux_session, command, level)}
+                return {"sent": run_command(TmuxController(), spec, session.tmux_session, session.tmux_pane, command, level)}
             except CommandError as e:
                 raise ProductError(409, f"session_command.{e.code}", str(e)) from None
 

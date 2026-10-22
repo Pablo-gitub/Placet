@@ -448,6 +448,8 @@ class Database:
             for col in ("activity_at", "pinned_at", "excluded_at", "suspended_at", "model", "continued_to"):
                 if col not in session_cols:
                     cursor.execute(f"ALTER TABLE sessions ADD COLUMN {col} TEXT;")
+            if "tmux_pane" not in session_cols:
+                cursor.execute("ALTER TABLE sessions ADD COLUMN tmux_pane TEXT;")
             if "prompt_count" not in session_cols:
                 cursor.execute("ALTER TABLE sessions ADD COLUMN prompt_count INTEGER NOT NULL DEFAULT 0;")
                 cursor.execute(
@@ -1711,6 +1713,7 @@ class Database:
             cwd=row["cwd"],
             title=row["title"],
             tmux_session=row["tmux_session"],
+            tmux_pane=row["tmux_pane"],
             state=row["state"],
             turn_request_id=row["turn_request_id"],
             started_at=datetime.fromisoformat(row["started_at"]),
@@ -1723,7 +1726,7 @@ class Database:
             pinned=row["pinned_at"] is not None,
             reachable=reachable and row["excluded_at"] is None,
             excluded=row["excluded_at"] is not None,
-            controls=session_controls(row["provider"], row["tmux_session"], row["entrypoint"]),
+            controls=session_controls(row["provider"], row["tmux_session"], row["entrypoint"], row["tmux_pane"]),
             node_id=row["node_id"],
             node_name=row["node_name"] if "node_name" in row.keys() else None,
             continued_to=row["continued_to"] if "continued_to" in row.keys() else None,
@@ -1740,6 +1743,7 @@ class Database:
         title: Optional[str] = None,
         tmux_session: Optional[str] = None,
         model: Optional[str] = None,
+        tmux_pane: Optional[str] = None,
     ) -> bool:
         """
         Registers a session or refreshes it. Returns False if the id is
@@ -1757,10 +1761,11 @@ class Database:
                 cursor.execute(
                     """
                     INSERT INTO sessions (id, agent_id, provider, entrypoint, cwd, title,
-                                          tmux_session, model, state, started_at, last_seen_at, activity_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?, ?)
+                                          tmux_session, tmux_pane, model, state, started_at, last_seen_at, activity_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?, ?)
                     """,
-                    (session_id, agent_id, provider, entrypoint, cwd, title, tmux_session, model, now, now, now),
+                    (session_id, agent_id, provider, entrypoint, cwd, title, tmux_session, tmux_pane, model,
+                     now, now, now),
                 )
             else:
                 cursor.execute(
@@ -1768,11 +1773,11 @@ class Database:
                     UPDATE sessions SET
                         provider = COALESCE(?, provider), entrypoint = COALESCE(?, entrypoint),
                         cwd = COALESCE(?, cwd), title = COALESCE(?, title),
-                        tmux_session = COALESCE(?, tmux_session), model = COALESCE(?, model),
-                        last_seen_at = ?
+                        tmux_session = COALESCE(?, tmux_session), tmux_pane = COALESCE(?, tmux_pane),
+                        model = COALESCE(?, model), last_seen_at = ?
                     WHERE id = ?
                     """,
-                    (provider, entrypoint, cwd, title, tmux_session, model, now, session_id),
+                    (provider, entrypoint, cwd, title, tmux_session, tmux_pane, model, now, session_id),
                 )
             return True
 
@@ -1914,6 +1919,16 @@ class Database:
                 cursor.execute("UPDATE sessions SET node_id = ? WHERE id = ?", (old["node_id"], new_session_id))
                 cursor.execute("UPDATE sessions SET node_id = NULL WHERE id = ?", (old_session_id,))
             return True
+
+    def pane_occupants(self, tmux_pane: str) -> List[SessionModel]:
+        """RF-62: the open, not suspended sessions reported in this pane, most recently seen first."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                f"{SESSIONS_WITH_NODE} WHERE sessions.tmux_pane = ? AND sessions.ended_at IS NULL"
+                " AND sessions.suspended_at IS NULL ORDER BY sessions.last_seen_at DESC, sessions.id",
+                (tmux_pane,),
+            ).fetchall()
+        return [self._row_to_session(r, WAITER_TTL_SECONDS) for r in rows]
 
     def log_session_control(self, session_id: str, actor: str, command: str) -> None:
         """RF-62: a control typed into the session by `actor`."""

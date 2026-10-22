@@ -27,10 +27,11 @@ def env(tmp_path):
     return create_app(db=db, config=CONFIG, bridge_token="tok-bridge"), db
 
 
-async def start(app, agent, session_id, provider, entrypoint="cli", tmux="agent-claude"):
+async def start(app, agent, session_id, provider, entrypoint="cli", tmux="agent-claude", pane="%3"):
     body = {"event": "start", "provider": provider, "cwd": "/p", "entrypoint": entrypoint}
     if tmux:
         body["tmux_session"] = tmux
+        body["tmux_pane"] = pane
     async with agent_client(app, f"tok-{agent}") as client:
         assert (await client.post(f"/api/sessions/{session_id}/events", json=body)).status_code == 200
 
@@ -80,7 +81,8 @@ async def test_compact_goes_to_the_bridge_as_a_fixed_command(env):
     job = seen[0]
     assert job["kind"] == "session_command" and job["command"] == "compact"
     assert job["tmux_session"] == "agent-claude" and job["agent_id"] == "claude"
-    assert set(job) <= {"id", "kind", "command", "level", "tmux_session", "agent_id"}  # no free text
+    assert job["session_id"] == "s1" and job["tmux_pane"] == "%3"  # who, and the stable pane
+    assert set(job) <= {"id", "kind", "command", "level", "tmux_session", "tmux_pane", "session_id", "agent_id"}  # no free text
     [event] = db.list_session_controls("s1")
     assert event["actor"].startswith("human") and event["command"] == "/compact"
 
@@ -141,20 +143,29 @@ async def test_bridge_failures_become_product_errors(env):
 
 
 class FakeTmux:
-    def __init__(self, exists=True, idle=True, typing=None):
-        self.exists, self.idle, self.typing, self.sent = exists, idle, typing, []
+    """Records every target an operation was aimed at: it must always be the pane id."""
+
+    def __init__(self, exists=True, idle=True, typing=None, pane_session="agent-claude"):
+        self.exists, self.idle, self.typing, self.pane_session = exists, idle, typing, pane_session
+        self.sent, self.targets = [], []
 
     def session_exists(self, name):
         return self.exists
 
-    def is_session_idle(self, name, idle_patterns, busy_patterns):
+    def pane_session_name(self, pane):
+        self.targets.append(("pane_session_name", pane))
+        return self.pane_session if self.exists else None
+
+    def is_session_idle(self, target, idle_patterns, busy_patterns):
+        self.targets.append(("idle", target))
         return self.idle
 
     def seconds_since_input(self, name):
         return self.typing
 
-    def send_keys(self, name, text, enter=True):
-        self.sent.append((name, text, enter))
+    def send_keys(self, target, text, enter=True):
+        self.targets.append(("send", target))
+        self.sent.append((target, text, enter))
         return True
 
 
@@ -163,23 +174,27 @@ def daemon(env, tmux):
     return BridgeDaemon(db=db, config=CONFIG, tmux=tmux)
 
 
-JOB = {"id": "j", "kind": "session_command", "agent_id": "claude", "tmux_session": "agent-claude", "command": "compact"}
+JOB = {"id": "j", "kind": "session_command", "agent_id": "claude", "tmux_session": "agent-claude",
+       "tmux_pane": "%3", "session_id": "s1", "command": "compact"}
 
 
 def test_the_bridge_types_only_the_fixed_command_into_the_configured_pane(env):
     tmux = FakeTmux()
     out = daemon(env, tmux).handle_job({**JOB, "text": "rm -rf /"})
     assert out == {"ok": True, "page": {"sent": "/compact"}}
-    assert tmux.sent == [("agent-claude", "/compact", True)]
+    assert tmux.sent == [("%3", "/compact", True)]
     tmux = FakeTmux()
     daemon(env, tmux).handle_job({**JOB, "command": "effort", "level": "max"})
-    assert tmux.sent == [("agent-claude", "/effort max", True)]
+    assert tmux.sent == [("%3", "/effort max", True)]
 
 
 @pytest.mark.parametrize("job,tmux,error", [
     ({"tmux_session": "somewhere-else"}, FakeTmux(), "wrong_session"),
+    ({"tmux_pane": "agent-claude"}, FakeTmux(), "tmux_missing"),          # not a pane id: never a session name
+    ({"tmux_pane": None}, FakeTmux(), "tmux_missing"),
     ({"agent_id": "nobody"}, FakeTmux(), "wrong_session"),
     ({}, FakeTmux(exists=False), "tmux_missing"),
+    ({}, FakeTmux(pane_session="another-name"), "wrong_session"),        # the pane now belongs to another tmux session
     ({}, FakeTmux(idle=False), "not_idle"),
     ({}, FakeTmux(typing=3.0), "user_typing"),
     ({"command": "model"}, FakeTmux(), "invalid"),
@@ -189,3 +204,74 @@ def test_the_bridge_refuses_what_is_not_safe(env, job, tmux, error):
     out = daemon(env, tmux).handle_job({**JOB, **job})
     assert out["ok"] is False and out["error"] == error
     assert tmux.sent == []
+
+
+def test_every_tmux_operation_targets_the_stable_pane_id(env):
+    """A pane switch between the check and the send cannot redirect the command."""
+    tmux = FakeTmux()
+    daemon(env, tmux).handle_job(JOB)
+    aimed = {target for op, target in tmux.targets if op in ("idle", "send")}
+    assert aimed == {"%3"}
+
+
+@pytest.mark.asyncio
+async def test_a_session_replaced_in_the_same_pane_is_refused_and_the_new_one_is_served(env):
+    app, db = env
+    await start(app, "claude", "old", "claude-code")                    # pane %3, session "agent-claude"
+    await asyncio.sleep(0.01)
+    await start(app, "claude", "new", "claude-code")                    # same tmux name and pane, later
+    stale = await post(app, "/api/sessions/old/compact")
+    assert stale.status_code == 409 and stale.json()["code"] == "session.pane_stale"
+    seen = []
+    ok = await post(app, "/api/sessions/new/compact", bridge_answer={"ok": True, "page": {"sent": "/compact"}}, seen=seen)
+    assert ok.status_code == 200 and seen[0]["session_id"] == "new"
+    assert db.list_session_controls("old") == []
+
+
+@pytest.mark.asyncio
+async def test_sessions_that_ended_or_sit_in_another_pane_do_not_make_it_stale(env):
+    app, db = env
+    await start(app, "claude", "old", "claude-code")
+    await start(app, "claude", "other-pane", "claude-code", pane="%9")
+    await asyncio.sleep(0.01)
+    await start(app, "claude", "gone", "claude-code")
+    db.end_session("gone")
+    ok = await post(app, "/api/sessions/old/compact", bridge_answer={"ok": True, "page": {"sent": "/compact"}})
+    assert ok.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_two_sessions_equally_recent_in_a_pane_are_ambiguous(env):
+    app, db = env
+    await start(app, "claude", "a", "claude-code")
+    await start(app, "claude", "b", "claude-code")
+    with db._get_connection() as conn:
+        conn.execute("UPDATE sessions SET last_seen_at = '2026-10-22T10:00:00+00:00' WHERE id IN ('a', 'b')")
+    resp = await post(app, "/api/sessions/a/compact")
+    assert resp.status_code == 409 and resp.json()["code"] == "session.pane_ambiguous"
+
+
+def test_normal_delivery_and_a_command_never_type_into_the_same_pane_at_once(env):
+    """One lock per tmux session in the bridge: a delivery waits for a command in progress."""
+    import threading
+    app, db = env
+    tmux = FakeTmux()
+    bridge = daemon(env, tmux)
+    lock = bridge.pane_lock("agent-claude")
+    assert bridge.pane_lock("agent-claude") is lock and bridge.pane_lock("other") is not lock
+    req = db.create_request(__import__("backend.app.models", fromlist=["RequestCreate"]).RequestCreate(
+        sender_id="codex", recipient_id="claude", prompt="fai"))
+    from backend.app.models import RequestStatus
+    db.update_request_decision(req.id, RequestStatus.APPROVED, "human:p")
+    finished = threading.Event()
+
+    def deliver():
+        bridge.process_pending_injections(injections=[db.get_request(req.id)], busy_agents=set(), busy_sessions=set())
+        finished.set()
+
+    with lock:                                  # a command is being typed
+        worker = threading.Thread(target=deliver)
+        worker.start()
+        assert not finished.wait(0.3) and tmux.sent == []
+    worker.join(5)
+    assert finished.is_set() and [t for _, t, _ in tmux.sent][0].startswith("[Placet")

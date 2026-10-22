@@ -25,8 +25,10 @@ def env(tmp_path):
     return create_app(db=db, config=CONFIG, bridge_token="tok-bridge"), db
 
 
-async def start(app, agent, session_id, provider, entrypoint=None, tmux=None):
+async def start(app, agent, session_id, provider, entrypoint=None, tmux=None, pane=None):
     body = {"event": "start", "provider": provider, "cwd": "/p"}
+    if pane:
+        body["tmux_pane"] = pane
     if entrypoint:
         body["entrypoint"] = entrypoint
     if tmux:
@@ -43,20 +45,21 @@ UNSUPPORTED = {"compact": "unsupported", "effort": "unsupported"}
 @pytest.mark.asyncio
 async def test_controls_follow_the_provider_and_how_it_runs(env):
     app, db = env
-    await start(app, "claude", "cli-tmux", "claude-code", "cli", "work")
+    await start(app, "claude", "cli-tmux", "claude-code", "cli", "work", "%3")
     await start(app, "claude", "desktop", "claude-code", "claude-desktop")
     await start(app, "claude", "cli-plain", "claude-code", "cli")
+    await start(app, "claude", "cli-old-hook", "claude-code", "cli", "work")  # tmux session known, pane not
     await start(app, "codex", "cx", "codex", "cli", "work2")
     await start(app, "gemini", "agy", "antigravity", "antigravity", "work3")
-    controls = {sid: db.get_session(sid).controls for sid in ("cli-tmux", "desktop", "cli-plain", "cx", "agy")}
+    controls = {sid: db.get_session(sid).controls for sid in ("cli-tmux", "desktop", "cli-plain", "cli-old-hook", "cx", "agy")}
     assert controls == {"cli-tmux": SUPPORTED, "desktop": PC_ONLY, "cli-plain": PC_ONLY,
-                        "cx": UNSUPPORTED, "agy": UNSUPPORTED}
+                        "cli-old-hook": UNSUPPORTED, "cx": UNSUPPORTED, "agy": UNSUPPORTED}
 
 
 @pytest.mark.asyncio
 async def test_the_sessions_api_exposes_them(env):
     app, db = env
-    await start(app, "claude", "cli-tmux", "claude-code", "cli", "work")
+    await start(app, "claude", "cli-tmux", "claude-code", "cli", "work", "%3")
     async with human_client(app) as human:
         listed = {s["id"]: s for s in (await human.get("/api/sessions")).json()}
     assert listed["cli-tmux"]["controls"] == SUPPORTED
