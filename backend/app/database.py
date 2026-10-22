@@ -127,6 +127,10 @@ def _normalize_utc_iso(val: Union[str, datetime, None]) -> Optional[str]:
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+class ControlPending(Exception):
+    """RF-62: the session already has a control being sent."""
+
+
 class Database:
     def __init__(self, db_path: str = "placet.db"):
         self.db_path = db_path
@@ -424,8 +428,17 @@ class Database:
             cursor.execute("PRAGMA table_info(session_control_events);")
             if "state" not in [r["name"] for r in cursor.fetchall()]:
                 cursor.execute("ALTER TABLE session_control_events ADD COLUMN state TEXT NOT NULL DEFAULT 'sent';")
-            # A restart between dispatch and answer leaves what happened unknown.
-            cursor.execute("UPDATE session_control_events SET state = 'uncertain' WHERE state = 'pending';")
+            # One pending control per session at most, enforced by the database. (A restart between
+            # dispatch and answer leaves what happened unknown: settle_pending_session_controls(),
+            # called when the backend starts, not by every process that opens the database.)
+            cursor.execute(
+                "UPDATE session_control_events SET state = 'uncertain' WHERE state = 'pending' AND id NOT IN"
+                " (SELECT MIN(id) FROM session_control_events WHERE state = 'pending' GROUP BY session_id);"
+            )
+            cursor.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_session_control_pending"
+                " ON session_control_events(session_id) WHERE state = 'pending';"
+            )
             # Hook events already applied: the bridge may forward one twice.
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS session_events_seen (
@@ -1954,14 +1967,35 @@ class Database:
         return [self._row_to_session(r, WAITER_TTL_SECONDS) for r in rows]
 
     def begin_session_control(self, session_id: str, actor: str, command: str) -> int:
-        """RF-62: audits a control BEFORE it is dispatched, as pending; returns its id."""
+        """
+        RF-62: audits a control BEFORE it is dispatched, as pending; returns its id.
+        ControlPending if the session already has one (a unique index decides, so two
+        simultaneous requests cannot both start).
+        """
+        try:
+            with self._get_connection() as conn:
+                cur = conn.execute(
+                    "INSERT INTO session_control_events (session_id, at, actor, command, state)"
+                    " VALUES (?, ?, ?, ?, 'pending')",
+                    (session_id, datetime.now(timezone.utc).isoformat(), actor, command),
+                )
+                return cur.lastrowid
+        except sqlite3.IntegrityError:
+            raise ControlPending(session_id) from None
+
+    def settle_pending_session_controls(self) -> int:
+        """Backend startup: a control still pending belongs to a process that is gone, so its outcome is unknown."""
         with self._get_connection() as conn:
-            cur = conn.execute(
-                "INSERT INTO session_control_events (session_id, at, actor, command, state)"
-                " VALUES (?, ?, ?, ?, 'pending')",
-                (session_id, datetime.now(timezone.utc).isoformat(), actor, command),
-            )
-            return cur.lastrowid
+            return conn.execute(
+                "UPDATE session_control_events SET state = 'uncertain' WHERE state = 'pending'").rowcount
+
+    def session_has_running_request(self, session_id: str) -> bool:
+        """A Placet request is being delivered to, or executed by, this session."""
+        with self._get_connection() as conn:
+            return conn.execute(
+                "SELECT 1 FROM requests WHERE recipient_session_id = ? AND status IN (?, ?) LIMIT 1",
+                (session_id, RequestStatus.DELIVERING.value, RequestStatus.EXECUTING.value),
+            ).fetchone() is not None
 
     def settle_session_control(self, control_id: int, state: str) -> None:
         """sent | needs_confirmation (a dialog waits on the PC) | refused | uncertain; only a pending row changes."""

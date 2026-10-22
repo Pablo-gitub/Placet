@@ -185,7 +185,11 @@
     "paneAmbiguous": "Two sessions are equally recent in this terminal: try again after one of them acts.",
     "controlPending": "A control for this session is still being sent.",
     "commandCheckFailed": "Placet could not tell whether someone is typing in the session: try again.",
-    "commandIdentity": "This terminal no longer matches the session (tmux was restarted, or the session's program is not running here). Nothing was sent."
+    "commandIdentity": "This terminal no longer matches the session (tmux was restarted, or the session's program is not running here). Nothing was sent.",
+    "commandExpired": "The terminal was busy for too long: nothing was sent.",
+    "commandBridgeOld": "The bridge on the PC is too old for this command: update it. Nothing was sent.",
+    "sessionRequestRunning": "A Placet request is being delivered to or executed by this session: try again when it ends.",
+    "bridgeNotTaken": "The bridge on the PC did not pick the command up. Nothing was sent."
   },
   "sessions": {
     "closed": "Closed",

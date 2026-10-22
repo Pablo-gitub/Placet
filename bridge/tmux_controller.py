@@ -22,6 +22,10 @@ DEFAULT_BUSY_PATTERNS = [
 ]
 
 
+class TmuxTimeout(Exception):
+    """tmux did not answer in time: whether the keys reached the pane is unknown."""
+
+
 class TmuxCheckError(Exception):
     """tmux could not answer: what it was asked is unknown (not "nobody", not "nothing")."""
 
@@ -111,6 +115,7 @@ class TmuxController:
                 capture_output=True,
                 text=True,
                 check=True,
+                timeout=5,
             )
             return res.stdout
         except Exception as e:
@@ -243,6 +248,8 @@ class TmuxController:
         try:
             subprocess.run(["tmux", "send-keys", "-t", target, "-l", text], check=True, timeout=5)
             return True
+        except subprocess.TimeoutExpired:
+            raise TmuxTimeout(f"tmux did not answer while typing into {target}") from None
         except Exception as e:
             logger.error(f"Failed to type into {target}: {e}")
             return False

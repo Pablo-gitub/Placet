@@ -151,6 +151,19 @@ describe("session controls menu", () => {
     expect(screen.queryByTestId("control-error")).toBeNull();
   });
 
+  it("translates the refusals of the hardened path", async () => {
+    for (const [code, key] of [["session_command.expired", "errors.commandExpired"],
+      ["session_command.unknown_job", "errors.commandBridgeOld"], ["session.has_request_running", "errors.sessionRequestRunning"],
+      ["bridge.not_taken", "errors.bridgeNotTaken"]]) {
+      serve(409, { code, params: {}, detail: "raw" });
+      const { unmount } = render(<SessionControls session={session(SUPPORTED)} />);
+      open();
+      fireEvent.click(screen.getByTestId("control-compact"));
+      expect(await screen.findByTestId("control-error")).toHaveTextContent(i18n.t(key));
+      unmount();
+    }
+  });
+
   it("renders nothing for a session without control information", () => {
     const { container } = render(<SessionControls session={{ id: "s1", provider: "claude-code" }} />);
     expect(container).toBeEmptyDOMElement();

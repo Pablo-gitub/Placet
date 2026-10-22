@@ -1,5 +1,6 @@
 from dataclasses import replace
 import os
+import time
 import json
 import asyncio
 import base64
@@ -30,6 +31,7 @@ from backend.app.auth import (
 )
 from backend.app.config import PlacetConfig, load_agents_config
 from backend.app.database import (
+    ControlPending,
     Database, NameTaken, NodeNameTaken, ProjectNameTaken,
     compose_project_instructions,
 )
@@ -69,7 +71,8 @@ from backend.app.models import (
 )
 from backend.app import envelopes
 from backend.app.upload_limits import MessageBodyLimit
-from backend.app.bridge_jobs import BridgeJobs, BridgeOffline, BridgeTimeout
+from backend.app import bridge_jobs as bridge_jobs_module
+from backend.app.bridge_jobs import BridgeJobs, BridgeNotTaken, BridgeOffline, BridgeTimeout
 from backend.app.webpush import WebPush, allowed_endpoint
 from backend.app.admin_commands import AdminCommands, install_routes as install_admin_routes
 from backend.app.notifier import NtfyConfig, send_ntfy_alert, send_ntfy_notification, send_ntfy_turn_end, session_label
@@ -502,6 +505,9 @@ def create_app(
     if db is None:
         db = Database(os.environ.get("PLACET_DB_PATH", "placet.db"))
         db.init_db()
+    # RF-62: a control left pending belongs to a backend that is gone: its outcome is unknown.
+    # Only here (the backend starting), not in init_db, which the bridge's own store also runs.
+    db.settle_pending_session_controls()
 
     if config is None:
         config = load_agents_config()
@@ -1583,18 +1589,27 @@ def create_app(
                   "invalid": (422, "Not a fixed session command."),
                   "send_failed": (502, "tmux refused the keys; nothing was typed."),
                   "enter_failed": (502, "The text was typed but Enter was not sent."),
-                  "unverified": (502, "Enter was sent but the screen cannot be read.")}
+                  "unverified": (502, "Enter was sent but the screen cannot be read."),
+                  "type_timeout": (502, "tmux did not answer while typing."),
+                  "expired": (409, "The command waited too long for the terminal and was dropped."),
+                  "unknown_job": (409, "The bridge is too old for this command.")}
         # Certainly not typed: every check failed, or the job never reached the bridge. Anything
         # else (lost reply, timeout, text typed without Enter, an unexpected error) is uncertain.
-        refused = {"bridge.offline", "session_command.wrong_session", "session_command.tmux_missing",
+        refused = {"bridge.offline", "bridge.not_taken", "session_command.expired", "session_command.unknown_job",
+                   "session_command.wrong_session", "session_command.tmux_missing",
                    "session_command.not_idle", "session_command.user_typing", "session_command.check_failed",
                    "session_command.identity_unknown", "session_command.server_mismatch",
                    "session_command.agent_gone", "session_command.agent_not_in_pane",
                    "session_command.invalid",
                    "session_command.send_failed"}
-        if db.pending_session_control(session_id) is not None:
-            raise ProductError(409, "session.control_pending", "A control for this session is still being sent.")
-        control_id = db.begin_session_control(session_id, who.actor, line)
+        if db.session_has_running_request(session.id):
+            raise ProductError(409, "session.has_request_running",
+                               "A Placet request is being delivered to or executed by this session.")
+        params["deadline"] = time.time() + bridge_jobs_module.JOB_TIMEOUT_SECONDS
+        try:
+            control_id = db.begin_session_control(session_id, who.actor, line)
+        except ControlPending:
+            raise ProductError(409, "session.control_pending", "A control for this session is still being sent.") from None
         try:
             outcome = await bridge_call("session_command", params, local, errors)
         except ProductError as e:
@@ -2105,6 +2120,8 @@ def create_app(
             result = await bridge_jobs.run(kind, params)
         except BridgeOffline:
             raise ProductError(503, "bridge.offline", "The bridge is offline.") from None
+        except BridgeNotTaken:
+            raise ProductError(504, "bridge.not_taken", "The bridge did not pick the job up: nothing was done.") from None
         except BridgeTimeout:
             raise ProductError(504, "bridge.timeout", "The bridge did not respond in time.") from None
         if not result.get("ok"):

@@ -7,7 +7,7 @@ from typing import Optional
 
 from backend.app.session_commands import command_text
 from bridge.procs import Procs
-from bridge.tmux_controller import TmuxCheckError
+from bridge.tmux_controller import TmuxCheckError, TmuxTimeout
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ def _number(value) -> Optional[int]:
 
 def run_command(tmux, spec, tmux_session: Optional[str], tmux_pane: Optional[str],
                 command: str, level: Optional[str], lock=None, identity: Optional[dict] = None,
-                procs=None):
+                procs=None, deadline: Optional[float] = None):
     """
     Sends the command to the session's pane and returns the line typed. The
     target is the stable pane id (%N), never a session name: a pane switch
@@ -61,6 +61,10 @@ def run_command(tmux, spec, tmux_session: Optional[str], tmux_pane: Optional[str
     except ValueError:
         raise CommandError("invalid", "Not a fixed session command.") from None
     with lock if lock is not None else nullcontext():
+        # The backend stopped waiting at the deadline: a job that got the terminal late
+        # (a delivery held it) is refused, never typed behind the user's back.
+        if isinstance(deadline, (int, float)) and time.time() > deadline:
+            raise CommandError("expired", "The command waited too long for the terminal and was dropped.")
         info = tmux.pane_info(tmux_pane)
         if info is None:
             raise CommandError("tmux_missing", f"Pane {tmux_pane} is not running.")
@@ -83,7 +87,11 @@ def run_command(tmux, spec, tmux_session: Optional[str], tmux_pane: Optional[str
             raise CommandError("user_typing", "Someone is typing in the session.")
         # Two steps, so that a failure tells what happened: nothing typed (send_failed,
         # certain) or the text typed but never confirmed (enter_failed, uncertain).
-        if not tmux.type_text(tmux_pane, line):
+        try:
+            typed = tmux.type_text(tmux_pane, line)
+        except TmuxTimeout:
+            raise CommandError("type_timeout", "tmux did not answer while typing: check the session.") from None
+        if not typed:
             raise CommandError("send_failed", "tmux refused the keys; nothing was typed.")
         if not tmux.press_enter(tmux_pane):
             raise CommandError("enter_failed", "The text was typed but Enter was not sent: check the session.")

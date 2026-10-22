@@ -451,7 +451,7 @@ class BridgeDaemon:
                                    job.get("command") or "", job.get("level"),
                                    lock=self.pane_lock(spec.name) if spec else None,
                                    identity={k: job.get(k) for k in ("tmux_server", "agent_pid", "agent_started")},
-                                   procs=self.procs)
+                                   procs=self.procs, deadline=job.get("deadline"))
                 page = {"sent": line, "needs_confirmation": needs_confirmation}
             elif kind == "claude_renew":
                 ok = renew_claude_credentials()

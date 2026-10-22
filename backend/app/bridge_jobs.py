@@ -29,6 +29,10 @@ class BridgeTimeout(Exception):
     pass
 
 
+class BridgeNotTaken(BridgeTimeout):
+    """Timed out while the job was still queued: the bridge never took it, so nothing ran."""
+
+
 class BridgeJobs:
     def __init__(self, alive_seconds: float = BRIDGE_ALIVE_SECONDS):
         self.alive_seconds = alive_seconds
@@ -55,7 +59,11 @@ class BridgeJobs:
         try:
             return await asyncio.wait_for(future, timeout)
         except asyncio.TimeoutError:
-            raise BridgeTimeout() from None
+            try:
+                self._pending.remove(job)
+            except ValueError:
+                raise BridgeTimeout() from None   # the bridge took it: what it did is unknown
+            raise BridgeNotTaken() from None
         finally:
             self._results.pop(job_id, None)
             with contextlib.suppress(ValueError):

@@ -91,7 +91,7 @@ async def test_compact_goes_to_the_bridge_as_a_fixed_command(env):
     assert job["tmux_session"] == "agent-claude" and job["agent_id"] == "claude"
     assert job["session_id"] == "s1" and job["tmux_pane"] == "%3"  # who, and the stable pane
     assert set(job) <= {"id", "kind", "command", "level", "tmux_session", "tmux_pane", "tmux_server", "agent_pid",
-                        "agent_started", "session_id", "agent_id"}  # no free text
+                        "agent_started", "session_id", "agent_id", "deadline"}  # no free text
     [event] = db.list_session_controls("s1")
     assert event["actor"].startswith("human") and event["command"] == "/compact" and event["state"] == "sent"
 
@@ -432,16 +432,22 @@ async def test_a_pending_command_blocks_a_second_one(env):
     assert resp.status_code == 409 and resp.json()["code"] == "session.control_pending"
 
 
-def test_a_restart_turns_pending_rows_into_uncertain(tmp_path):
+def test_only_the_backends_startup_turns_pending_rows_into_uncertain(tmp_path):
     path = str(tmp_path / "placet.db")
     db = Database(path)
     db.init_db()
     pending = db.begin_session_control("s1", "human:p", "/compact")
-    done = db.begin_session_control("s1", "human:p", "/effort low")
+    done = db.begin_session_control("s2", "human:p", "/effort low")
     db.settle_session_control(done, "sent")
+    other = Database(path)                       # the bridge's LocalStore opens the database too
+    other.init_db()
+    assert other.list_session_controls("s1")[0]["state"] == "pending"
     restarted = Database(path)
     restarted.init_db()
-    assert {row["id"]: row["state"] for row in restarted.list_session_controls("s1")} == {pending: "uncertain", done: "sent"}
+    create_app(db=restarted, config=CONFIG, bridge_token="tok-bridge")     # the backend starts
+    assert restarted.list_session_controls("s1")[0]["id"] == pending
+    assert restarted.list_session_controls("s1")[0]["state"] == "uncertain"
+    assert restarted.list_session_controls("s2")[0]["state"] == "sent"
 
 
 def test_rows_written_before_states_existed_count_as_sent(tmp_path):
@@ -662,3 +668,121 @@ async def test_an_unverified_enter_is_uncertain(env):
     resp = await post(app, "/api/sessions/s1/compact", bridge_answer={"ok": False, "error": "unverified"})
     assert resp.status_code == 502 and resp.json()["code"] == "session_command.uncertain"
     assert [row["state"] for row in db.list_session_controls("s1")] == ["uncertain"]
+
+
+# --- P2 ---------------------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_job_carries_a_deadline_and_the_bridge_refuses_after_it(env):
+    import time
+    app, db = env
+    await start(app, "claude", "s1", "claude-code")
+    seen = []
+    await post(app, "/api/sessions/s1/compact", bridge_answer={"ok": True, "page": {"sent": "/compact", "needs_confirmation": False}}, seen=seen)
+    assert seen[0]["deadline"] > time.time() - 1
+    tmux = FakeTmux()
+    out = daemon(env, tmux).handle_job({**JOB, "deadline": time.time() - 1})
+    assert out["ok"] is False and out["error"] == "expired" and tmux.sent == [] and tmux.typed is None
+
+
+def test_a_job_that_waited_for_the_lock_past_its_deadline_is_refused(env):
+    import threading
+    import time
+    tmux = FakeTmux()
+    bridge = daemon(env, tmux)
+    lock = bridge.pane_lock("agent-claude")
+    result = []
+    lock.acquire()                                             # a delivery holds the terminal
+    worker = threading.Thread(target=lambda: result.append(bridge.handle_job({**JOB, "deadline": time.time() + 0.2})))
+    worker.start()
+    time.sleep(0.4)
+    lock.release()
+    worker.join(5)
+    assert result[0]["error"] == "expired" and tmux.typed is None
+
+
+@pytest.mark.asyncio
+async def test_a_job_nobody_took_is_a_certain_refusal(env, monkeypatch):
+    app, db = env
+    await start(app, "claude", "s1", "claude-code")
+    monkeypatch.setattr("backend.app.bridge_jobs.JOB_TIMEOUT_SECONDS", 0.2)
+    async with agent_client(app, "tok-bridge") as bridge:
+        assert (await bridge.get("/api/bridge/jobs")).status_code == 204        # the bridge is alive...
+        resp = await post(app, "/api/sessions/s1/compact")                       # ...but takes nothing
+    assert resp.status_code == 504 and resp.json()["code"] == "bridge.not_taken"
+    assert [row["state"] for row in db.list_session_controls("s1")] == ["refused"]
+
+
+@pytest.mark.asyncio
+async def test_a_bridge_that_does_not_know_the_job_is_a_refusal(env):
+    app, db = env
+    await start(app, "claude", "s1", "claude-code")
+    resp = await post(app, "/api/sessions/s1/compact", bridge_answer={"ok": False, "error": "unknown_job"})
+    assert resp.status_code == 409 and resp.json()["code"] == "session_command.unknown_job"
+    assert [row["state"] for row in db.list_session_controls("s1")] == ["refused"]
+
+
+def test_a_typing_timeout_is_uncertain_not_a_refusal(env, monkeypatch):
+    from bridge.tmux_controller import TmuxTimeout
+    tmux = FakeTmux()
+
+    def hangs(target, text):
+        raise TmuxTimeout("tmux did not answer")
+    tmux.type_text = hangs
+    out = daemon(env, tmux).handle_job(JOB)
+    assert out["ok"] is False and out["error"] == "type_timeout"
+
+
+@pytest.mark.asyncio
+async def test_a_typing_timeout_is_audited_uncertain(env):
+    app, db = env
+    await start(app, "claude", "s1", "claude-code")
+    resp = await post(app, "/api/sessions/s1/compact", bridge_answer={"ok": False, "error": "type_timeout"})
+    assert resp.status_code == 502 and resp.json()["code"] == "session_command.uncertain"
+    assert [row["state"] for row in db.list_session_controls("s1")] == ["uncertain"]
+
+
+def test_the_controller_times_out_typing_and_capturing(monkeypatch):
+    import subprocess
+    from bridge.tmux_controller import TmuxController, TmuxTimeout
+    seen = {}
+
+    def run(*a, **k):
+        seen.update(k)
+        raise subprocess.TimeoutExpired("tmux", 5)
+    monkeypatch.setattr("bridge.tmux_controller.subprocess.run", run)
+    controller = TmuxController()
+    with pytest.raises(TmuxTimeout):
+        controller.type_text("%3", "/compact")
+    assert controller.capture_pane("%3") == "" and seen.get("timeout")       # bounded, and a timeout reads as empty
+
+
+def test_two_pending_controls_for_one_session_cannot_exist(tmp_path):
+    from backend.app.database import ControlPending
+    db = Database(str(tmp_path / "placet.db"))
+    db.init_db()
+    first = db.begin_session_control("s1", "human:p", "/compact")
+    with pytest.raises(ControlPending):
+        db.begin_session_control("s1", "human:p", "/effort low")
+    db.begin_session_control("s2", "human:p", "/compact")                    # another session is free
+    db.settle_session_control(first, "sent")
+    db.begin_session_control("s1", "human:p", "/effort low")
+
+
+@pytest.mark.asyncio
+async def test_a_session_with_a_request_being_delivered_or_executed_takes_no_command(env):
+    from backend.app.models import RequestCreate
+    app, db = env
+    await start(app, "claude", "s1", "claude-code")
+    req = db.create_request(RequestCreate(sender_id="codex", recipient_id="claude", prompt="fai"))
+    for status in ("APPROVED", "COMPLETED"):
+        with db._get_connection() as conn:
+            conn.execute("UPDATE requests SET status = ?, recipient_session_id = 's1' WHERE id = ?", (status, req.id))
+        ok = await post(app, "/api/sessions/s1/compact", bridge_answer={"ok": True, "page": {"sent": "/compact", "needs_confirmation": False}})
+        assert ok.status_code == 200, status
+    for status in ("DELIVERING", "EXECUTING"):
+        with db._get_connection() as conn:
+            conn.execute("UPDATE requests SET status = ? WHERE id = ?", (status, req.id))
+        resp = await post(app, "/api/sessions/s1/compact")
+        assert resp.status_code == 409 and resp.json()["code"] == "session.has_request_running", status
