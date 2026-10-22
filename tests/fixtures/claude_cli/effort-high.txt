@@ -1,0 +1,6 @@
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+   Change effort level?
+   Your next response will be slower and use more tokens
+   This conversation is cached for the current effort level. Switching to high means the full history gets re-read on your next message.
+   ❯ 1. Yes, switch to high
+     2. No, go back

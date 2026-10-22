@@ -14,6 +14,26 @@
     "label": "Language",
     "auto": "Auto"
   },
+  "controls": {
+    "title": "Session controls",
+    "compact": "Compact",
+    "effort": "Effort",
+    "apply": "Apply",
+    "done": "Command sent.",
+    "pcOnly": "Available only on the PC for this session.",
+    "unsupported": "This provider has no remote control for this (Codex ignores it; Antigravity is not verified).",
+    "busy": "The session is working: available when the turn ends.",
+    "confirmRepeat": "The previous command may already have been applied. Send it again?",
+    "effortPersists": "low, medium, high and xhigh are saved as the default for future sessions; max applies to this session only; auto clears the saved level and returns to the model's default. If CLAUDE_CODE_EFFORT_LEVEL is set in the environment it is an explicit choice that takes precedence over saved levels. Available levels depend on the model.",
+    "effortDocs": "Effort levels in the Claude Code documentation",
+    "needsConfirmation": "Command typed, but a confirmation is waiting on the PC: confirm it there."
+  },
+  "mcp": {
+    "warning": "Placet MCP not detected",
+    "hintMissing": "Not found in the configurations Placet checks. Check the client's MCP configuration and its available tools.",
+    "hintSuspect": "No Placet tool call was seen in this session. Check the client's available tools.",
+    "guide": "Installation guide"
+  },
   "home": {
     "questions": "Questions",
     "emptyQuestions": "No questions waiting.",
@@ -109,6 +129,15 @@
     "pinSave": "Unable to save your session selection.",
     "messageConnection": "Connection error: your message was not sent.",
     "sessionClosed": "This session is closed. You can no longer send messages to it.",
+    "sessionBusy": "The session is working: wait for the turn to end.",
+    "controlPcOnly": "This control is available only on the PC for this session.",
+    "controlUnsupported": "This provider offers no remote control for this.",
+    "effortInvalid": "That effort level is not accepted.",
+    "commandNotIdle": "The session is not at an empty prompt.",
+    "commandUserTyping": "Someone is typing in the session: try again in a moment.",
+    "commandTmuxMissing": "The session's terminal is not running.",
+    "commandWrongSession": "This is not the terminal configured for the agent.",
+    "commandSendFailed": "The terminal refused the command.",
     "unknownAgent": "This session has an unknown agent. Check the agent configuration.",
     "mentionAmbiguous": "Ambiguous mention. Select the target session again.",
     "mentionMissing": "A selected mention is missing from your message. Select it again or remove the reference.",
@@ -155,7 +184,22 @@
     "invalidTimezone": "Invalid timezone.",
     "invalidDate": "Invalid date format (expected YYYY-MM-DD).",
     "invalidRange": "Start date cannot be after end date.",
-    "rangeTooLarge": "Date range exceeds maximum allowed."
+    "rangeTooLarge": "Date range exceeds maximum allowed.",
+    "commandUncertain": "Uncertain outcome: check the session before repeating.",
+    "commandEnterFailed": "The text was typed but not confirmed: check the session.",
+    "paneStale": "Another session now runs in this terminal.",
+    "paneAmbiguous": "Two sessions are equally recent in this terminal: try again after one of them acts.",
+    "controlPending": "A control for this session is still being sent.",
+    "commandCheckFailed": "Placet could not tell whether someone is typing in the session: try again.",
+    "commandIdentity": "This terminal no longer matches the session (tmux was restarted, or the session's program is not running here). Nothing was sent.",
+    "commandExpired": "The terminal was busy for too long: nothing was sent.",
+    "commandBridgeOld": "The bridge on the PC is too old for this command: update it. Nothing was sent.",
+    "sessionRequestRunning": "A Placet request is being delivered to or executed by this session: try again when it ends.",
+    "bridgeNotTaken": "The bridge on the PC did not pick the command up. Nothing was sent.",
+    "controlUncertain": "The previous command's outcome is uncertain: check the session first.",
+    "scheduleTimeInPast": "Scheduled time cannot be in the past.",
+    "scheduleTooFarAhead": "Scheduled time cannot be more than 30 days in the future.",
+    "scheduleNotAllowed": "This message cannot be scheduled."
   },
   "sessions": {
     "closed": "Closed",
@@ -305,7 +349,9 @@
     "send": "Send",
     "limited": "{{provider}} has reached its usage limit: your message waits in Placet and is sent after the reset at {{time}}.",
     "noProjectsForSession": "No projects for this session",
-    "projectMentionLabel": "Projects for this session"
+    "projectMentionLabel": "Projects for this session",
+    "schedule": "Schedule",
+    "clearSchedule": "Clear schedule"
   },
   "chat": {
     "actions_one": "{{count}} action",
@@ -384,7 +430,12 @@
     "markedFinished": "Marked finished: the session can receive the next message.",
     "queuedNext": "The next message will be sent without waiting.",
     "limited": "Waiting: {{provider}} reached its usage limit, sent after the reset at {{time}}",
-    "mayStillRun": "It has replied, but it may still be working: releasing the queue does not interrupt it."
+    "mayStillRun": "It has replied, but it may still be working: releasing the queue does not interrupt it.",
+    "scheduledFor": "Scheduled for {{time}}",
+    "sendNow": "Send now",
+    "modify": "Edit",
+    "sendNowFeedback": "Message sent now.",
+    "scheduledFeedback": "Message scheduled."
   },
   "backgroundLanguage": {
     "title": "Notification and message language",
@@ -565,7 +616,8 @@
     "nodeInstructionsTitle": "Node instructions in this project",
     "nodeInstructionsPlaceholder": "E.g. Specific role of this node in the project…",
     "saveNodeInstructions": "Save node instructions",
-    "graphWaiting": "Waiting for you"
+    "graphWaiting": "Waiting for you",
+    "graphQueued": "Queued"
   },
   "settings": {
     "title": "Settings",
@@ -586,6 +638,8 @@
     "guardActive": "Now reviewed because of usage: {{providers}}.",
     "guardClaudeWarning": "Claude needs automatic login renewal: without it, after about 8 hours Placet can no longer read its usage and the guard does not apply to Claude.",
     "renewHint": "Renews Claude Code's login when it expires, without using the model, so its usage stays current.",
+    "deliverAtResetTitle": "Deliver at reset",
+    "deliverAtResetHint": "When recipient or sender is over limit, schedule delivery for the next reset instead of requiring manual review.",
     "save": "Save",
     "saveError": "Could not save.",
     "loadError": "Settings unavailable.",

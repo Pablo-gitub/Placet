@@ -28,7 +28,9 @@ export function providerOf(session) {
 }
 
 export function sessionProject(session) {
-  return session?.cwd ? session.cwd.split("/").filter(Boolean).pop() : null;
+  // The project, not the folder the session happens to work in (a worktree's root is its repository).
+  const folder = session?.project_root || session?.cwd;
+  return folder ? folder.split("/").filter(Boolean).pop() : null;
 }
 
 function sessionClient(session) {

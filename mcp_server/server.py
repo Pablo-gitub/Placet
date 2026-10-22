@@ -37,18 +37,24 @@ def read_prompt_file(path: str):
 def _format_error(e: Exception) -> str:
     if isinstance(e, httpx.HTTPStatusError):
         detail = str(e)
+        body = None
         try:
             body = e.response.json()
             if isinstance(body, dict) and "detail" in body:
                 detail = body["detail"]
         except Exception:
             pass
-        return json.dumps({
+        error = {
             "status": "ERROR",
             "code": e.response.status_code,
             "error": str(e),
             "detail": detail,
-        }, ensure_ascii=False)
+        }
+        # Product errors carry a stable code and parameters (candidates, ...).
+        if isinstance(body, dict) and isinstance(body.get("code"), str):
+            error["product_code"] = body["code"]
+            error["params"] = body.get("params") or {}
+        return json.dumps(error, ensure_ascii=False)
 
     return json.dumps({
         "status": "ERROR",
@@ -117,7 +123,10 @@ def placet_send_to_agent(
     - `target_node` (+ `relation_type` when several types connect you): a node
       name from placet_list_relations. Prefer this when you have relations.
     - `target_agent` (+ optional `target_session` from placet_list_agents): an
-      ad hoc request, always reviewed by the human.
+      ad hoc request, always reviewed by the human. Without `target_session`
+      the request goes to the one reachable session of that agent in your
+      folder; with none or several there (request.target_session_ambiguous)
+      nothing is sent: pass `target_session`, or ask the human which one.
 `session_id` is your own session ID: pass it (as for placet_list_relations)
 when Placet cannot tell which session is sending; with `target_node`, a
 missing sender or relation is an error and nothing is sent.
