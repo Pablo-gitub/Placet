@@ -62,6 +62,35 @@ app) and `reachable`. rc=0 is never called "started"; the log keeps "Requested
 (`POST /api/bridge/sessions/{id}/wake`, from its loop: waking itself never touches
 the mail or the store).
 
+### Why the session may not start: the app's capacity limit (October 22, 2026)
+
+Findings from the app's own log, read only (Claude Desktop 2.9939.4, `~/.config/Claude/logs/main.log`),
+not from documentation; the format is not an API and may change with any version:
+
+- The link **does** start the engine when the app has room: on October 19 the log shows
+  `[CCD] Session local_<id> warmed successfully in <n>ms` for a link opened by Placet.
+- When the app is at its cap of warm sessions it logs, after `[CCD] Warming session local_<id>`,
+  `[CliGovernor] at cap=7; would evict local_<victim> (idle Ns) for warm spawn` and then
+  `[CliGovernor] at cap; yielding warm spawn`, and the engine never starts. The governor only
+  evicts for a warm spawn when the active count equals the cap exactly: once the count is above the
+  cap (spawns the user typed may exceed it) a link wake-up is always yielded.
+- In this app version the per-session idle timeout is no longer armed (the last `Starting idle
+  timeout` for sessions is from September 21), so idle engines are not reaped by it.
+- Placet cannot call the app's internal pause, and does not try to evict or close anything.
+
+`bridge/claude_desktop_log.py` is an isolated adapter that, for a few minutes after an accepted open,
+reads the tail of that log (a plain file of the user, never a symlink, at most 256 KB, tolerant of
+truncation and rotation) and names **one** cause, `warm_capacity_denied`, only when the full sequence
+for that very session appears after the attempt: its warm spawn, then `at cap; yielding warm spawn`,
+before any `warmed successfully` for it. A `would evict` line alone, another session's refusal, older
+lines, an unknown format or an unreadable log give no diagnosis, and a later success, a `SessionStart`
+or a waiter heartbeat supersedes it. Only the closed code, the time the app logged it and the attempt
+it belongs to reach the backend (`POST /api/bridge/sessions/{id}/wake-cause`): never a line, a path, an
+argument or chat content. It is stored with the wake state (`sessions.wake_cause`, `wake_cause_at`) and
+the notice adds that Claude Desktop reported its limit on preloaded sessions during this attempt, that
+the start is not confirmed and that writing in the chat on the PC starts the session. The cause informs
+only: it never changes the delivery or the queue, and never triggers a retry or an eviction.
+
 For `wake_unconfirmed` and `wake_failed` the session view shows one notice (opening
 requested but the session did not start listening; the message is still in
 Placet; write in the chat on the PC or retry) with the time of the last attempt and
