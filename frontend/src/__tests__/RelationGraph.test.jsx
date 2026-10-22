@@ -1,6 +1,7 @@
 import React from "react";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
+import i18n from "../i18n";
 import RelationGraph from "../RelationGraph";
 
 // The real nodes and relations of the Placet project (October 19, 2026).
@@ -89,6 +90,20 @@ describe("live activity (RF-44)", () => {
     const ball = screen.getByTestId("graph-ball-1");
     expect(ball).toHaveClass("rg-ball-delivering");
     expect(ball.querySelector("animateMotion").getAttribute("keyPoints")).toBe("0;1");
+  });
+
+  it("keeps a queued prompt at the sender's end, still, with its own legend", () => {
+    render(<RelationGraph nodes={live} relations={relations} requests={[req({ status: "APPROVED" })]} />);
+    const ball = screen.getByTestId("graph-ball-1");
+    expect(ball).toHaveClass("rg-ball-queued");
+    expect(ball.querySelector("animateMotion")).toBeNull();
+    expect(screen.getByTestId("graph-legend-queued")).toHaveTextContent(i18n.t("projects.graphQueued"));
+    expect(screen.queryByTestId("graph-legend-waiting")).toBeNull();
+  });
+
+  it("does not show the queued legend once the delivery starts", () => {
+    render(<RelationGraph nodes={live} relations={relations} requests={[req({ status: "DELIVERING" })]} />);
+    expect(screen.queryByTestId("graph-legend-queued")).toBeNull();
   });
 
   it("highlights the edge while the recipient executes", () => {
