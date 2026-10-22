@@ -158,3 +158,20 @@ def test_the_attempt_is_forgotten_after_a_while():
     bridge.diagnose_wakes()
     waker.diagnose.assert_not_called()
     assert bridge._wake_diagnoses == {}
+
+
+def test_the_attempt_time_is_taken_before_the_launcher_runs():
+    """The app logs the warm-up while the link is being handed over, before the launcher returns."""
+    import time as clock
+    waker = MagicMock()
+    seen = {}
+
+    def slow_open(*_args, **_kwargs):
+        seen["during"] = clock.time()
+        clock.sleep(1.2)
+        return True
+
+    waker.open.side_effect = slow_open
+    bridge, _ = daemon(waker)
+    bridge.wake_claude_sessions([{"id": SID, "cwd": "/lab"}])
+    assert bridge._wake_diagnoses[SID]["attempt_epoch"] <= seen["during"]
