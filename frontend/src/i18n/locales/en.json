@@ -779,6 +779,7 @@
     "failed": "Placet could not ask Claude Desktop to open the session. The message is still in Placet: open the session on the PC, or try again.",
     "waiting": "Opening requested: waiting for the session to start listening…",
     "lastAttempt": "Last attempt: {{when}}",
-    "retry": "Retry opening"
+    "retry": "Retry opening",
+    "capacityDenied": "Claude Desktop reported its limit on preloaded sessions during this attempt. The start is not confirmed; the message is still in Placet: write a message in the chat on the PC to start it."
   }
 }

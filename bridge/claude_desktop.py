@@ -12,16 +12,18 @@ import time
 import uuid
 
 from hooks.placet_common import active
+from bridge.claude_desktop_log import ClaudeDesktopLog
 
 LOCAL_ID = re.compile(r'local_[A-Za-z0-9-]{1,64}\Z')
 COOLDOWN_SECONDS = 300
 
 
 class ClaudeDesktopWake:
-    def __init__(self, sessions_dir=None, state_dir=None, run=subprocess.run, clock=time.time):
+    def __init__(self, sessions_dir=None, state_dir=None, run=subprocess.run, clock=time.time, log=None):
         self.sessions_dir = Path(sessions_dir or Path.home() / '.config/Claude/claude-code-sessions')
         self.state_dir = Path(state_dir or Path.home() / '.cache/placet/claude-wake')
         self.run, self.clock = run, clock
+        self.log = log or ClaudeDesktopLog()
 
     def resolve(self, session_id, cwd):
         matches = []
@@ -77,3 +79,11 @@ class ClaudeDesktopWake:
             if result.returncode != 0:
                 raise RuntimeError('Claude Desktop did not accept the conversation link')
         return True
+
+    def diagnose(self, session_id, cwd, since):
+        """Why the app did not start the session this attempt asked for (a closed code), if its log says so."""
+        try:
+            local_id = self.resolve(str(uuid.UUID(session_id)), cwd)
+            return self.log.diagnose(local_id, since)
+        except Exception:
+            return None

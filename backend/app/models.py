@@ -413,6 +413,9 @@ class SessionModel(BaseModel):
     wake_state: Optional[str] = None
     wake_at: Optional[datetime] = None
     wake_attempts: int = 0
+    # Why the app did not start it, when its log says so: a closed code (warm_capacity_denied).
+    wake_cause: Optional[str] = None
+    wake_cause_at: Optional[datetime] = None
     # When the hook last reported the configuration (each start): a use before it does not
     # prove the configuration of this start.
     mcp_checked_at: Optional[datetime] = None

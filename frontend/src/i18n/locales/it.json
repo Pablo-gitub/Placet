@@ -779,6 +779,7 @@
     "failed": "Placet non è riuscito a chiedere a Claude Desktop di aprire la sessione. Il messaggio è ancora in Placet: apri la sessione sul PC, oppure riprova.",
     "waiting": "Apertura richiesta: in attesa che la sessione inizi ad ascoltare…",
     "lastAttempt": "Ultimo tentativo: {{when}}",
-    "retry": "Riprova apertura"
+    "retry": "Riprova apertura",
+    "capacityDenied": "Claude Desktop ha segnalato il limite delle sessioni precaricate durante questo tentativo. L'avvio non è confermato; il messaggio è ancora in Placet: scrivi un messaggio nella chat sul PC per avviarla."
   }
 }

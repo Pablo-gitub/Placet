@@ -1,4 +1,5 @@
 import base64
+from datetime import datetime, timezone
 import time
 import logging
 import subprocess
@@ -12,6 +13,7 @@ from backend.app import envelopes
 from backend.app.models import RequestModel
 from bridge.channels import ChannelError, ChannelUncertain, default_channels
 from bridge.stores import BridgeStore, LocalStore, Work
+from bridge.claude_desktop_log import WakeDiagnosis
 from bridge.procs import Procs
 from bridge.session_commands import CommandError, run_command
 from bridge.tmux_controller import SessionSpec, TmuxController
@@ -41,6 +43,8 @@ RECONCILE_EVERY_SECONDS = 20.0
 FOLDERS_EVERY_SECONDS = 15.0
 # A "now" message taken by the hook is confirmed by its event within this long.
 STEER_CONFIRM_SECONDS = 120.0
+# How long after an accepted Claude Desktop open the app's log is read for the cause.
+WAKE_DIAGNOSIS_SECONDS = 180.0
 # How often Codex and Antigravity titles are read (they change on rename).
 TITLES_EVERY_SECONDS = 30.0
 # How often usage windows are read (RF-60).
@@ -70,6 +74,8 @@ class BridgeDaemon:
         self.spool = spool
         self.claude_waker = claude_waker if claude_waker is not None else ClaudeDesktopWake()
         self._claude_wake_at: dict = {}
+        # Accepted opens still worth looking at in the app's log: session -> attempt, last diagnosis.
+        self._wake_diagnoses: dict = {}
         self._reconciled_at: dict = {}
         self._folders_at = -FOLDERS_EVERY_SECONDS
         self._excluded: Optional[Set[str]] = None
@@ -418,7 +424,37 @@ class BridgeDaemon:
                 outcome = 'failed'
             if outcome:
                 outcomes[sid] = outcome
+            if outcome == 'open_requested':
+                self._wake_diagnoses[sid] = {'cwd': session.get('cwd'), 'attempt_epoch': time.time(),
+                                             'attempt_at': datetime.now(timezone.utc), 'reported': False}
         return outcomes
+
+    def diagnose_wakes(self) -> None:
+        """
+        For a few minutes after an accepted open, read the app's log for the cause when the session
+        does not start (today: the app's capacity limit for warm sessions). Reports a closed code
+        only; a log it cannot read or does not recognise is no diagnosis. Never raises, never acts.
+        """
+        for sid, info in list(self._wake_diagnoses.items()):
+            if time.time() - info['attempt_epoch'] > WAKE_DIAGNOSIS_SECONDS:
+                del self._wake_diagnoses[sid]
+                continue
+            try:
+                found = self.claude_waker.diagnose(sid, info['cwd'], info['attempt_epoch'])
+            except Exception:
+                continue
+            if not isinstance(found, WakeDiagnosis):
+                found = None
+            if found is None and not info['reported']:
+                continue
+            if found is not None and info['reported']:
+                continue
+            try:
+                self.store.report_wake_cause(sid, found.code if found else None,
+                                             found.observed_at if found else None, info['attempt_at'])
+                info['reported'] = found is not None
+            except Exception as exc:
+                logger.warning('Could not report the wake-up cause of %s (%s).', sid, type(exc).__name__)
 
     def run_loop_step(self) -> int:
         # At most one injection per session per tick, outcomes first: they
@@ -428,6 +464,7 @@ class BridgeDaemon:
         self.check_folders(work.folders)
         self.refresh_titles(work.titles)
         self.refresh_usage(auto_renew=work.claude_auto_renew)
+        self.diagnose_wakes()
         for sid, outcome in self.wake_claude_sessions(work.claude_wake_sessions).items():
             try:
                 self.store.report_wake(sid, outcome)

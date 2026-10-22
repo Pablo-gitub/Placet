@@ -514,6 +514,9 @@ class Database:
                 cursor.execute("ALTER TABLE sessions ADD COLUMN wake_attempts INTEGER NOT NULL DEFAULT 0;")
                 cursor.execute("ALTER TABLE sessions ADD COLUMN wake_force INTEGER NOT NULL DEFAULT 0;")
                 cursor.execute("ALTER TABLE sessions ADD COLUMN wake_alerted_at TEXT;")
+            if "wake_cause" not in session_cols:
+                cursor.execute("ALTER TABLE sessions ADD COLUMN wake_cause TEXT;")
+                cursor.execute("ALTER TABLE sessions ADD COLUMN wake_cause_at TEXT;")
             if "mcp_checked_at" not in session_cols:
                 # When the hook last reported the configuration (each start), to tell a use
                 # since this start from one that predates it.
@@ -2001,6 +2004,8 @@ class Database:
             wake_state=Database._effective_wake_state(row["wake_state"], _ts(row["wake_at"])),
             wake_at=_ts(row["wake_at"]),
             wake_attempts=row["wake_attempts"] or 0,
+            wake_cause=row["wake_cause"],
+            wake_cause_at=_ts(row["wake_cause_at"]),
             mcp_checked_at=_ts(row["mcp_checked_at"]),
             node_id=row["node_id"],
             node_name=row["node_name"] if "node_name" in row.keys() else None,
@@ -3311,6 +3316,30 @@ class Database:
                 and s.wake_attempts < self.WAKE_MAX_ATTEMPTS
                 and self.inbox_has_message(s, explicit_only=True)]
 
+    WAKE_CAUSES = ("warm_capacity_denied",)
+
+    def report_wake_cause(self, session_id: str, cause: Optional[str], observed_at, attempt_at) -> bool:
+        """
+        The bridge read in the app's log why the last open did not start the session (a closed code),
+        or that it no longer says so (None). It belongs to the CURRENT attempt only: one made earlier
+        than the latest open is ignored. It changes nothing else: not the state, the attempts or the
+        message.
+        """
+        if cause is not None and cause not in self.WAKE_CAUSES:
+            raise ValueError(cause)
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT wake_at FROM sessions WHERE id = ? AND provider = 'claude-code'"
+                               " AND entrypoint = 'claude-desktop'", (session_id,)).fetchone()
+            if row is None:
+                return False
+            current = _ts(row["wake_at"])
+            attempt = _ts(_normalize_utc_iso(attempt_at)) if attempt_at is not None else None
+            if current is None or attempt is None or abs((current - attempt).total_seconds()) > 15:
+                return True                      # not the current attempt (or none): nothing to attach it to
+            seen = _normalize_utc_iso(observed_at) if (cause and observed_at) else None
+            conn.execute("UPDATE sessions SET wake_cause = ?, wake_cause_at = ? WHERE id = ?", (cause, seen, session_id))
+        return True
+
     def wake_evidence(self, session_id: str) -> bool:
         """
         The session showed it is listening (a SessionStart, a waiter heartbeat): the episode is over and
@@ -3319,7 +3348,7 @@ class Database:
         with self._get_connection() as conn:
             cur = conn.execute(
                 "UPDATE sessions SET wake_state = 'reachable', wake_attempts = 0, wake_force = 0,"
-                " wake_alerted_at = NULL WHERE id = ? AND (wake_attempts > 0 OR wake_state IN"
+                " wake_alerted_at = NULL, wake_cause = NULL, wake_cause_at = NULL WHERE id = ? AND (wake_attempts > 0 OR wake_state IN"
                 " ('open_requested', 'wake_unconfirmed', 'wake_failed'))", (session_id,))
             return cur.rowcount > 0
 
@@ -3348,8 +3377,8 @@ class Database:
             if session.reachable or not self.inbox_has_message(session, explicit_only=True):
                 with self._get_connection() as conn:
                     conn.execute(
-                        "UPDATE sessions SET wake_state = ?, wake_attempts = 0, wake_force = 0, wake_alerted_at = NULL"
-                        " WHERE id = ?", ("reachable" if session.reachable else None, session_id))
+                        "UPDATE sessions SET wake_state = ?, wake_attempts = 0, wake_force = 0, wake_alerted_at = NULL,"
+                        " wake_cause = NULL, wake_cause_at = NULL WHERE id = ?", ("reachable" if session.reachable else None, session_id))
                 ended.append(session_id)
         return {"unconfirmed": [s for s in unconfirmed if s not in ended], "ended": ended}
 
@@ -3371,7 +3400,7 @@ class Database:
         """The user asked again: a new episode, whose open may ignore the bridge's cooldown."""
         with self._get_connection() as conn:
             conn.execute("UPDATE sessions SET wake_state = NULL, wake_attempts = 0, wake_force = 1,"
-                         " wake_alerted_at = NULL WHERE id = ?", (session_id,))
+                         " wake_alerted_at = NULL, wake_cause = NULL, wake_cause_at = NULL WHERE id = ?", (session_id,))
 
     def wake_forced(self, session_id: str) -> bool:
         with self._get_connection() as conn:
@@ -3400,8 +3429,8 @@ class Database:
                 state = "open_requested"
             else:
                 state = "wake_failed" if attempts >= self.WAKE_MAX_ATTEMPTS else None
-            conn.execute("UPDATE sessions SET wake_state = ?, wake_at = ?, wake_attempts = ?, wake_force = 0"
-                         " WHERE id = ?", (state, now, attempts, session_id))
+            conn.execute("UPDATE sessions SET wake_state = ?, wake_at = ?, wake_attempts = ?, wake_force = 0,"
+                         " wake_cause = NULL, wake_cause_at = NULL WHERE id = ?", (state, now, attempts, session_id))
         return True
 
     def bridge_sessions_with_mail(self, include_suspended: bool = False) -> List[SessionModel]:
