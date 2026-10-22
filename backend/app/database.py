@@ -1005,10 +1005,7 @@ class Database:
                 sender_session = self.get_session(req.sender_session_id)
                 sender_provider = sender_session.provider if sender_session else None
                 cfg_enabled = self.get_setting("usage_guard_enabled") == "true"
-                deliver_at_reset = (
-                    self.get_setting("deliver_at_reset") == "true"
-                    or self.get_setting("deliver_at_reset_enabled") == "true"
-                )
+                deliver_at_reset = self.get_setting("deliver_at_reset") == "true"
                 def percent(k: str, default: int) -> int:
                     try:
                         return int(self.get_setting(k) or default)

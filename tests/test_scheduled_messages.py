@@ -374,11 +374,14 @@ async def test_deliver_at_reset_settings_api(rel_app_and_db):
 
         # Verify persisted
         assert db.get_setting("deliver_at_reset") == "true"
+        assert db.get_setting("deliver_at_reset_enabled") is None
 
         # Toggle back to false
         resp = await human.put("/api/settings/deliver-at-reset", json={"enabled": False})
         assert resp.status_code == 200
         assert resp.json() == {"enabled": False}
+        assert db.get_setting("deliver_at_reset") == "false"
+        assert db.get_setting("deliver_at_reset_enabled") is None
 
     # Agent cannot access
     async with agent_client(app, "tok-claude") as client:

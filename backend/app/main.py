@@ -706,10 +706,7 @@ def create_app(
             "enabled": db.get_setting("usage_guard_enabled") == "true",
             "five_hour": percent("usage_guard_5h", 90),
             "seven_day": percent("usage_guard_7d", 95),
-            "deliver_at_reset": (
-                db.get_setting("deliver_at_reset") == "true"
-                or db.get_setting("deliver_at_reset_enabled") == "true"
-            ),
+            "deliver_at_reset": db.get_setting("deliver_at_reset") == "true",
         }
 
     def usage_guarded() -> Set[str]:
@@ -747,7 +744,6 @@ def create_app(
         if payload.deliver_at_reset is not None:
             val = "true" if payload.deliver_at_reset else "false"
             db.set_setting("deliver_at_reset", val)
-            db.set_setting("deliver_at_reset_enabled", val)
         response.headers["Cache-Control"] = "no-store"
         cfg = usage_guard()
         return {"enabled": cfg["enabled"], "five_hour": cfg["five_hour"], "seven_day": cfg["seven_day"], "guarded": sorted(usage_guarded())}
@@ -756,14 +752,13 @@ def create_app(
     async def get_deliver_at_reset_setting(response: Response, who: Principal = Depends(principal)):
         require_human(who)
         response.headers["Cache-Control"] = "no-store"
-        return {"enabled": db.get_setting("deliver_at_reset") == "true" or db.get_setting("deliver_at_reset_enabled") == "true"}
+        return {"enabled": db.get_setting("deliver_at_reset") == "true"}
 
     @app.put("/api/settings/deliver-at-reset", response_model=DeliverAtResetSetting)
     async def set_deliver_at_reset_setting(payload: DeliverAtResetSetting, response: Response, who: Principal = Depends(principal)):
         require_human(who)
         val = "true" if payload.enabled else "false"
         db.set_setting("deliver_at_reset", val)
-        db.set_setting("deliver_at_reset_enabled", val)
         response.headers["Cache-Control"] = "no-store"
         return {"enabled": payload.enabled}
 
