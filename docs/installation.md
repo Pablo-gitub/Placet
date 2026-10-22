@@ -288,6 +288,8 @@ Add Placet to your client's MCP configuration (e.g. `claude_desktop_config.json`
 
 `PLACET_AGENT_ID` is optional: the identity comes from the token, and if the ID is set the backend checks that it matches.
 
+Once the hooks are installed, Placet checks at each session start whether the client's configuration lists a `placet` server (Claude Code: `~/.claude.json` and `.mcp.json`; Codex: `~/.codex/config.toml`; Antigravity: `~/.gemini/config/mcp_config.json`, not `~/.gemini/antigravity/`). A session where none is found shows "Placet MCP non rilevato" in the PWA (the same warning appears when a Placet turn ends without any Placet tool call having been seen); check the client's MCP configuration and its available tools, add the entry above if it is missing and start a new session. A server provided by a plugin or managed settings is not looked for and can trigger a false warning.
+
 ---
 
 ## Available MCP tools

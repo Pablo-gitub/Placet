@@ -328,6 +328,9 @@ class SessionModel(BaseModel):
     provider: Optional[str] = None
     entrypoint: Optional[str] = None      # claude-desktop, cli, ...
     cwd: Optional[str] = None
+    # The project the session belongs to (the main repository when working in a worktree):
+    # used to group sessions and to compare folders; `cwd` stays the raw working directory.
+    project_root: Optional[str] = None
     title: Optional[str] = None
     tmux_session: Optional[str] = None
     state: str = "idle"                   # busy while a turn is running
@@ -353,6 +356,12 @@ class SessionModel(BaseModel):
     # RF-29d: continued conversation pointer and prompt counter
     continued_to: Optional[str] = None
     prompt_count: int = 0
+    # RF-27: configured | missing | unknown (what the hook read from the
+    # provider's configuration), or suspect (a Placet turn ended with no MCP
+    # call ever made by an "unknown" session). None: never reported.
+    mcp_state: Optional[str] = None
+    # The last time this session used a Placet MCP tool.
+    mcp_seen_at: Optional[datetime] = None
 
 
 class NodeModel(BaseModel):

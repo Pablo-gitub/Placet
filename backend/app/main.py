@@ -93,6 +93,8 @@ class SessionEventPayload(BaseModel):
     provider: Optional[str] = None
     entrypoint: Optional[str] = None
     cwd: Optional[str] = None
+    # The project root (main repository when in a worktree), for grouping and routing only.
+    project_root: Optional[str] = Field(default=None, max_length=4096)
     model: Optional[str] = Field(default=None, max_length=100)
     title: Optional[str] = None
     tmux_session: Optional[str] = None
@@ -105,6 +107,8 @@ class SessionEventPayload(BaseModel):
     start_source: Optional[str] = Field(None, max_length=32)
     # RF-29d: UUID of the session being continued
     continues: Optional[str] = None
+    # RF-27 (start): does the provider's configuration list the Placet MCP server?
+    mcp: Optional[Literal["configured", "missing", "unknown"]] = None
     # RFC-16: the turn ended but the work goes on (stop), or this turn
     # continues it (prompt): an Antigravity background task or plan review.
     pause: Optional[Literal["background_task", "app_review"]] = None
@@ -445,7 +449,7 @@ def create_app(
             return
         lang = db.get_background_language()
         key = "notify.queue_held_title_one" if waiting == 1 else "notify.queue_held_title"
-        web_push_later(text(key, lang, label=session_label(session.provider, session.title, session.cwd),
+        web_push_later(text(key, lang, label=session_label(session.provider, session.title, session.project_root or session.cwd),
                             count=waiting),
                        text("notify.queue_held_body", lang), f"/#/sessione/{session_id}",
                        f"queue-held-{req_id}", "high")
@@ -597,7 +601,7 @@ def create_app(
         session = db.get_session(req.sender_session_id)
         if session is None:
             return None
-        return session_label(session.provider, session.title, session.cwd) or None
+        return session_label(session.provider, session.title, session.project_root or session.cwd) or None
 
     # A followed session's turn ends: at most one quiet notification a minute each.
     turn_end_notified: Dict[str, float] = {}
@@ -615,7 +619,7 @@ def create_app(
             return
         lang = db.get_background_language()
         web_push_later(text("notify.app_review_title", lang,
-                            label=session_label(session.provider, session.title, session.cwd)),
+                            label=session_label(session.provider, session.title, session.project_root or session.cwd)),
                        text("notify.app_review_body", lang), f"/#/sessione/{session.id}",
                        f"app-review-{session.id}", "high")
 
@@ -633,12 +637,53 @@ def create_app(
             return
         turn_end_notified[session.id] = loop_time
         task = asyncio.get_running_loop().create_task(send_ntfy_turn_end(
-            session.id, session_label(session.provider, session.title, session.cwd), last_message, replace(ntfy, language=db.get_background_language())))
+            session.id, session_label(session.provider, session.title, session.project_root or session.cwd), last_message, replace(ntfy, language=db.get_background_language())))
         background_alerts.add(task)
         task.add_done_callback(background_alerts.discard)
         lang = db.get_background_language()
-        web_push_later(text("notify.turn_title", lang, label=session_label(session.provider, session.title, session.cwd)),
+        web_push_later(text("notify.turn_title", lang, label=session_label(session.provider, session.title, session.project_root or session.cwd)),
                        text("notify.turn_body", lang), f"/#/sessione/{session.id}", f"turn-{session.id}", "low")
+
+    def bind_unaddressed_session(req: RequestCreate, sender_session: Optional[str]) -> RequestCreate:
+        """
+        A request for an agent, without a session or node, is bound at creation
+        to a session of that agent in the sender's folder (any folder, when the
+        sender is unknown), never left for the first idle session, which may be
+        stale or foreign: the one reachable session there; else the one known
+        session there that cannot be woken now (suspended, waiter gone), which
+        gets the request when it comes back and nobody else can claim it.
+        Several, or none there while other sessions exist: refused with the
+        sessions. An agent with no session at all, or only tmux-driven ones the
+        bridge reaches, keeps the old behaviour.
+        """
+        sender = db.get_session(sender_session) if sender_session else None
+        # Compare project roots (the main repository when working in a worktree), real paths
+        # on both sides; a session that reports none is compared by its working directory.
+        folder_of = lambda s: os.path.realpath(s.project_root or s.cwd) if (s.project_root or s.cwd) else None  # noqa: E731
+        folder = folder_of(sender) if sender is not None else None
+        # The sender is never a candidate: a session cannot receive its own request.
+        others = [s for s in db.list_sessions(agent_id=req.recipient_id)
+                  if s.id != sender_session and not s.excluded]
+        reachable = [s for s in others if s.reachable]
+        waiting = [s for s in others if not s.reachable and not s.tmux_session]
+        here = lambda pool: [s for s in pool if folder is None or folder_of(s) == folder]  # noqa: E731
+        brief = lambda s: {"id": s.id, "title": s.title, "cwd": s.cwd, "project_root": s.project_root}  # noqa: E731
+        for pool in (here(reachable), here(waiting) if not here(reachable) else []):
+            if len(pool) == 1:
+                return req.model_copy(update={"recipient_session_id": pool[0].id})
+        if not reachable and not waiting:
+            return req
+        candidates = here(reachable) or here(waiting)
+        where = f" in {folder}" if folder else ""
+        ambiguous = bool(reachable)
+        raise ProductError(
+            409, "request.target_session_ambiguous" if ambiguous or candidates else "request.target_session_unreachable",
+            (f"{len(candidates)} {req.recipient_id} sessions{where}: " if candidates
+             else f"No reachable {req.recipient_id} session{where}. ")
+            + "Pass target_session (an ID from placet_list_agents), or ask the human which one. Nothing was sent.",
+            {"candidates": [brief(s) for s in candidates],
+             "other_sessions": [brief(s) for s in reachable + waiting if s not in candidates]},
+        )
 
     def check_target_session(session_id: str, agent_id: str) -> None:
         session = db.get_session(session_id)
@@ -811,6 +856,9 @@ def create_app(
             sender_session = own.id
         else:
             sender_session = created_sender_session(who)
+        if (req.recipient_id != "human" and req.recipient_session_id is None
+                and config.get_agent(req.recipient_id) is not None):
+            req = bind_unaddressed_session(req, sender_session)
         relation = (relation_of(sender_session, req.recipient_session_id, req.relation_type_id)
                     if req.recipient_id != "human" else None)
         if req.target_node and relation is None:
@@ -900,6 +948,7 @@ def create_app(
         # hook links it too, but must not be the only way.
         if sender_session and db.link_sender_session(created.id, sender_session, who.id):
             created = db.get_request(created.id)
+            db.mark_mcp_seen(sender_session)  # RF-27: a Placet MCP call came from this session
 
         # RFC-04/05: the relation between the two nodes decides the policy.
         by_relation = False
@@ -1246,6 +1295,7 @@ def create_app(
         if req.status not in (RequestStatus.DELIVERING, RequestStatus.EXECUTING):
             raise ProductError(409, "request.not_running",
                                f"Request {request_id} is {req.status.value}: progress applies only while it runs.")
+        db.mark_mcp_seen(req.recipient_session_id)
         text_ = payload.content.strip()
         db.set_progress(request_id, text_)
         db.log_event(request_id, who.actor, "progress", {"content": text_})
@@ -1279,6 +1329,7 @@ def create_app(
                 detail=f"Request {request_id} is in {req.status.value} state, not in APPROVED, DELIVERING or EXECUTING state.",
             )
 
+        db.mark_mcp_seen(req.recipient_session_id)
         completed = db.record_reply(
             request_id=request_id,
             responder_id=who.id,
@@ -1384,7 +1435,9 @@ def create_app(
         """The recipient confirms it received an injected prompt (placet_ack)."""
         require_agent(who)
         expire_and_notify()
-        return ack_request(who, request_id, via="mcp")
+        acked = ack_request(who, request_id, via="mcp")
+        db.mark_mcp_seen(acked.recipient_session_id)
+        return acked
 
     @app.post("/api/agents/me/state")
     async def agent_state(payload: AgentStatePayload, who: Principal = Depends(principal)):
@@ -1459,7 +1512,7 @@ def create_app(
             return {"session": session_id, "event": payload.event, "duplicate": True}
         if not db.upsert_session(
             session_id, who.id, provider=payload.provider, entrypoint=payload.entrypoint,
-            cwd=payload.cwd, title=payload.title, tmux_session=payload.tmux_session,
+            cwd=payload.cwd, project_root=payload.project_root, title=payload.title, tmux_session=payload.tmux_session,
             model=payload.model,
         ):
             raise HTTPException(status_code=404, detail="Session not found")
@@ -1473,6 +1526,8 @@ def create_app(
             db.reopen_session(session_id)
         if payload.event == "start":
             db.set_session_state(session_id, "idle")
+            if payload.mcp is not None:
+                db.set_mcp_config_state(session_id, payload.mcp)
             if payload.start_source == "clear":
                 result["node_id"] = db.reattach_after_clear(session_id)
         elif payload.event == "prompt":
@@ -1528,6 +1583,8 @@ def create_app(
         elif payload.event == "stop":
             was_busy = session.state == "busy"
             is_placet = (session.turn_request_id is not None) or bool(db.steered_in_turn(session_id))
+            if session.turn_request_id is not None and db.suspect_mcp(session_id):
+                logger.info(f"Session {session_id} ended a Placet turn without ever using the MCP: suspect")
             db.set_session_state(session_id, "idle")
             if was_busy:
                 notify_turn_end(session, payload.last_message, is_placet=is_placet)

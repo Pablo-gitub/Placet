@@ -29,6 +29,7 @@ import RequestCard from "./RequestCard";
 import { actionLabel, groupEntries, timeOf } from "./chatEntries";
 import { providerClass, providerOf, sessionName, sessionPlace, sessionStatus } from "./sessionInfo";
 import { useTranscript } from "./useTranscript";
+import McpWarning from "./McpWarning";
 import { holdsQueueUnseen, isUncertain } from "./aspects";
 import NodeControl from "./NodeControl";
 
@@ -429,6 +430,7 @@ export default function SessionView({
           </span>
         )}
       </div>
+      <McpWarning session={session} />
       {activeProjectId && (
         <div className="project-context-bar">
           <span

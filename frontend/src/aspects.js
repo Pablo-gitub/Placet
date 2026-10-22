@@ -27,3 +27,11 @@ export const holdsQueueUnseen = (req, now = Date.now()) =>
 export const queueStuck = (requests, sessionId, now = Date.now()) =>
   requests.some((r) => r.recipient_session_id === sessionId && holdsQueueUnseen(r, now)) &&
   requests.some((r) => r.recipient_session_id === sessionId && r.status === "APPROVED" && (!r.scheduled_at || Date.parse(r.scheduled_at) <= now));
+
+/**
+ * RF-27: "missing" (the provider's configuration has no Placet MCP server) or
+ * "suspect" (a Placet turn ended and the session never used it). Anything
+ * else, including "unknown", is not worth a warning.
+ */
+export const mcpWarning = (session) =>
+  session && (session.mcp_state === "missing" || session.mcp_state === "suspect") ? session.mcp_state : null;
