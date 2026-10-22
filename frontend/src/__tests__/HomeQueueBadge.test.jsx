@@ -34,6 +34,15 @@ describe("a session whose queue is held with messages waiting", () => {
     expect(queueStuck([answered, waiting()], "cx1", completed + 1000)).toBe(false);
     expect(queueStuck([answered, waiting()], "cx1", completed + REPLY_TURN_GRACE_MS)).toBe(true);
   });
+
+  it("does not treat future-scheduled approved messages as waiting", () => {
+    const now = Date.parse("2026-10-21T11:00:00Z");
+    const futureScheduled = waiting({ scheduled_at: "2026-10-21T12:00:00Z" });
+    expect(queueStuck([held(), futureScheduled], "cx1", now)).toBe(false);
+
+    const pastScheduled = waiting({ scheduled_at: "2026-10-21T10:00:00Z" });
+    expect(queueStuck([held(), pastScheduled], "cx1", now)).toBe(true);
+  });
 });
 
 describe("Home session list", () => {

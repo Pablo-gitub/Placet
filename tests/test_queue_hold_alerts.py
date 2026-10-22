@@ -118,6 +118,27 @@ async def test_the_alert_follows_the_notification_preference(env):
 
 
 @pytest.mark.asyncio
+async def test_held_queue_does_not_alert_when_waiting_message_is_scheduled_in_future(env):
+    """Future-scheduled APPROVED messages are not waiting to be released: no queue held alert."""
+    app, db, sent = env
+    await subscribe(app)
+    await start(app, "codex", "cx1", "codex")
+    held = (await write(app, "cx1", "lungo lavoro")).json()["id"]
+    assert await bridge_delivers(app, "cx1") == held
+    future = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+    async with human_client(app) as human:
+        resp = await human.post("/api/sessions/cx1/messages", json={"text": "futuro", "scheduled_at": future})
+        assert resp.status_code == 201
+        scheduled = resp.json()["id"]
+    age_hold(db, held, 11 * 60)
+    db.unconfirmed_starts()
+    age_hold(db, held, 11 * 60)
+    await sweep(app)
+    assert [p for p in sent if p["tag"].startswith("queue-held")] == []
+    assert db.get_request(held).hold_alerted_at is None
+
+
+@pytest.mark.asyncio
 async def test_the_preference_is_saved_through_the_api(env):
     app, _, _ = env
     async with human_client(app) as human:

@@ -136,6 +136,8 @@ class RequestCreate(BaseModel):
     expires_in_seconds: int = Field(
         DEFAULT_EXPIRES_IN_SECONDS, ge=10, le=MAX_EXPIRES_IN_SECONDS
     )
+    # RF-65: scheduled delivery time in UTC.
+    scheduled_at: Optional[datetime] = None
 
     @field_validator("options")
     @classmethod
@@ -207,6 +209,8 @@ class RequestModel(BaseModel):
     project_id: Optional[int] = None
     project_name: Optional[str] = None
     project_context: Optional[str] = None
+    # RF-65: scheduled delivery time in UTC.
+    scheduled_at: Optional[datetime] = None
     id: int
     sender_id: str
     recipient_id: str
@@ -221,6 +225,7 @@ class RequestModel(BaseModel):
     selected_options: List[str] = Field(default_factory=list)
     custom_text: Optional[str] = None
     created_at: datetime
+    expires_in_seconds: int = DEFAULT_EXPIRES_IN_SECONDS
     expires_at: Optional[datetime] = None
     decided_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
@@ -267,6 +272,14 @@ BRIDGE_PROVIDERS = ("codex", "antigravity")
 # SessionEnd only means the app unloaded the conversation (idle, restart,
 # update): it can be resumed, so the session is suspended, not ended.
 SUSPENDING_PROVIDERS = ("codex",)
+# Mapping from known agent names to their execution provider.
+AGENT_PROVIDERS = {
+    "claude": "claude-code",
+    "claude-code": "claude-code",
+    "codex": "codex",
+    "gemini": "antigravity",
+    "antigravity": "antigravity",
+}
 
 
 class SessionMention(BaseModel):
@@ -303,6 +316,8 @@ class SessionMessage(BaseModel):
     mentions: List[SessionMention] = Field(default_factory=list, max_length=20)
     # RFC-15: optional project context when sending message from PWA
     project_id: Optional[int] = None
+    # RF-65: scheduled delivery timestamp in UTC
+    scheduled_at: Optional[datetime] = None
 
     @model_validator(mode="after")
     def has_content(self):
@@ -335,6 +350,11 @@ def session_controls(provider: Optional[str], tmux_session: Optional[str],
             "effort_levels": list(effort_levels(provider)) if state == "supported" else []}
 
 
+class RequestSchedule(BaseModel):
+    """Payload to schedule or clear scheduled delivery of a request (RF-65)."""
+    scheduled_at: Optional[datetime] = None
+
+
 class SessionModel(BaseModel):
     """An agent session (e.g. one Claude Code conversation), from its hooks."""
     id: str
@@ -342,6 +362,9 @@ class SessionModel(BaseModel):
     provider: Optional[str] = None
     entrypoint: Optional[str] = None      # claude-desktop, cli, ...
     cwd: Optional[str] = None
+    # The project the session belongs to (the main repository when working in a worktree):
+    # used to group sessions and to compare folders; `cwd` stays the raw working directory.
+    project_root: Optional[str] = None
     title: Optional[str] = None
     tmux_session: Optional[str] = None
     # The pane id (%N) of its terminal, reported by the hook: the stable address for RF-62.
@@ -375,6 +398,12 @@ class SessionModel(BaseModel):
     prompt_count: int = 0
     # RF-62: computed, never stored. compact / effort: supported | pc_only | unsupported.
     controls: Dict[str, Any] = Field(default_factory=dict)
+    # RF-27: configured | missing | unknown (what the hook read from the
+    # provider's configuration), or suspect (a Placet turn ended with no MCP
+    # call ever made by an "unknown" session). None: never reported.
+    mcp_state: Optional[str] = None
+    # The last time this session used a Placet MCP tool.
+    mcp_seen_at: Optional[datetime] = None
 
 
 class NodeModel(BaseModel):

@@ -258,7 +258,7 @@ export default function App() {
   };
 
   /** The user writes to a session (RF-34); true when the message is accepted. */
-  const sendMessage = async (sessionId, text, mentions = [], attachments = [], mode = "queue", projectId = null) => {
+  const sendMessage = async (sessionId, text, mentions = [], attachments = [], mode = "queue", projectId = null, scheduledAt = null) => {
     try {
       const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
         method: "POST",
@@ -269,6 +269,7 @@ export default function App() {
           ...(attachments.length ? { attachments } : {}),
           ...(mode === "now" ? { mode } : {}),
           ...(projectId ? { project_id: projectId } : {}),
+          ...(scheduledAt ? { scheduled_at: scheduledAt } : {}),
         }),
       });
       if (!res.ok) {
@@ -324,6 +325,29 @@ export default function App() {
     }
   };
 
+  const scheduleRequest = async (requestId, scheduledAt = null) => {
+    try {
+      const res = await fetch(`/api/requests/${requestId}/schedule`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scheduled_at: scheduledAt }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showFeedback(apiErrorDescriptor(data, res.status), true);
+        return false;
+      }
+      setRequests((prev) => upsert(prev, data));
+      showFeedback(
+        scheduledAt ? { key: "deliveryUi.scheduledFeedback" } : { key: "deliveryUi.sendNowFeedback" }
+      );
+      return true;
+    } catch {
+      showFeedback({ key: "errors.connection" }, true);
+      return false;
+    }
+  };
+
   const openSession = (id, projectId = null) => navigate(projectId ? `#/sessione/${id}?project=${projectId}` : `#/sessione/${id}`);
   const pendingCount = requests.filter((r) => r.status === "PENDING" || needsReturnApproval(r)).length;
 
@@ -354,6 +378,7 @@ export default function App() {
       onDecide={handleDecision}
       onSend={sendMessage}
       onDelivery={deliveryAction}
+      onSchedule={scheduleRequest}
       submittingId={submittingId}
       focusId={focusId}
     />

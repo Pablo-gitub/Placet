@@ -3,6 +3,7 @@ import React, { useState } from "react";
 import { CheckCircle, ChevronDown, ChevronRight, Circle, MessageCircleQuestion, PauseCircle, Plus } from "lucide-react";
 import RequestCard from "./RequestCard";
 import { needsReturnApproval } from "./decisions";
+import McpWarning from "./McpWarning";
 import { queueStuck } from "./aspects";
 import useHoldClock from "./useHoldClock";
 import AddSessionsDialog from "./AddSessionsDialog";
@@ -34,6 +35,7 @@ function SessionRow({ session, label, questions, stuck, onOpen, active }) {
       <div className="session-row">
         <span className="provider-chip">{providerOf(session).label}</span>
         <strong className="session-name">{label || sessionName(session)}</strong>
+        <McpWarning session={session} compact />
         {stuck && (
           <span className="badge-held" title={t("home.queueHeld")} data-testid={`session-held-${session.id}`}>
             <PauseCircle size={14} aria-label={t("home.queueHeld")} />

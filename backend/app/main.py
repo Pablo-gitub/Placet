@@ -8,7 +8,7 @@ import contextlib
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import List, Literal, Optional, Dict, Set
+from typing import Any, List, Literal, Optional, Dict, Set
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, status, Request, Depends
 from fastapi import Path as FastAPIPath
 from fastapi.middleware.cors import CORSMiddleware
@@ -51,6 +51,7 @@ from backend.app.models import (
     RequestDecision,
     OutcomeDecision,
     SessionMessage,
+    RequestSchedule,
     NodeModel,
     ProjectModel,
     ProjectSummaryModel,
@@ -58,6 +59,7 @@ from backend.app.models import (
     RelationModel,
     RelationTypeModel,
     SessionModel,
+    AGENT_PROVIDERS,
     BRIDGE_PROVIDERS,
     SUSPENDING_PROVIDERS,
     STEER_PROVIDERS,
@@ -97,6 +99,8 @@ class SessionEventPayload(BaseModel):
     provider: Optional[str] = None
     entrypoint: Optional[str] = None
     cwd: Optional[str] = None
+    # The project root (main repository when in a worktree), for grouping and routing only.
+    project_root: Optional[str] = Field(default=None, max_length=4096)
     model: Optional[str] = Field(default=None, max_length=100)
     title: Optional[str] = None
     tmux_session: Optional[str] = None
@@ -115,6 +119,8 @@ class SessionEventPayload(BaseModel):
     start_source: Optional[str] = Field(None, max_length=32)
     # RF-29d: UUID of the session being continued
     continues: Optional[str] = None
+    # RF-27 (start): does the provider's configuration list the Placet MCP server?
+    mcp: Optional[Literal["configured", "missing", "unknown"]] = None
     # RFC-16: the turn ended but the work goes on (stop), or this turn
     # continues it (prompt): an Antigravity background task or plan review.
     pause: Optional[Literal["background_task", "app_review"]] = None
@@ -144,6 +150,20 @@ class FoldersReport(BaseModel):
 EXCLUDED_DETAIL = "This project is excluded from Placet (.placet-off)."
 
 
+def validate_scheduled_time(dt: Optional[datetime]) -> None:
+    if dt is None:
+        return
+    now = datetime.now(timezone.utc)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    if dt < now - timedelta(minutes=1):
+        raise ProductError(422, "schedule.time_in_past", "Scheduled time cannot be in the past.")
+    if dt > now + timedelta(days=30):
+        raise ProductError(422, "schedule.too_far_ahead", "Scheduled time cannot be more than 30 days in the future.")
+
+
 class BackgroundLanguage(BaseModel):
     language: Literal["en", "it"]
 
@@ -152,11 +172,16 @@ class ClaudeRenewSetting(BaseModel):
     enabled: bool
 
 
+class DeliverAtResetSetting(BaseModel):
+    enabled: bool
+
+
 class UsageGuardSetting(BaseModel):
     """Automatic relations fall back to review near a provider's usage limit."""
     enabled: bool
     five_hour: int = Field(ge=50, le=100)
     seven_day: int = Field(ge=50, le=100)
+    deliver_at_reset: Optional[bool] = None
 
 
 class QueueRelease(BaseModel):
@@ -439,7 +464,7 @@ def create_app(
             return
         lang = db.get_background_language()
         key = "notify.queue_held_title_one" if waiting == 1 else "notify.queue_held_title"
-        web_push_later(text(key, lang, label=session_label(session.provider, session.title, session.cwd),
+        web_push_later(text(key, lang, label=session_label(session.provider, session.title, session.project_root or session.cwd),
                             count=waiting),
                        text("notify.queue_held_body", lang), f"/#/sessione/{session_id}",
                        f"queue-held-{req_id}", "high")
@@ -575,7 +600,10 @@ def create_app(
 
     def reply_is_automatic(relation) -> bool:
         """RFC-16: the relation's own reply policy, held back by the usage guard."""
-        if relation is None or relation_guarded(relation):
+        if relation is None:
+            return False
+        cfg = usage_guard()
+        if not cfg.get("deliver_at_reset", False) and relation_guarded(relation):
             return False
         return relation.reply_approval == "automatic"
 
@@ -591,7 +619,7 @@ def create_app(
         session = db.get_session(req.sender_session_id)
         if session is None:
             return None
-        return session_label(session.provider, session.title, session.cwd) or None
+        return session_label(session.provider, session.title, session.project_root or session.cwd) or None
 
     # A followed session's turn ends: at most one quiet notification a minute each.
     turn_end_notified: Dict[str, float] = {}
@@ -609,7 +637,7 @@ def create_app(
             return
         lang = db.get_background_language()
         web_push_later(text("notify.app_review_title", lang,
-                            label=session_label(session.provider, session.title, session.cwd)),
+                            label=session_label(session.provider, session.title, session.project_root or session.cwd)),
                        text("notify.app_review_body", lang), f"/#/sessione/{session.id}",
                        f"app-review-{session.id}", "high")
 
@@ -627,12 +655,53 @@ def create_app(
             return
         turn_end_notified[session.id] = loop_time
         task = asyncio.get_running_loop().create_task(send_ntfy_turn_end(
-            session.id, session_label(session.provider, session.title, session.cwd), last_message, replace(ntfy, language=db.get_background_language())))
+            session.id, session_label(session.provider, session.title, session.project_root or session.cwd), last_message, replace(ntfy, language=db.get_background_language())))
         background_alerts.add(task)
         task.add_done_callback(background_alerts.discard)
         lang = db.get_background_language()
-        web_push_later(text("notify.turn_title", lang, label=session_label(session.provider, session.title, session.cwd)),
+        web_push_later(text("notify.turn_title", lang, label=session_label(session.provider, session.title, session.project_root or session.cwd)),
                        text("notify.turn_body", lang), f"/#/sessione/{session.id}", f"turn-{session.id}", "low")
+
+    def bind_unaddressed_session(req: RequestCreate, sender_session: Optional[str]) -> RequestCreate:
+        """
+        A request for an agent, without a session or node, is bound at creation
+        to a session of that agent in the sender's folder (any folder, when the
+        sender is unknown), never left for the first idle session, which may be
+        stale or foreign: the one reachable session there; else the one known
+        session there that cannot be woken now (suspended, waiter gone), which
+        gets the request when it comes back and nobody else can claim it.
+        Several, or none there while other sessions exist: refused with the
+        sessions. An agent with no session at all, or only tmux-driven ones the
+        bridge reaches, keeps the old behaviour.
+        """
+        sender = db.get_session(sender_session) if sender_session else None
+        # Compare project roots (the main repository when working in a worktree), real paths
+        # on both sides; a session that reports none is compared by its working directory.
+        folder_of = lambda s: os.path.realpath(s.project_root or s.cwd) if (s.project_root or s.cwd) else None  # noqa: E731
+        folder = folder_of(sender) if sender is not None else None
+        # The sender is never a candidate: a session cannot receive its own request.
+        others = [s for s in db.list_sessions(agent_id=req.recipient_id)
+                  if s.id != sender_session and not s.excluded]
+        reachable = [s for s in others if s.reachable]
+        waiting = [s for s in others if not s.reachable and not s.tmux_session]
+        here = lambda pool: [s for s in pool if folder is None or folder_of(s) == folder]  # noqa: E731
+        brief = lambda s: {"id": s.id, "title": s.title, "cwd": s.cwd, "project_root": s.project_root}  # noqa: E731
+        for pool in (here(reachable), here(waiting) if not here(reachable) else []):
+            if len(pool) == 1:
+                return req.model_copy(update={"recipient_session_id": pool[0].id})
+        if not reachable and not waiting:
+            return req
+        candidates = here(reachable) or here(waiting)
+        where = f" in {folder}" if folder else ""
+        ambiguous = bool(reachable)
+        raise ProductError(
+            409, "request.target_session_ambiguous" if ambiguous or candidates else "request.target_session_unreachable",
+            (f"{len(candidates)} {req.recipient_id} sessions{where}: " if candidates
+             else f"No reachable {req.recipient_id} session{where}. ")
+            + "Pass target_session (an ID from placet_list_agents), or ask the human which one. Nothing was sent.",
+            {"candidates": [brief(s) for s in candidates],
+             "other_sessions": [brief(s) for s in reachable + waiting if s not in candidates]},
+        )
 
     def check_target_session(session_id: str, agent_id: str) -> None:
         session = db.get_session(session_id)
@@ -691,14 +760,8 @@ def create_app(
         response.headers["Cache-Control"] = "no-store"
         return db.get_notification_preferences()
 
-    def usage_guard() -> Dict[str, object]:
-        def percent(key: str, default: int) -> int:
-            try:
-                return int(db.get_setting(key) or default)
-            except ValueError:
-                return default
-        return {"enabled": db.get_setting("usage_guard_enabled") == "true",
-                "five_hour": percent("usage_guard_5h", 90), "seven_day": percent("usage_guard_7d", 95)}
+    def usage_guard() -> Dict[str, Any]:
+        return db.usage_guard_config()
 
     def usage_guarded() -> Set[str]:
         """The providers whose automatic relations are reviewed now, if the guard is on."""
@@ -723,7 +786,8 @@ def create_app(
     async def get_usage_guard(response: Response, who: Principal = Depends(principal)):
         require_human(who)
         response.headers["Cache-Control"] = "no-store"
-        return {**usage_guard(), "guarded": sorted(usage_guarded())}
+        cfg = usage_guard()
+        return {"enabled": cfg["enabled"], "five_hour": cfg["five_hour"], "seven_day": cfg["seven_day"], "guarded": sorted(usage_guarded())}
 
     @app.put("/api/settings/usage-guard")
     async def set_usage_guard(payload: UsageGuardSetting, response: Response, who: Principal = Depends(principal)):
@@ -731,8 +795,26 @@ def create_app(
         db.set_setting("usage_guard_enabled", "true" if payload.enabled else "false")
         db.set_setting("usage_guard_5h", str(payload.five_hour))
         db.set_setting("usage_guard_7d", str(payload.seven_day))
+        if payload.deliver_at_reset is not None:
+            val = "true" if payload.deliver_at_reset else "false"
+            db.set_setting("deliver_at_reset", val)
         response.headers["Cache-Control"] = "no-store"
-        return {**usage_guard(), "guarded": sorted(usage_guarded())}
+        cfg = usage_guard()
+        return {"enabled": cfg["enabled"], "five_hour": cfg["five_hour"], "seven_day": cfg["seven_day"], "guarded": sorted(usage_guarded())}
+
+    @app.get("/api/settings/deliver-at-reset", response_model=DeliverAtResetSetting)
+    async def get_deliver_at_reset_setting(response: Response, who: Principal = Depends(principal)):
+        require_human(who)
+        response.headers["Cache-Control"] = "no-store"
+        return {"enabled": db.get_setting("deliver_at_reset") == "true"}
+
+    @app.put("/api/settings/deliver-at-reset", response_model=DeliverAtResetSetting)
+    async def set_deliver_at_reset_setting(payload: DeliverAtResetSetting, response: Response, who: Principal = Depends(principal)):
+        require_human(who)
+        val = "true" if payload.enabled else "false"
+        db.set_setting("deliver_at_reset", val)
+        response.headers["Cache-Control"] = "no-store"
+        return {"enabled": payload.enabled}
 
     @app.get("/api/health")
     def health():
@@ -761,6 +843,11 @@ def create_app(
             )
         req = req.model_copy(update={"sender_id": who.id})
 
+        if req.scheduled_at is not None:
+            if not who.is_human:
+                raise ProductError(422, "schedule.not_allowed", "Only human users can schedule requests.")
+            validate_scheduled_time(req.scheduled_at)
+
         # RFC-08: a node by name stands for its current session and agent.
         if req.target_node:
             node = db.node_by_name(req.target_node.strip())
@@ -787,6 +874,9 @@ def create_app(
             sender_session = own.id
         else:
             sender_session = created_sender_session(who)
+        if (req.recipient_id != "human" and req.recipient_session_id is None
+                and config.get_agent(req.recipient_id) is not None):
+            req = bind_unaddressed_session(req, sender_session)
         relation = (relation_of(sender_session, req.recipient_session_id, req.relation_type_id)
                     if req.recipient_id != "human" else None)
         if req.target_node and relation is None:
@@ -876,6 +966,7 @@ def create_app(
         # hook links it too, but must not be the only way.
         if sender_session and db.link_sender_session(created.id, sender_session, who.id):
             created = db.get_request(created.id)
+            db.mark_mcp_seen(sender_session)  # RF-27: a Placet MCP call came from this session
 
         # RFC-04/05: the relation between the two nodes decides the policy.
         by_relation = False
@@ -916,8 +1007,39 @@ def create_app(
             elif db.automatic_sends_last_hour(relation.id) >= limits["max_per_hour"]:
                 automation_limit = "rate"
             details: Dict[str, object] = {}
-            if not automation_limit and (near := relation_guarded(relation)):
-                automation_limit, details = "usage", {"provider": near}
+            cfg = usage_guard()
+            deliver_at_reset_on = cfg.get("deliver_at_reset", False)
+
+            to_node = db.get_node(relation.to_node) if relation.to_node else None
+            rec_session = db.get_session(to_node.session_id) if to_node and to_node.session_id else None
+            rec_provider = rec_session.provider if rec_session else None
+            rec_over = rec_provider and db.is_provider_over_limit(
+                rec_provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"]
+            )
+
+            from_node = db.get_node(relation.from_node) if relation.from_node else None
+            snd_session = db.get_session(from_node.session_id) if from_node and from_node.session_id else None
+            snd_provider = snd_session.provider if snd_session else None
+            snd_over = snd_provider and db.is_provider_over_limit(
+                snd_provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"]
+            )
+
+            if not automation_limit:
+                if rec_over:
+                    if deliver_at_reset_on:
+                        rec_reset = db.provider_reset_time(
+                            rec_provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"]
+                        )
+                        if rec_reset is not None:
+                            db.schedule_request(created.id, rec_reset, actor=f"system:relation#{relation.id}")
+                            created = db.get_request(created.id)
+                        else:
+                            automation_limit, details = "usage", {"provider": rec_provider}
+                    else:
+                        automation_limit, details = "usage", {"provider": rec_provider}
+                elif snd_over:
+                    if not deliver_at_reset_on:
+                        automation_limit, details = "usage", {"provider": snd_provider}
             if automation_limit:
                 needs_approval, by_relation = True, False
                 db.log_event(created.id, "system:limits", "automation_limited",
@@ -1052,6 +1174,8 @@ def create_app(
                 relation = relation_of(req.sender_session_id, decision.recipient_session_id)
                 redirect = (redirect_to, relation.id if relation else None)
         if decision.status == RequestStatus.APPROVED and decision.delivery_mode == "now":
+            if req.scheduled_at is not None:
+                raise ProductError(422, "schedule.steer_conflict", "A message in 'now' mode cannot be scheduled.")
             target_id = decision.recipient_session_id or req.recipient_session_id
             target = db.get_session(target_id) if target_id else None
             if (req.question_type != QuestionType.PROMPT_REVIEW or req.recipient_id == "human"
@@ -1064,6 +1188,29 @@ def create_app(
             raise ProductError(409, "decision.not_pending",
                                f"Request {request_id} is no longer in PENDING state.", {"id": request_id})
 
+        # RF-66: If approved message to an over-limit recipient and deliver_at_reset is ON:
+        # schedule delivery at recipient's reset time (unless mode is "now").
+        effective_schedule = None
+        if decision.status == RequestStatus.APPROVED and decision.delivery_mode != "now" and req.recipient_id != "human":
+            target_id = decision.recipient_session_id or req.recipient_session_id
+            target_sess = db.get_session(target_id) if target_id else None
+            if target_sess is None and relation and relation.to_node:
+                node = db.get_node(relation.to_node)
+                target_sess = db.get_session(node.session_id) if node and node.session_id else None
+            rec_provider = target_sess.provider if target_sess else None
+            if rec_provider is None:
+                rec_provider = AGENT_PROVIDERS.get(req.recipient_id, req.recipient_id)
+
+            cfg = usage_guard()
+            if cfg.get("deliver_at_reset", False) and rec_provider:
+                if db.is_provider_over_limit(rec_provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"]):
+                    rec_reset = db.provider_reset_time(rec_provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"])
+                    if rec_reset is not None:
+                        if req.scheduled_at is not None:
+                            effective_schedule = max(req.scheduled_at, rec_reset)
+                        else:
+                            effective_schedule = rec_reset
+
         updated = db.update_request_decision(
             request_id=request_id,
             status=decision.status,
@@ -1074,6 +1221,7 @@ def create_app(
             allow_auto_return=decision.allow_auto_return or reply_is_automatic(relation),
             delivery_mode=decision.delivery_mode if decision.status == RequestStatus.APPROVED and req.recipient_id != "human" else None,
             recipient_session_id=decision.recipient_session_id,
+            scheduled_at=effective_schedule,
         )
         if updated is None:
             # State changed between the check and the update (e.g. expired or cancelled).
@@ -1083,6 +1231,33 @@ def create_app(
                 f"Request {request_id} is in {current.status.value} state, not in PENDING state.",
                 {"id": request_id},
             )
+
+        notify_change(request_id)
+        return updated
+
+    @app.post("/api/requests/{request_id}/schedule", response_model=RequestModel)
+    async def schedule_request(
+        request_id: int, body: RequestSchedule, who: Principal = Depends(principal)
+    ):
+        """
+        Schedules or clears the scheduled delivery time of a request (RF-65).
+        Allowed only for the human supervisor, while the request is PENDING or APPROVED
+        with delivery waiting.
+        """
+        require_human(who)
+        validate_scheduled_time(body.scheduled_at)
+        req = db.get_request(request_id)
+        if req is None:
+            raise ProductError(404, "request.not_found", "Request not found")
+        if (
+            req.status not in (RequestStatus.PENDING, RequestStatus.APPROVED, RequestStatus.COMPLETED)
+            or req.delivered_at is not None
+            or (req.delivery != "waiting" and req.status != RequestStatus.COMPLETED)
+        ):
+            raise ProductError(409, "schedule.not_allowed", "This request can no longer be scheduled.")
+        updated = db.schedule_request(request_id, body.scheduled_at, actor=who.actor)
+        if updated is None:
+            raise ProductError(409, "schedule.not_allowed", "This request can no longer be scheduled.")
         notify_change(request_id)
         return updated
 
@@ -1138,6 +1313,7 @@ def create_app(
         if req.status not in (RequestStatus.DELIVERING, RequestStatus.EXECUTING):
             raise ProductError(409, "request.not_running",
                                f"Request {request_id} is {req.status.value}: progress applies only while it runs.")
+        db.mark_mcp_seen(req.recipient_session_id)
         text_ = payload.content.strip()
         db.set_progress(request_id, text_)
         db.log_event(request_id, who.actor, "progress", {"content": text_})
@@ -1171,6 +1347,7 @@ def create_app(
                 detail=f"Request {request_id} is in {req.status.value} state, not in APPROVED, DELIVERING or EXECUTING state.",
             )
 
+        db.mark_mcp_seen(req.recipient_session_id)
         completed = db.record_reply(
             request_id=request_id,
             responder_id=who.id,
@@ -1276,7 +1453,9 @@ def create_app(
         """The recipient confirms it received an injected prompt (placet_ack)."""
         require_agent(who)
         expire_and_notify()
-        return ack_request(who, request_id, via="mcp")
+        acked = ack_request(who, request_id, via="mcp")
+        db.mark_mcp_seen(acked.recipient_session_id)
+        return acked
 
     @app.post("/api/agents/me/state")
     async def agent_state(payload: AgentStatePayload, who: Principal = Depends(principal)):
@@ -1351,7 +1530,7 @@ def create_app(
             return {"session": session_id, "event": payload.event, "duplicate": True}
         if not db.upsert_session(
             session_id, who.id, provider=payload.provider, entrypoint=payload.entrypoint,
-            cwd=payload.cwd, title=payload.title, tmux_session=payload.tmux_session, tmux_pane=payload.tmux_pane,
+            cwd=payload.cwd, project_root=payload.project_root, title=payload.title, tmux_session=payload.tmux_session, tmux_pane=payload.tmux_pane,
             tmux_server=payload.tmux_server, agent_pid=payload.agent_pid, agent_started=payload.agent_started,
             model=payload.model,
         ):
@@ -1366,6 +1545,8 @@ def create_app(
             db.reopen_session(session_id)
         if payload.event == "start":
             db.set_session_state(session_id, "idle")
+            if payload.mcp is not None:
+                db.set_mcp_config_state(session_id, payload.mcp)
             if payload.start_source == "clear":
                 result["node_id"] = db.reattach_after_clear(session_id)
         elif payload.event == "prompt":
@@ -1421,6 +1602,8 @@ def create_app(
         elif payload.event == "stop":
             was_busy = session.state == "busy"
             is_placet = (session.turn_request_id is not None) or bool(db.steered_in_turn(session_id))
+            if session.turn_request_id is not None and db.suspect_mcp(session_id):
+                logger.info(f"Session {session_id} ended a Placet turn without ever using the MCP: suspect")
             db.set_session_state(session_id, "idle")
             if was_busy:
                 notify_turn_end(session, payload.last_message, is_placet=is_placet)
@@ -1738,17 +1921,50 @@ def create_app(
             block = compose_project_instructions(project.name, project.instructions, node_inst, outgoing)
             if block:
                 project_context = block
+        if body.scheduled_at is not None:
+            if body.mode == "now":
+                raise ProductError(422, "schedule.steer_conflict", "A message in 'now' mode cannot be scheduled.")
+            validate_scheduled_time(body.scheduled_at)
+        cfg = usage_guard()
+        rec_provider = session.provider
+        sched_at = body.scheduled_at
+        hold_for_usage = False
+        if (
+            body.mode != "now"
+            and sched_at is None
+            and rec_provider
+            and db.is_provider_over_limit(rec_provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"])
+        ):
+            if cfg.get("deliver_at_reset", False):
+                rec_reset = db.provider_reset_time(
+                    rec_provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"]
+                )
+                if rec_reset is not None:
+                    sched_at = rec_reset.isoformat()
+                else:
+                    hold_for_usage = True
+            else:
+                hold_for_usage = True
+
         created = db.create_request(
             RequestCreate(
                 sender_id="human", recipient_id=session.agent_id, question_type=QuestionType.MESSAGE,
                 prompt=prompt, context=mention_context, recipient_session_id=session.id, priority=Priority.NORMAL,
                 project_id=body.project_id, project_context=project_context,
+                scheduled_at=sched_at,
             ),
             actor=who.actor,
         )
         if body.mode == "now":
             db.set_delivery_mode(created.id, "now")
             created = db.get_request(created.id)
+
+        if hold_for_usage:
+            db.log_event(created.id, "system:limits", "automation_limited",
+                         {"reason": "usage", "provider": rec_provider})
+            notify_change(created.id)
+            return created
+
         approved = db.update_request_decision(created.id, RequestStatus.APPROVED, actor=who.actor)
         notify_change(created.id)
         return approved

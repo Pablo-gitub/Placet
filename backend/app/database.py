@@ -30,6 +30,7 @@ from backend.app.models import (
     ProjectDetailModel,
     ProjectRelationDetail,
     WAITER_TTL_SECONDS,
+    DEFAULT_EXPIRES_IN_SECONDS,
     is_settled,
 )
 
@@ -114,12 +115,12 @@ def _normalize_utc_iso(val: Union[str, datetime, None]) -> Optional[str]:
     if isinstance(val, str):
         try:
             dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
-        except Exception:
-            return val
+        except Exception as e:
+            raise ValueError(f"Invalid timestamp format: {val}") from e
     elif isinstance(val, datetime):
         dt = val
     else:
-        return None
+        raise ValueError(f"Invalid timestamp format: {val}")
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     else:
@@ -171,6 +172,20 @@ class Database:
         with self._get_connection() as conn:
             conn.execute("INSERT INTO app_settings (key, value) VALUES (?, ?)"
                          " ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, value))
+
+    def usage_guard_config(self) -> Dict[str, Any]:
+        """Current usage guard settings from the database (or defaults)."""
+        def percent(key: str, default: int) -> int:
+            try:
+                return int(self.get_setting(key) or default)
+            except ValueError:
+                return default
+        return {
+            "enabled": self.get_setting("usage_guard_enabled") == "true",
+            "five_hour": percent("usage_guard_5h", 90),
+            "seven_day": percent("usage_guard_7d", 95),
+            "deliver_at_reset": self.get_setting("deliver_at_reset") == "true",
+        }
 
     def add_push_subscription(self, endpoint: str, p256dh: str, auth: str, user_agent: Optional[str]) -> None:
         with self._get_connection() as conn:
@@ -355,7 +370,9 @@ class Database:
                 prompt_source TEXT,
                 project_id INTEGER,
                 project_context TEXT,
-                relation_type_name TEXT
+                relation_type_name TEXT,
+                scheduled_at TEXT,
+                expires_in_seconds INTEGER NOT NULL DEFAULT 86400
             );
             """)
             cursor.execute("""
@@ -475,12 +492,18 @@ class Database:
                 cursor.execute("ALTER TABLE sessions ADD COLUMN tmux_server TEXT;")
                 cursor.execute("ALTER TABLE sessions ADD COLUMN agent_pid INTEGER;")
                 cursor.execute("ALTER TABLE sessions ADD COLUMN agent_started TEXT;")
+            if "project_root" not in session_cols:
+                cursor.execute("ALTER TABLE sessions ADD COLUMN project_root TEXT;")
             if "prompt_count" not in session_cols:
                 cursor.execute("ALTER TABLE sessions ADD COLUMN prompt_count INTEGER NOT NULL DEFAULT 0;")
                 cursor.execute(
                     "UPDATE sessions SET prompt_count = 1"
                     " WHERE activity_at > started_at OR turn_request_id IS NOT NULL OR ended_at IS NOT NULL;"
                 )
+            # RF-27: the Placet MCP connection, as the hook read it and as seen in use.
+            if "mcp_state" not in session_cols:
+                cursor.execute("ALTER TABLE sessions ADD COLUMN mcp_state TEXT;")
+                cursor.execute("ALTER TABLE sessions ADD COLUMN mcp_seen_at TEXT;")
             # RFC-02: the stable named node the session is attached to.
             if "node_id" not in session_cols:
                 cursor.execute("ALTER TABLE sessions ADD COLUMN node_id INTEGER;")
@@ -639,6 +662,11 @@ class Database:
             if "relation_type_name" not in cols:
                 # RF-64: historical relation type name on requests
                 cursor.execute("ALTER TABLE requests ADD COLUMN relation_type_name TEXT;")
+            if "scheduled_at" not in cols:
+                # RF-65: scheduled delivery timestamp in UTC ISO format
+                cursor.execute("ALTER TABLE requests ADD COLUMN scheduled_at TEXT;")
+            if "expires_in_seconds" not in cols:
+                cursor.execute("ALTER TABLE requests ADD COLUMN expires_in_seconds INTEGER NOT NULL DEFAULT 86400;")
             # RFC-16: each relation has its own reply policy, initially equal to
             # its outbound policy; replies no longer depend on the reverse relation.
             rel_cols = [row["name"] for row in cursor.execute("PRAGMA table_info(relations);").fetchall()]
@@ -716,7 +744,13 @@ class Database:
 
     def create_request(self, req: RequestCreate, actor: Optional[str] = None) -> RequestModel:
         now = datetime.now(timezone.utc)
-        expires_at = now + timedelta(seconds=req.expires_in_seconds)
+        scheduled_at = _normalize_utc_iso(getattr(req, "scheduled_at", None))
+        base_time = now
+        if scheduled_at is not None:
+            sched_dt = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
+            if sched_dt > now:
+                base_time = sched_dt
+        expires_at = base_time + timedelta(seconds=req.expires_in_seconds)
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -724,8 +758,9 @@ class Database:
                 INSERT INTO requests (
                     sender_id, recipient_id, question_type, prompt, context,
                     options, status, created_at, expires_at, updated_at, priority,
-                    recipient_session_id, prompt_source, project_id, project_context
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    recipient_session_id, prompt_source, project_id, project_context,
+                    scheduled_at, expires_in_seconds
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     req.sender_id,
@@ -743,6 +778,8 @@ class Database:
                     req.prompt_source,
                     req.project_id,
                     req.project_context,
+                    scheduled_at,
+                    req.expires_in_seconds,
                 ),
             )
             req_id = cursor.lastrowid
@@ -751,6 +788,12 @@ class Database:
                 {"question_type": req.question_type.value, "expires_at": expires_at.isoformat()},
                 at=now.isoformat(),
             )
+            if scheduled_at:
+                self._log(
+                    cursor, req_id, actor or f"agent:{req.sender_id}", "scheduled",
+                    {"scheduled_at": scheduled_at},
+                    at=now.isoformat(),
+                )
         return self.get_request(req_id)
 
     def get_request(self, request_id: int) -> Optional[RequestModel]:
@@ -837,6 +880,8 @@ class Database:
             relation_type_name=row["relation_type_name"] if "relation_type_name" in keys else None,
             progress_text=row["progress_text"] if "progress_text" in keys else None,
             progress_at=_ts(row["progress_at"]) if "progress_at" in keys else None,
+            scheduled_at=_ts(row["scheduled_at"]) if "scheduled_at" in keys else None,
+            expires_in_seconds=row["expires_in_seconds"] if "expires_in_seconds" in keys and row["expires_in_seconds"] else DEFAULT_EXPIRES_IN_SECONDS,
         )
 
     def open_request_toward(self, sender_session: str, recipient_id: str,
@@ -846,14 +891,15 @@ class Database:
         (or, without one, the agent) it now wants to write to, if any. Its
         reply belongs in placet_reply, not in a new request.
         """
+        now = datetime.now(timezone.utc).isoformat()
         sql = ("SELECT id FROM requests WHERE recipient_session_id = ?"
-               " AND status IN ('APPROVED', 'DELIVERING', 'EXECUTING') AND ")
+               " AND (status IN ('DELIVERING', 'EXECUTING') OR (status = 'APPROVED' AND (scheduled_at IS NULL OR datetime(scheduled_at) <= datetime(?)))) AND ")
         if recipient_session:
             sql += "sender_session_id = ?"
-            params = (sender_session, recipient_session)
+            params = (sender_session, now, recipient_session)
         else:
             sql += "sender_id = ?"
-            params = (sender_session, recipient_id)
+            params = (sender_session, now, recipient_id)
         with self._get_connection() as conn:
             row = conn.execute(sql + " ORDER BY id DESC LIMIT 1", params).fetchone()
             return row["id"] if row else None
@@ -924,6 +970,7 @@ class Database:
         allow_auto_return: bool = False,
         delivery_mode: Optional[str] = None,
         recipient_session_id: Optional[str] = None,
+        scheduled_at: Optional[Union[str, datetime]] = None,
     ) -> Optional[RequestModel]:
         """
         Applies the human decision (PENDING -> APPROVED/REJECTED). Returns
@@ -936,16 +983,45 @@ class Database:
             return None
 
         now = datetime.now(timezone.utc).isoformat()
+        scheduled_at_iso = _normalize_utc_iso(scheduled_at) if scheduled_at is not None else None
         placeholders = ",".join("?" for _ in allowed_sources)
         with self._get_connection() as conn:
             cursor = conn.cursor()
+            new_expires_at = None
+            if scheduled_at_iso is not None:
+                cursor.execute(
+                    "SELECT created_at, expires_at, scheduled_at, expires_in_seconds FROM requests WHERE id = ?",
+                    (request_id,),
+                )
+                row = cursor.fetchone()
+                if row:
+                    secs = row["expires_in_seconds"] if "expires_in_seconds" in row.keys() and row["expires_in_seconds"] else None
+                    if secs and secs >= 10:
+                        window = timedelta(seconds=secs)
+                    else:
+                        try:
+                            exp_dt = datetime.fromisoformat(row["expires_at"].replace("Z", "+00:00"))
+                            base_str = row["scheduled_at"] or row["created_at"]
+                            base_dt = datetime.fromisoformat(base_str.replace("Z", "+00:00"))
+                            window = exp_dt - base_dt
+                            if window.total_seconds() < 10:
+                                window = timedelta(seconds=DEFAULT_EXPIRES_IN_SECONDS)
+                        except Exception:
+                            window = timedelta(seconds=DEFAULT_EXPIRES_IN_SECONDS)
+                    sched_dt = datetime.fromisoformat(scheduled_at_iso.replace("Z", "+00:00"))
+                    now_dt = datetime.now(timezone.utc)
+                    new_base = max(now_dt, sched_dt)
+                    new_expires_at = (new_base + window).isoformat()
+
             cursor.execute(
                 f"""
                 UPDATE requests
                 SET allow_auto_return = ?, approval = ?, status = ?, edited_prompt = ?, selected_options = ?, custom_text = ?,
                     decided_at = ?, updated_at = ?,
                     delivery_mode = COALESCE(?, delivery_mode),
-                    recipient_session_id = COALESCE(?, recipient_session_id)
+                    recipient_session_id = COALESCE(?, recipient_session_id),
+                    scheduled_at = COALESCE(?, scheduled_at),
+                    expires_at = COALESCE(?, expires_at)
                 WHERE id = ? AND status IN ({placeholders})
                 """,
                 [
@@ -959,6 +1035,8 @@ class Database:
                     now,
                     delivery_mode,
                     recipient_session_id,
+                    scheduled_at_iso,
+                    new_expires_at,
                     request_id,
                     *allowed_sources,
                 ],
@@ -978,6 +1056,9 @@ class Database:
                 details["selected_options"] = selected_options
             if custom_text:
                 details["custom_text"] = custom_text
+            if scheduled_at_iso is not None:
+                details["scheduled_at"] = scheduled_at_iso
+                self._log(cursor, request_id, actor, "scheduled", {"scheduled_at": scheduled_at_iso}, at=now)
             self._log(cursor, request_id, actor, "decided", details, at=now)
         return self.get_request(request_id)
 
@@ -996,6 +1077,25 @@ class Database:
         """
         now = datetime.now(timezone.utc).isoformat()
         sources = [st.value for st in _REPLYABLE]
+
+        req = self.get_request(request_id)
+        schedule_action = None
+        sender_provider = None
+        if req and req.sender_session_id and req.sender_id != "human":
+            sender_session = self.get_session(req.sender_session_id)
+            sender_provider = sender_session.provider if sender_session else None
+            cfg = self.usage_guard_config()
+            if self.is_provider_over_limit(sender_provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"]):
+                if cfg["deliver_at_reset"]:
+                    reset_time = self.provider_reset_time(sender_provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"])
+                    if reset_time is not None:
+                        scheduled_at_iso = _normalize_utc_iso(reset_time)
+                        schedule_action = ("schedule", scheduled_at_iso)
+                    else:
+                        schedule_action = ("limit", None)
+                else:
+                    schedule_action = ("limit", None)
+
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -1023,6 +1123,19 @@ class Database:
             if implicit:
                 details["implicit"] = True
             self._log(cursor, request_id, actor or f"agent:{responder_id}", "replied", details, at=now)
+
+            if schedule_action:
+                action_type, sched_iso = schedule_action
+                if action_type == "schedule":
+                    cursor.execute("UPDATE requests SET scheduled_at = ?, updated_at = ? WHERE id = ?",
+                                   (sched_iso, now, request_id))
+                    self._log(cursor, request_id, "system:limits", "scheduled",
+                              {"scheduled_at": sched_iso, "reason": "usage"}, at=now)
+                else:
+                    cursor.execute("UPDATE requests SET allow_auto_return = 0, updated_at = ? WHERE id = ?",
+                                   (now, request_id))
+                    self._log(cursor, request_id, "system:limits", "automation_limited",
+                              {"reason": "usage", "provider": sender_provider}, at=now)
         return self.get_request(request_id)
 
     # --- Injection delivery (agent-to-agent prompts) -------------------------
@@ -1036,10 +1149,12 @@ class Database:
         now: str,
         extra_sql: str = "",
         extra_params: Sequence[Any] = (),
+        extra_where: str = "",
+        where_params: Sequence[Any] = (),
     ) -> bool:
         cursor.execute(
-            f"UPDATE requests SET status = ?, updated_at = ?{extra_sql} WHERE id = ? AND status = ?",
-            [target.value, now, *extra_params, request_id, source.value],
+            f"UPDATE requests SET status = ?, updated_at = ?{extra_sql} WHERE id = ? AND status = ?{extra_where}",
+            [target.value, now, *extra_params, request_id, source.value, *where_params],
         )
         return cursor.rowcount > 0
 
@@ -1054,6 +1169,8 @@ class Database:
                 ", delivering_since = ?, delivery_attempts = delivery_attempts + 1,"
                 " delivery_state = 'in_progress', delivery_channel = 'tmux', attempt_id = ?",
                 [now, _new_attempt()],
+                extra_where=" AND (scheduled_at IS NULL OR datetime(scheduled_at) <= datetime(?))",
+                where_params=[now],
             ):
                 return None
             cursor.execute("SELECT delivery_attempts FROM requests WHERE id = ?", (request_id,))
@@ -1284,6 +1401,7 @@ class Database:
                 SELECT r.id, r.recipient_session_id AS sid, (
                     SELECT COUNT(*) FROM requests w
                     WHERE w.recipient_session_id = r.recipient_session_id AND w.status = ?
+                      AND (w.scheduled_at IS NULL OR datetime(w.scheduled_at) <= datetime(?))
                 ) AS waiting
                 FROM requests r
                 WHERE r.hold_alerted_at IS NULL AND r.queue_released_at IS NULL
@@ -1298,7 +1416,7 @@ class Database:
                   AND waiting > 0
                 ORDER BY r.id
                 """,
-                (RequestStatus.APPROVED.value, RequestStatus.EXECUTING.value, RequestStatus.STALLED.value,
+                (RequestStatus.APPROVED.value, now, RequestStatus.EXECUTING.value, RequestStatus.STALLED.value,
                  RequestStatus.COMPLETED.value, RequestStatus.COMPLETED.value, RequestStatus.STALLED.value,
                  cutoff),
             )
@@ -1360,8 +1478,78 @@ class Database:
         with self._get_connection() as conn:
             conn.execute("UPDATE requests SET delivery_mode = ? WHERE id = ?", (mode, request_id))
 
+    def schedule_request(
+        self, request_id: int, scheduled_at: Optional[Union[str, datetime]], actor: str
+    ) -> Optional[RequestModel]:
+        """
+        Schedules or clears the scheduled delivery time of a request (RF-65).
+        Allowed only while the request is not yet delivered:
+        status in (PENDING, APPROVED, COMPLETED), delivered_at IS NULL,
+        and (delivery_state IS NULL OR delivery_state = 'waiting' OR status = 'COMPLETED').
+        """
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
+        scheduled_at_iso = _normalize_utc_iso(scheduled_at) if scheduled_at is not None else None
+        valid_statuses = (RequestStatus.PENDING.value, RequestStatus.APPROVED.value, RequestStatus.COMPLETED.value)
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT created_at, expires_at, scheduled_at, expires_in_seconds FROM requests WHERE id = ?",
+                (request_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            secs = row["expires_in_seconds"] if "expires_in_seconds" in row.keys() and row["expires_in_seconds"] else None
+            if secs and secs >= 10:
+                window = timedelta(seconds=secs)
+            else:
+                try:
+                    exp_dt = datetime.fromisoformat(row["expires_at"].replace("Z", "+00:00"))
+                    base_str = row["scheduled_at"] or row["created_at"]
+                    base_dt = datetime.fromisoformat(base_str.replace("Z", "+00:00"))
+                    window = exp_dt - base_dt
+                    if window.total_seconds() < 10:
+                        window = timedelta(seconds=DEFAULT_EXPIRES_IN_SECONDS)
+                except Exception:
+                    window = timedelta(seconds=DEFAULT_EXPIRES_IN_SECONDS)
+
+            if scheduled_at_iso is None:
+                new_expires_at = (now + window).isoformat()
+            else:
+                sched_dt = datetime.fromisoformat(scheduled_at_iso.replace("Z", "+00:00"))
+                new_base = max(now, sched_dt)
+                new_expires_at = (new_base + window).isoformat()
+
+            cursor.execute(
+                f"""
+                UPDATE requests
+                SET scheduled_at = ?, expires_at = ?, updated_at = ?
+                WHERE id = ?
+                  AND delivered_at IS NULL
+                  AND status IN ({','.join('?' for _ in valid_statuses)})
+                  AND (delivery_state IS NULL OR delivery_state = 'waiting' OR status = ?)
+                """,
+                (
+                    scheduled_at_iso,
+                    new_expires_at,
+                    now_iso,
+                    request_id,
+                    *valid_statuses,
+                    RequestStatus.COMPLETED.value,
+                ),
+            )
+            if cursor.rowcount == 0:
+                return None
+            if scheduled_at is None:
+                self._log(cursor, request_id, actor, "schedule_cleared", at=now_iso)
+            else:
+                self._log(cursor, request_id, actor, "scheduled", {"scheduled_at": scheduled_at_iso}, at=now_iso)
+        return self.get_request(request_id)
+
     def steer_candidates(self) -> List[Tuple[RequestModel, SessionModel]]:
         """'Now' messages for sessions in the middle of a turn that can take them."""
+        now = datetime.now(timezone.utc).isoformat()
         placeholders = ", ".join("?" for _ in STEER_PROVIDERS)
         with self._get_connection() as conn:
             rows = conn.execute(
@@ -1370,9 +1558,10 @@ class Database:
                 JOIN sessions s ON s.id = r.recipient_session_id
                 WHERE r.status = ? AND r.delivery_mode = 'now' AND s.state = 'busy'
                   AND s.ended_at IS NULL AND s.excluded_at IS NULL AND s.provider IN ({placeholders})
+                  AND (r.scheduled_at IS NULL OR datetime(r.scheduled_at) <= datetime(?))
                 ORDER BY r.id
                 """,
-                (RequestStatus.APPROVED.value, *STEER_PROVIDERS),
+                (RequestStatus.APPROVED.value, *STEER_PROVIDERS, now),
             ).fetchall()
         out = []
         for row in rows:
@@ -1391,6 +1580,8 @@ class Database:
                 ", delivering_since = ?, delivery_attempts = delivery_attempts + 1,"
                 " delivery_state = 'in_progress', delivery_channel = 'steer', attempt_id = ?",
                 [now, _new_attempt()],
+                extra_where=" AND (scheduled_at IS NULL OR datetime(scheduled_at) <= datetime(?))",
+                where_params=[now],
             ):
                 return None
             self._log(cursor, request_id, actor, "injection_claimed",
@@ -1524,8 +1715,11 @@ class Database:
         """
         in_flight = set(self.recipients_with_delivery_in_flight())
         ready = []
+        now = datetime.now(timezone.utc)
         for r in self.list_requests(status=RequestStatus.APPROVED, oldest_first=True, limit=200):
             if r.recipient_id == "human" or r.recipient_id in in_flight:
+                continue
+            if r.scheduled_at is not None and r.scheduled_at > now:
                 continue
             ready.append(r)
             in_flight.add(r.recipient_id)
@@ -1633,8 +1827,8 @@ class Database:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "UPDATE requests SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL AND (sender_id = 'human' OR recipient_id = 'human' OR status != 'COMPLETED' OR allow_auto_return = 1 OR return_decision IN ('approved', 'forwarded'))",
-                (now, request_id),
+                "UPDATE requests SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL AND (sender_id = 'human' OR recipient_id = 'human' OR status != 'COMPLETED' OR allow_auto_return = 1 OR return_decision IN ('approved', 'forwarded')) AND (scheduled_at IS NULL OR datetime(scheduled_at) <= datetime(?))",
+                (now, request_id, now),
             )
             if cursor.rowcount == 0:
                 return False
@@ -1695,22 +1889,28 @@ class Database:
         Settled requests whose outcome has not reached the sender yet, oldest
         first, whose last change falls in (settled_after, settled_before].
         """
+        now = datetime.now(timezone.utc).isoformat()
+        later_ts = "CASE WHEN scheduled_at IS NOT NULL AND datetime(scheduled_at) > datetime(updated_at) THEN scheduled_at ELSE updated_at END"
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                """
+                f"""
                 SELECT id FROM requests
                 WHERE delivered_at IS NULL AND status != ? AND (sender_id = 'human' OR recipient_id = 'human' OR status != 'COMPLETED' OR allow_auto_return = 1 OR return_decision IN ('approved', 'forwarded'))
                   -- the user's own messages: the outcome is in the conversation
                   AND sender_id != 'human'
-                  AND updated_at IS NOT NULL AND updated_at <= ? AND updated_at > ?
-                ORDER BY updated_at ASC
+                  AND ({later_ts}) IS NOT NULL
+                  AND datetime({later_ts}) <= datetime(?)
+                  AND datetime({later_ts}) > datetime(?)
+                  AND (scheduled_at IS NULL OR datetime(scheduled_at) <= datetime(?))
+                ORDER BY datetime({later_ts}) ASC
                 LIMIT ?
                 """,
                 (
                     RequestStatus.PENDING.value,
                     settled_before.isoformat(),
                     settled_after.isoformat(),
+                    now,
                     limit,
                 ),
             )
@@ -1736,6 +1936,7 @@ class Database:
             provider=row["provider"],
             entrypoint=row["entrypoint"],
             cwd=row["cwd"],
+            project_root=row["project_root"],
             title=row["title"],
             tmux_session=row["tmux_session"],
             tmux_pane=row["tmux_pane"],
@@ -1756,6 +1957,8 @@ class Database:
             excluded=row["excluded_at"] is not None,
             controls=session_controls(row["provider"], row["tmux_session"], row["entrypoint"], row["tmux_pane"],
                                      bool(row["tmux_server"] and row["agent_pid"] and row["agent_started"])),
+            mcp_state=row["mcp_state"],
+            mcp_seen_at=_ts(row["mcp_seen_at"]),
             node_id=row["node_id"],
             node_name=row["node_name"] if "node_name" in row.keys() else None,
             continued_to=row["continued_to"] if "continued_to" in row.keys() else None,
@@ -1776,6 +1979,7 @@ class Database:
         tmux_server: Optional[str] = None,
         agent_pid: Optional[int] = None,
         agent_started: Optional[str] = None,
+        project_root: Optional[str] = None,
     ) -> bool:
         """
         Registers a session or refreshes it. Returns False if the id is
@@ -1792,12 +1996,12 @@ class Database:
             if row is None:
                 cursor.execute(
                     """
-                    INSERT INTO sessions (id, agent_id, provider, entrypoint, cwd, title,
+                    INSERT INTO sessions (id, agent_id, provider, entrypoint, cwd, project_root, title,
                                           tmux_session, tmux_pane, tmux_server, agent_pid, agent_started,
                                           model, state, started_at, last_seen_at, activity_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'idle', ?, ?, ?)
                     """,
-                    (session_id, agent_id, provider, entrypoint, cwd, title, tmux_session, tmux_pane,
+                    (session_id, agent_id, provider, entrypoint, cwd, project_root, title, tmux_session, tmux_pane,
                      tmux_server, agent_pid, agent_started, model, now, now, now),
                 )
             else:
@@ -1805,14 +2009,14 @@ class Database:
                     """
                     UPDATE sessions SET
                         provider = COALESCE(?, provider), entrypoint = COALESCE(?, entrypoint),
-                        cwd = COALESCE(?, cwd), title = COALESCE(?, title),
+                        cwd = COALESCE(?, cwd), project_root = COALESCE(?, project_root), title = COALESCE(?, title),
                         tmux_session = COALESCE(?, tmux_session), tmux_pane = COALESCE(?, tmux_pane),
                         tmux_server = COALESCE(?, tmux_server), agent_pid = COALESCE(?, agent_pid),
                         agent_started = COALESCE(?, agent_started),
                         model = COALESCE(?, model), last_seen_at = ?
                     WHERE id = ?
                     """,
-                    (provider, entrypoint, cwd, title, tmux_session, tmux_pane, tmux_server, agent_pid,
+                    (provider, entrypoint, cwd, project_root, title, tmux_session, tmux_pane, tmux_server, agent_pid,
                      agent_started, model, now, session_id),
                 )
             return True
@@ -2026,6 +2230,33 @@ class Database:
                 (session_id,),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def set_mcp_config_state(self, session_id: str, state: str) -> None:
+        """RF-27: what the hook read at session start. A session seen using the MCP stays configured."""
+        with self._get_connection() as conn:
+            conn.execute(
+                "UPDATE sessions SET mcp_state = CASE WHEN mcp_seen_at IS NOT NULL THEN 'configured' ELSE ? END"
+                " WHERE id = ?", (state, session_id))
+
+    def mark_mcp_seen(self, session_id: Optional[str]) -> None:
+        """RF-27: a Placet MCP call carried this session: the connection works."""
+        if not session_id:
+            return
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            conn.execute("UPDATE sessions SET mcp_seen_at = ?, mcp_state = 'configured' WHERE id = ?",
+                         (now, session_id))
+
+    def suspect_mcp(self, session_id: str) -> bool:
+        """
+        RF-27: a Placet request's turn ended and the session never used the
+        MCP while the config check could not tell: suspect, once.
+        """
+        with self._get_connection() as conn:
+            cur = conn.execute(
+                "UPDATE sessions SET mcp_state = 'suspect' WHERE id = ? AND mcp_state = 'unknown'"
+                " AND mcp_seen_at IS NULL", (session_id,))
+            return cur.rowcount > 0
 
     def increment_prompt_count(self, session_id: str) -> None:
         with self._get_connection() as conn:
@@ -2362,6 +2593,11 @@ class Database:
         with self._get_connection() as conn:
             return [r["data"] for r in conn.execute("SELECT data FROM provider_usage ORDER BY provider")]
 
+    def get_usage(self, provider: str) -> Optional[str]:
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT data FROM provider_usage WHERE provider = ?", (provider,)).fetchone()
+            return row["data"] if row else None
+
     def record_usage_samples(
         self,
         provider: str,
@@ -2537,6 +2773,79 @@ class Database:
                    for b in usage.buckets):
                 near.add(usage.provider)
         return near
+
+    def is_provider_over_limit(
+        self,
+        provider: Optional[str],
+        five_hour: float,
+        seven_day: float,
+        check_near_limit: bool = True,
+        now: Optional[datetime] = None,
+    ) -> bool:
+        """RF-66: True if provider has used up account window (100%) or exceeded thresholds."""
+        if not provider:
+            return False
+        now = now or datetime.now(timezone.utc)
+        if provider in self.limited_providers(now=now):
+            return True
+        if check_near_limit and provider in self.near_limit_providers(five_hour, seven_day, now=now):
+            return True
+        return False
+
+    def provider_reset_time(
+        self,
+        provider: Optional[str],
+        five_hour: float,
+        seven_day: float,
+        check_near_limit: bool = True,
+        now: Optional[datetime] = None,
+    ) -> Optional[datetime]:
+        """
+        RF-66: Latest resets_at among the over-limit windows of provider.
+        Returns None if reset time is unknown or stale (e.g. missing resets_at,
+        resets_at <= now, or polled provider older than USAGE_STALE_AFTER).
+        """
+        if not provider:
+            return None
+        from backend.app.models import ProviderUsage
+        now = now or datetime.now(timezone.utc)
+        data = self.get_usage(provider)
+        if not data:
+            return None
+        usage = ProviderUsage.model_validate_json(data)
+        observed = usage.observed_at
+        if observed is not None and observed.tzinfo is None:
+            observed = observed.replace(tzinfo=timezone.utc)
+        if (
+            usage.provider in USAGE_POLLED
+            and observed is not None
+            and now - observed > USAGE_STALE_AFTER
+        ):
+            return None
+
+        threshold = {"5h": five_hour, "7d": seven_day}
+        over_limit_buckets = []
+        for b in usage.buckets:
+            if b.group is None and b.used_percent >= 100:
+                over_limit_buckets.append(b)
+            elif check_near_limit and b.used_percent >= threshold.get(b.window, 100):
+                over_limit_buckets.append(b)
+
+        if not over_limit_buckets:
+            return None
+
+        reset_times = []
+        for b in over_limit_buckets:
+            if b.resets_at is None:
+                return None
+            rt = b.resets_at
+            if rt.tzinfo is None:
+                rt = rt.replace(tzinfo=timezone.utc)
+            if rt <= now:
+                return None
+            reset_times.append(rt)
+
+        return max(reset_times)
 
     def get_stats(
         self,
@@ -2827,6 +3136,8 @@ class Database:
     _OUTCOMES_SQL = """
         SELECT id FROM requests
         WHERE sender_session_id = ? AND delivered_at IS NULL AND status != ? AND (sender_id = 'human' OR recipient_id = 'human' OR status != 'COMPLETED' OR allow_auto_return = 1 OR return_decision IN ('approved', 'forwarded'))
+          -- RF-66: scheduled outcomes wait until scheduled_at arrives
+          AND (scheduled_at IS NULL OR datetime(scheduled_at) <= datetime(?))
         ORDER BY updated_at ASC
     """
     _INJECTIONS_SQL = """
@@ -2836,6 +3147,8 @@ class Database:
           AND (recipient_session_id = ? OR (recipient_session_id IS NULL AND ? = 0))
           -- a session never receives its own request (agent -> same agent)
           AND (sender_session_id IS NULL OR sender_session_id != ?)
+          -- RF-65: scheduled messages are only delivered when scheduled_at arrives
+          AND (scheduled_at IS NULL OR datetime(scheduled_at) <= datetime(?))
         ORDER BY (recipient_session_id IS NULL) ASC, id ASC
     """
 
@@ -2921,11 +3234,12 @@ class Database:
             return False
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(self._OUTCOMES_SQL, (session.id, RequestStatus.PENDING.value))
+            now = datetime.now(timezone.utc).isoformat()
+            cursor.execute(self._OUTCOMES_SQL, (session.id, RequestStatus.PENDING.value, now))
             outcome_ids = [r["id"] for r in cursor.fetchall()]
             cursor.execute(
                 self._INJECTIONS_SQL,
-                (RequestStatus.APPROVED.value, session.agent_id, session.id, int(explicit_only), session.id),
+                (RequestStatus.APPROVED.value, session.agent_id, session.id, int(explicit_only), session.id, now),
             )
             if cursor.fetchone() is not None and self.request_in_flight(session.id) is None:
                 return True
@@ -2972,9 +3286,10 @@ class Database:
         if session.provider in self.limited_providers():
             return None
         actor = actor or f"agent:{session.agent_id}"
+        now = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(self._OUTCOMES_SQL, (session.id, RequestStatus.PENDING.value))
+            cursor.execute(self._OUTCOMES_SQL, (session.id, RequestStatus.PENDING.value, now))
             outcome_ids = [r["id"] for r in cursor.fetchall()]
         for req_id in outcome_ids:
             req = self.get_request(req_id)
@@ -2988,7 +3303,7 @@ class Database:
             cursor = conn.cursor()
             cursor.execute(
                 self._INJECTIONS_SQL,
-                (RequestStatus.APPROVED.value, session.agent_id, session.id, 0, session.id),
+                (RequestStatus.APPROVED.value, session.agent_id, session.id, 0, session.id, now),
             )
             candidates = [r["id"] for r in cursor.fetchall()]
             for req_id in candidates:
@@ -3000,6 +3315,8 @@ class Database:
                     " recipient_session_id = ?, delivery_state = 'in_progress', delivery_channel = ?,"
                     " attempt_id = ?",
                     [now, session.id, "bridge" if via == "bridge" else "waiter", _new_attempt()],
+                    extra_where=" AND (scheduled_at IS NULL OR datetime(scheduled_at) <= datetime(?))",
+                    where_params=[now],
                 ):
                     continue
                 cursor.execute("SELECT delivery_attempts FROM requests WHERE id = ?", (req_id,))
