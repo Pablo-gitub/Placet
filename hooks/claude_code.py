@@ -47,6 +47,10 @@ CONTINUED_JSONL_UUID = re.compile(
 # Claude Code names MCP tools mcp__<server>__<tool>; other clients may not.
 PLACET_TOOLS = re.compile(r"(^|__|\.|/)placet_(ask_human|send_to_agent)$")
 MAX_MESSAGE_CHARS = 20000
+# RF-29d fallback: where, in the session's own transcript, a continuation
+# summary can be (it is the conversation's first message).
+TRANSCRIPT_HEAD_BYTES = 256 * 1024
+TRANSCRIPT_HEAD_LINES = 5
 ADAPTER = "claude_code.py/2"
 
 
@@ -89,6 +93,32 @@ def _request_id_from_tool_response(response, depth: int = 0):
     return None
 
 
+def continued_from_transcript(path):
+    """
+    The session this one continues, from the head of its own transcript: a
+    continuation starts with a summary naming the previous transcript. Only
+    that explicit reference counts, and never the transcript itself. None
+    when the file is unreadable or says nothing.
+    """
+    if not path:
+        return None
+    try:
+        with open(path, "rb") as handle:
+            head = handle.read(TRANSCRIPT_HEAD_BYTES).decode("utf-8", errors="replace")
+    except OSError:
+        return None
+    own = Path(path).stem.lower()
+    for line in head.splitlines()[:TRANSCRIPT_HEAD_LINES]:
+        index = line.find(CONTINUED_PREFIX)
+        if index == -1:
+            continue
+        found = [u.lower() for u in CONTINUED_JSONL_UUID.findall(line[index:])]
+        found = [u for u in found if u != own]
+        if found:
+            return found[-1]
+    return None
+
+
 def build_event(event: dict, provider: str = "claude-code"):
     """The /api/sessions/{id}/events payload for a hook event, or None."""
     name = event.get("hook_event_name")
@@ -115,6 +145,9 @@ def build_event(event: dict, provider: str = "claude-code"):
             jsonl_uuids = CONTINUED_JSONL_UUID.findall(prompt_text[cont_idx:])
             if jsonl_uuids:
                 payload["continues"] = jsonl_uuids[-1].lower()
+        if "continues" not in payload and provider == "claude-code":
+            # The summary may not reach the prompt hook: the transcript has it.
+            payload["continues"] = continued_from_transcript(event.get("transcript_path"))
         return payload
     if name == "PostToolUse" and PLACET_TOOLS.search(event.get("tool_name") or ""):
         request_id = _request_id_from_tool_response(event.get("tool_response"))
