@@ -3333,6 +3333,26 @@ class Database:
                 ended.append(session_id)
         return {"unconfirmed": [s for s in unconfirmed if s not in ended], "ended": ended}
 
+    def wake_alert_candidates(self) -> List[str]:
+        """Sessions whose episode ended without evidence (or never reached the app) and were not told about yet."""
+        with self._get_connection() as conn:
+            return [r["id"] for r in conn.execute(
+                "SELECT id FROM sessions WHERE wake_state IN ('wake_unconfirmed', 'wake_failed')"
+                " AND wake_alerted_at IS NULL").fetchall()]
+
+    def claim_wake_alert(self, session_id: str) -> bool:
+        """The one needs-you notification of this episode: True the first time only."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            return conn.execute("UPDATE sessions SET wake_alerted_at = ? WHERE id = ? AND wake_alerted_at IS NULL",
+                                (now, session_id)).rowcount > 0
+
+    def request_wake_retry(self, session_id: str) -> None:
+        """The user asked again: a new episode, whose open may ignore the bridge's cooldown."""
+        with self._get_connection() as conn:
+            conn.execute("UPDATE sessions SET wake_state = NULL, wake_attempts = 0, wake_force = 1,"
+                         " wake_alerted_at = NULL WHERE id = ?", (session_id,))
+
     def wake_forced(self, session_id: str) -> bool:
         with self._get_connection() as conn:
             row = conn.execute("SELECT wake_force FROM sessions WHERE id = ?", (session_id,)).fetchone()

@@ -446,6 +446,8 @@ def create_app(
         swept = db.settle_wake_episodes()
         for session_id in swept["unconfirmed"] + swept["ended"]:
             notify_session(session_id)
+        for session_id in db.wake_alert_candidates():
+            alert_wake(session_id)
         # Switched off, nothing is marked: turning it on later still alerts.
         if db.get_notification_preferences().get("queue_held", True):
             for req_id, session_id, waiting in db.held_queues_to_alert():
@@ -461,6 +463,23 @@ def create_app(
             elif stalled.question_type != QuestionType.MESSAGE:
                 # The user's own messages need no reply: the answer is in the chat.
                 alert(req_id, "stalled")
+
+    def alert_wake(session_id: str) -> None:
+        """
+        A Claude Desktop session was asked to open and never started listening (or the link never
+        reached the app): one needs-you notification per episode, never repeated, never when the
+        user turned that kind off (and then not consumed).
+        """
+        if not db.get_notification_preferences().get("needs_you", True):
+            return
+        session = db.get_session(session_id)
+        if session is None or not db.claim_wake_alert(session_id):
+            return
+        lang = db.get_background_language()
+        key = "wake_failed" if session.wake_state == "wake_failed" else "wake_unconfirmed"
+        web_push_later(text(f"notify.{key}_title", lang,
+                            label=session_label(session.provider, session.title, session.project_root or session.cwd)),
+                       text(f"notify.{key}_body", lang), f"/#/sessione/{session_id}", f"wake-{session_id}", "high")
 
     def alert_held_queue(req_id: int, session_id: str, waiting: int) -> None:
         session = db.get_session(session_id)
@@ -2537,7 +2556,36 @@ def create_app(
         if not db.report_wake(session_id, body.outcome):
             raise HTTPException(status_code=404, detail="Session not found")
         notify_session(session_id)
+        if db.get_session(session_id).wake_state == "wake_failed":
+            alert_wake(session_id)
         return {"session": session_id, "outcome": body.outcome}
+
+    @app.post("/api/sessions/{session_id}/wake")
+    async def retry_wake(session_id: str, who: Principal = Depends(principal)):
+        """
+        "Riprova apertura": the user asks again to open a Claude Desktop session that never started
+        listening. A new episode (one automatic open, the bridge's cooldown ignored once). The
+        message waiting for it is untouched.
+        """
+        require_human(who)
+        session = db.get_session(session_id)
+        if session is None:
+            raise ProductError(404, "session.not_found", "Session not found")
+        if session.provider != "claude-code" or session.entrypoint != "claude-desktop":
+            raise ProductError(409, "session.wake_unsupported", "Only a Claude Desktop session can be opened this way.")
+        if session.excluded:
+            raise ProductError(409, "session.excluded", "This project is excluded from Placet (.placet-off).")
+        if session.ended_at is not None:
+            raise ProductError(409, "session.closed", "The session is closed.")
+        if session.reachable:
+            raise ProductError(409, "session.already_reachable", "The session is already listening.")
+        if session.wake_state in ("open_requested", "waiting_for_session"):
+            raise ProductError(409, "session.wake_in_progress", "The opening was just requested: wait for the window to end.")
+        if not db.inbox_has_message(session, explicit_only=True):
+            raise ProductError(409, "session.nothing_to_wake", "No message is waiting for this session.")
+        db.request_wake_retry(session_id)
+        notify_session(session_id)
+        return {"session": session_id, "wake_state": None}
 
     @app.post("/api/bridge/titles")
     async def bridge_titles(payload: TitlesReport, who: Principal = Depends(principal)):

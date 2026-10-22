@@ -61,5 +61,9 @@
   "notify.app_review_body": "Approva il piano nell'app Antigravity sul PC: il lavoro riprende da lì.",
   "notify.queue_held_title": "{label}: {count} messaggi fermi, conferma se ha finito",
   "notify.queue_held_title_one": "{label}: 1 messaggio fermo, conferma se ha finito",
-  "notify.queue_held_body": "La fine dell'ultimo turno della sessione non è stata vista: aprila e conferma."
+  "notify.queue_held_body": "La fine dell'ultimo turno della sessione non è stata vista: aprila e conferma.",
+  "notify.wake_unconfirmed_title": "{label}: la sessione non è partita",
+  "notify.wake_unconfirmed_body": "Apertura richiesta, ma la sessione non ha iniziato ad ascoltare. Il messaggio è ancora in Placet.",
+  "notify.wake_failed_title": "{label}: apertura non riuscita",
+  "notify.wake_failed_body": "Placet non è riuscito a chiedere a Claude Desktop di aprire la sessione. Il messaggio è ancora in Placet."
 }

@@ -199,7 +199,11 @@
     "controlUncertain": "The previous command's outcome is uncertain: check the session first.",
     "scheduleTimeInPast": "Scheduled time cannot be in the past.",
     "scheduleTooFarAhead": "Scheduled time cannot be more than 30 days in the future.",
-    "scheduleNotAllowed": "This message cannot be scheduled."
+    "scheduleNotAllowed": "This message cannot be scheduled.",
+    "wakeInProgress": "The opening was just requested: wait for it to finish.",
+    "wakeNothing": "No message is waiting for this session.",
+    "wakeReachable": "The session is already listening.",
+    "wakeUnsupported": "Only a Claude Desktop session can be opened this way."
   },
   "sessions": {
     "closed": "Closed",
@@ -769,5 +773,12 @@
     "expired": "Expired",
     "cancelled": "Cancelled",
     "human": "Human"
+  },
+  "wake": {
+    "unconfirmed": "Opening was requested, but the session did not start listening. The message is still in Placet: write a message in the chat on the PC, or try again.",
+    "failed": "Placet could not ask Claude Desktop to open the session. The message is still in Placet: open the session on the PC, or try again.",
+    "waiting": "Opening requested: waiting for the session to start listening…",
+    "lastAttempt": "Last attempt: {{when}}",
+    "retry": "Retry opening"
   }
 }
