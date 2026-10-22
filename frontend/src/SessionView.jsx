@@ -201,7 +201,7 @@ function Outgoing({ req, session, limitAt, onDelivery, onEdit, onSchedule }) {
   const uncertain = isUncertain(req);
   const failed = req.status === "DELIVERY_FAILED" || req.status === "EXPIRED";
   const projName = req.project_name || "";
-  const isScheduled = !!req.scheduled_at && req.status in OUTGOING_STATES;
+  const isScheduled = !!req.scheduled_at && req.status === "APPROVED";
   return (
     <div
       className={`msg msg-user outgoing${failed ? " failed" : ""}${uncertain ? " uncertain" : ""}`}
@@ -259,20 +259,9 @@ function Outgoing({ req, session, limitAt, onDelivery, onEdit, onSchedule }) {
             </button>
           )}
           {req.status === "APPROVED" && onEdit && (
-            <>
-              <button type="button" data-testid={`edit-${req.id}`} onClick={() => onEdit(req)}>
-                {t(isScheduled ? "deliveryUi.modify" : "deliveryUi.edit")}
-              </button>
-              {isScheduled && (
-                <button
-                  type="button"
-                  data-testid={`modify-${req.id}`}
-                  style={{ display: "none" }}
-                  aria-hidden="true"
-                  onClick={() => onEdit(req)}
-                />
-              )}
-            </>
+            <button type="button" data-testid={`edit-${req.id}`} onClick={() => onEdit(req)}>
+              {t(isScheduled ? "deliveryUi.modify" : "deliveryUi.edit")}
+            </button>
           )}
           <button type="button" data-testid={`cancel-${req.id}`} onClick={() => onDelivery(req.id, "cancel")}>
             {t("deliveryUi.cancel")}

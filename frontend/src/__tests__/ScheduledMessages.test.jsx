@@ -110,8 +110,9 @@ describe("SessionView scheduled messages display and actions (RF-65)", () => {
     fireEvent.click(cancelBtn);
     expect(onDelivery).toHaveBeenCalledWith(42, "cancel");
 
-    const modifyBtn = screen.getByTestId("modify-42");
-    expect(modifyBtn).toBeInTheDocument();
+    const editBtn = screen.getByTestId("edit-42");
+    expect(editBtn).toBeInTheDocument();
+    expect(editBtn).toHaveTextContent(/Modifica|Modify/);
   });
 
   it("modifies scheduled message: withdraws message and preloads scheduled_at in composer", async () => {
@@ -149,5 +150,35 @@ describe("SessionView scheduled messages display and actions (RF-65)", () => {
     await waitFor(() => expect(screen.getByTestId("composer-input")).toHaveValue("Aggiorna il database"));
     const scheduleInput = screen.getByTestId("composer-schedule-input");
     expect(scheduleInput.value).toBeTruthy();
+  });
+
+  it("displays actual delivery/execution state when scheduled request transitions past APPROVED", async () => {
+    mockFetch([[transcriptOf("s1"), latest]]);
+
+    const deliveringReq = {
+      id: 50,
+      sender_id: "human",
+      recipient_id: "claude",
+      recipient_session_id: "s1",
+      question_type: "message",
+      prompt: "Delivering scheduled",
+      status: "DELIVERING",
+      scheduled_at: "2026-10-22T08:00:00Z",
+      created_at: "2026-10-22T07:00:00Z",
+    };
+
+    render(
+      <SessionView
+        sessionId="s1"
+        session={session}
+        requests={[deliveringReq]}
+        sessions={[session]}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByTestId("outgoing-50")).toBeInTheDocument());
+    const outgoing = screen.getByTestId("outgoing-50");
+    expect(outgoing).not.toHaveTextContent(/Programmato per|Scheduled for/);
+    expect(outgoing).toHaveTextContent(/In consegna|Delivering/);
   });
 });
