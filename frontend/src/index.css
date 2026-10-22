@@ -2214,3 +2214,23 @@ body.chat-open { overflow: hidden; }
 .state-archived { color: var(--text-muted); }
 .desktop-capacity { display: flex; flex-direction: column; gap: 0.1rem; padding: 0.2rem 0.75rem; font-size: 0.75rem; color: var(--text-muted); }
 .desktop-capacity.capacity-full { color: var(--warning); }
+
+/* --- Messages: the undelivered list and the history rows ------------------------------- */
+
+.message-group { margin-top: 0.75rem; }
+.message-group h4 { font-size: 0.85rem; margin: 0 0 0.35rem; color: var(--text-muted); }
+.message-row { border-top: 1px solid var(--border-color); }
+.message-row > summary,
+.message-row-button {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.6rem;
+  width: 100%; padding: 0.55rem 0; min-height: 2.75rem; cursor: pointer; list-style: none;
+  background: none; border: 0; color: inherit; font: inherit; text-align: left;
+}
+.message-row > summary::-webkit-details-marker { display: none; }
+.message-id { font-weight: 700; font-variant-numeric: tabular-nums; }
+.message-route { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.25rem; min-width: 0; overflow-wrap: anywhere; }
+.message-project { font-size: 0.75rem; color: var(--text-muted); }
+.message-row time { margin-left: auto; font-size: 0.75rem; color: var(--text-muted); white-space: nowrap; }
+.message-row-body { padding: 0 0 0.75rem; overflow-wrap: anywhere; }
+.message-actions { margin-top: 0.6rem; }
+.error-text { color: var(--danger); }

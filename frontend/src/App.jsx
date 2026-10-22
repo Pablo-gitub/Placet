@@ -400,6 +400,8 @@ export default function App() {
   );
   const settingsView = route.view === "settings" && (
     <Settings
+      requests={requests}
+      sessions={sessions}
       onOpenHistory={() => navigate("#/storico")}
       onOpenCommands={() => navigate("#/comandi")}
       onOpenStats={() => navigate("#/statistiche")}
