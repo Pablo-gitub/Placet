@@ -1837,6 +1837,9 @@ body.chat-open { overflow: hidden; }
 .rg-ball-delivering { fill: var(--accent); }
 .rg-ball-returning { fill: var(--primary); }
 .rg-ball-queued { fill: var(--text-muted); }
+.rg-ball-scheduled { fill: none; stroke: var(--text-muted); stroke-dasharray: 2 2; }
+.rg-clock circle { fill: var(--bg-card, var(--bg-secondary)); stroke: var(--text-muted); stroke-width: 1; }
+.rg-clock path { fill: none; stroke: var(--text-muted); stroke-width: 1; stroke-linecap: round; }
 .rg-ball-waiting { fill: var(--warning); animation: rg-wait 1.2s ease-in-out infinite alternate; }
 @keyframes rg-wait { from { opacity: 1; } to { opacity: 0.45; } }
 @media (prefers-reduced-motion: reduce) {
@@ -1845,6 +1848,7 @@ body.chat-open { overflow: hidden; }
 }
 .rg-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; vertical-align: middle; margin-right: 0.3rem; background: var(--warning); }
 .rg-dot.rg-ball-queued { background: var(--text-muted); }
+.rg-dot.rg-ball-scheduled { background: transparent; border: 1px dashed var(--text-muted); }
 
 /* Settings */
 .settings { display: flex; flex-direction: column; gap: 1rem; }

@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import i18n from "../i18n";
 import RelationGraph from "../RelationGraph";
+import { formatDateTime } from "../i18n/formatters";
 
 // The real nodes and relations of the Placet project (October 19, 2026).
 const nodes = [
@@ -158,4 +159,27 @@ it("marks the relations whose replies need approval (RFC-16)", () => {
   expect(auto.getAttribute("marker-start")).toBeNull();
   expect(manual.getAttribute("marker-start")).toBe("url(#rg-reply-manual)");
   expect(screen.getByTestId("graph-legend-reply")).toBeInTheDocument();
+});
+
+describe("a request scheduled for later on the graph", () => {
+  const later = new Date(Date.now() + 3 * 3600000).toISOString();
+  const scheduled = { id: 5, relation_id: 1, status: "APPROVED", scheduled_at: later };
+
+  it("is drawn with a clock and its delivery time, not as a stuck queued ball", () => {
+    render(<RelationGraph nodes={nodes} relations={relations} requests={[scheduled]} />);
+    const ball = screen.getByTestId("graph-ball-1");
+    expect(ball).toHaveClass("rg-ball-scheduled");
+    expect(ball).not.toHaveClass("rg-ball-queued");
+    expect(ball.querySelector("animateMotion")).toBeNull();
+    const clock = screen.getByTestId("graph-clock-1");
+    expect(clock.querySelector("title").textContent).toBe(i18n.t("projects.graphScheduledAt", { time: formatDateTime(later) }));
+    expect(screen.getByTestId("graph-legend-scheduled")).toHaveTextContent(i18n.t("projects.graphScheduled"));
+    expect(screen.queryByTestId("graph-legend-queued")).toBeNull();
+  });
+
+  it("does not add a clock to a plain queued ball", () => {
+    render(<RelationGraph nodes={nodes} relations={relations} requests={[{ ...scheduled, scheduled_at: null }]} />);
+    expect(screen.queryByTestId("graph-clock-1")).toBeNull();
+    expect(screen.getByTestId("graph-ball-1")).toHaveClass("rg-ball-queued");
+  });
 });

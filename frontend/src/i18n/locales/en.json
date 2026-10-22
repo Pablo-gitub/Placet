@@ -628,7 +628,9 @@
     "nodeInstructionsPlaceholder": "E.g. Specific role of this node in the project…",
     "saveNodeInstructions": "Save node instructions",
     "graphWaiting": "Waiting for you",
-    "graphQueued": "Queued"
+    "graphQueued": "Queued",
+    "graphScheduled": "Scheduled",
+    "graphScheduledAt": "Leaves {{time}}"
   },
   "settings": {
     "title": "Settings",

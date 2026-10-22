@@ -628,7 +628,9 @@
     "nodeInstructionsPlaceholder": "Es. Ruolo specifico di questo nodo nel progetto…",
     "saveNodeInstructions": "Salva istruzioni nodo",
     "graphWaiting": "In attesa di te",
-    "graphQueued": "In coda"
+    "graphQueued": "In coda",
+    "graphScheduled": "Programmato",
+    "graphScheduledAt": "Parte il {{time}}"
   },
   "settings": {
     "title": "Impostazioni",
