@@ -59,6 +59,8 @@ export function requestIdFromHash(hash) {
 export function routeFromHash(hash) {
   const session = /^#\/sessione\/([A-Za-z0-9_-]+)(?:\?project=(\d+))?$/.exec(hash || "");
   if (session) return { view: "session", sessionId: session[1], projectId: session[2] ? Number(session[2]) : undefined };
+  const message = /^#\/messaggio\/(\d+)$/.exec(hash || "");
+  if (message) return { view: "message", requestId: Number(message[1]) };
   const project = /^#\/progetti\/(\d+)$/.exec(hash || "");
   if (project) return { view: "project_detail", projectId: Number(project[1]) };
   if (hash === "#/progetti" || hash === "#projects") return { view: "projects" };

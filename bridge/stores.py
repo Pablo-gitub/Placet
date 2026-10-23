@@ -60,6 +60,8 @@ class Work:
     # Suspended Codex sessions: queue once, then request native opening.
     wake_sessions: List[dict] = field(default_factory=list)
     claude_wake_sessions: List[dict] = field(default_factory=list)
+    # RFC-16: busy Claude Code sessions ({"id", "since"}), read for a user interrupt.
+    claude_busy: List[dict] = field(default_factory=list)
     claude_auto_renew: bool = False
 
 
@@ -94,6 +96,8 @@ class BridgeStore(Protocol):
     def report_wake(self, session_id: str, outcome: str) -> None: ...
     # Why the app did not start the session this attempt asked for: a closed code, or None.
     def report_wake_cause(self, session_id: str, cause: Optional[str], observed_at, attempt_at) -> None: ...
+    # RFC-16: the user interrupted the session's turn in the app, at this time.
+    def report_interrupted(self, session_id: str, at) -> None: ...
     # What the Claude Desktop app records: conversations archived / no longer archived.
     def report_desktop_state(self, archived: List[str], not_archived: List[str], capacity: Optional[dict] = None,
                              loaded: Optional[List[str]] = None) -> None: ...
@@ -130,6 +134,9 @@ class LocalStore:
             language=self.db.get_background_language(),
             claude_wake_sessions=[{"id": s.id, "cwd": s.cwd}
                                  for s in self.db.claude_sessions_to_wake()],
+            claude_busy=[{"id": s.id, "since": s.activity_at.isoformat() if s.activity_at else None}
+                         for s in self.db.list_sessions()
+                         if s.provider == "claude-code" and s.state == "busy" and s.ended_at is None],
             wake_sessions=[{"id": s.id, "provider": s.provider, "suspended": True}
                            for s in self.db.bridge_sessions_with_mail(include_suspended=True)
                            if s.suspended_at is not None],
@@ -192,6 +199,14 @@ class LocalStore:
 
     def report_wake_cause(self, session_id: str, cause: Optional[str], observed_at, attempt_at) -> None:
         self.db.report_wake_cause(session_id, cause, observed_at, attempt_at)
+
+    def report_interrupted(self, session_id: str, at) -> None:
+        session = self.db.get_session(session_id)
+        if session is not None and session.state == "busy" and session.activity_at is not None \
+                and at > session.activity_at:
+            if session.turn_request_id is not None:
+                self.db.log_event(session.turn_request_id, BRIDGE_ACTOR, "cancelled_in_app", {"at": at.isoformat()})
+            self.db.set_session_state(session_id, "idle", session.turn_request_id)
 
     def report_desktop_state(self, archived: List[str], not_archived: List[str], capacity: Optional[dict] = None,
                              loaded: Optional[List[str]] = None) -> None:
@@ -260,6 +275,7 @@ class HttpStore:
         return Work(
             language=data.get("language"),
             claude_wake_sessions=list(data.get("claude_wake_sessions", [])),
+            claude_busy=list(data.get("claude_busy", [])),
             wake_sessions=list(data.get("wake_sessions", [])),
             injections=[RequestModel(**r) for r in data["injections"]],
             results=[RequestModel(**r) for r in data["results"]],
@@ -319,6 +335,10 @@ class HttpStore:
         resp = self.client.post(f"/api/bridge/sessions/{session_id}/wake-cause", json={
             "cause": cause, "observed_at": observed_at.isoformat() if observed_at else None,
             "attempt_at": attempt_at.isoformat()})
+        resp.raise_for_status()
+
+    def report_interrupted(self, session_id: str, at) -> None:
+        resp = self.client.post(f"/api/bridge/sessions/{session_id}/interrupted", json={"at": at.isoformat()})
         resp.raise_for_status()
 
     def report_usage(self, providers: List[dict]) -> None:
