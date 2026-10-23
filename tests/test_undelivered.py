@@ -272,3 +272,27 @@ async def test_the_listing_names_the_nodes_and_the_project(env):
     item = (await listing(app))[rid]
     assert (item["sender_node"], item["recipient_node"]) == ("planner", "reviewer")
     assert item["request"]["sender_id"] == "codex" and item["request"]["recipient_id"] == "gemini"
+
+
+@pytest.mark.asyncio
+async def test_forwarding_a_prompt_held_for_a_usage_reset_releases_the_hold(env):
+    """Held back by the old recipient's usage limit: the new recipient does not wait for that reset."""
+    app, db = env
+    await world(app)
+    held = await send(app)
+    await approve(app, held)
+    db.schedule_request(held, datetime.now(timezone.utc) + timedelta(hours=2), actor="system:relation#8")
+    assert (await forward(app, held, "cx-spare")).status_code == 200
+    assert db.get_request(held).scheduled_at is None
+    assert db.claim_injection(held)
+
+
+@pytest.mark.asyncio
+async def test_forwarding_a_prompt_the_user_scheduled_keeps_the_time(env):
+    app, db = env
+    await world(app)
+    mine = await send(app)
+    await approve(app, mine)
+    db.schedule_request(mine, datetime.now(timezone.utc) + timedelta(hours=1), actor="human:local")
+    assert (await forward(app, mine, "cx-spare")).status_code == 200
+    assert db.get_request(mine).scheduled_at is not None

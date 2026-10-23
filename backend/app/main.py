@@ -1212,6 +1212,8 @@ def create_app(
         if not moved:
             raise ProductError(409, "undelivered.not_available",
                                "This message has already started to be delivered, or is not a prompt to an agent.")
+        if undelivered_cause(req, datetime.now(timezone.utc))[0] == "awaiting_refresh":
+            db.schedule_request(request_id, None, actor=who.actor)   # the old recipient's reset is not the new one's
         notify_change(request_id)
         notify_session(target.id)
         return get_or_404(request_id)
