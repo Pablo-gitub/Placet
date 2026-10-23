@@ -143,7 +143,7 @@ Problems addressed:
 
 | ID | Requirement | Status |
 | --- | --- | --- |
-| RF-50 | Create a session from the PWA by choosing provider, existing/new folder, model and effort. | [Decided] |
+| RF-50 | Create a session from the PWA by choosing provider, existing/new folder, model and effort. | [Decided]; design proposal in [session creation](plans/session-creation.md). |
 | RF-51 | Placet-created sessions are **tmux CLIs with Remote Control**: genuine `/compact`/`/effort`, resumable through desktop, phone and web. | [Decided]; verified for Claude. |
 | RF-52 | **Temporary sessions:** work in the originating session's folder with a chosen provider (such as Codex reviewing Claude), return results, close automatically, can be deleted. | [Decided] |
 | RF-53 | Creating a session in a **new folder** requires confirmation. | [Decided] |
