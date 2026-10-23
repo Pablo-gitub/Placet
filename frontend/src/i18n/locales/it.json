@@ -307,7 +307,8 @@
       "stalled": "Bloccata: nessuna risposta",
       "cancelled": "Annullata",
       "expired": "Scaduta",
-      "return_decided": "Inoltro della risposta deciso"
+      "return_decided": "Inoltro della risposta deciso",
+      "cancelled_in_app": "interrotta nell'app"
     }
   },
   "picker": {

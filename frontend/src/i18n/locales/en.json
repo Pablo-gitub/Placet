@@ -307,7 +307,8 @@
       "stalled": "Stalled: no reply",
       "cancelled": "Cancelled",
       "expired": "Expired",
-      "return_decided": "Reply forwarding decided"
+      "return_decided": "Reply forwarding decided",
+      "cancelled_in_app": "interrupted in the app"
     }
   },
   "picker": {

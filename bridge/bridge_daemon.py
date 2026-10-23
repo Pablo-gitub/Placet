@@ -20,6 +20,8 @@ from bridge.session_commands import CommandError, run_command
 from bridge.tmux_controller import SessionSpec, TmuxController
 from bridge.attachments import AttachmentError
 from bridge.transcripts import TranscriptError, read_attachment, read_transcript
+from bridge.transcripts import locate as _locate
+from bridge.claude_interrupts import last_turn_interrupted
 from bridge import steer as steer_files
 from bridge.titles import codex_titles
 from bridge.usage import (
@@ -46,6 +48,12 @@ FOLDERS_EVERY_SECONDS = 15.0
 STEER_CONFIRM_SECONDS = 120.0
 # How often the app's own records (archived conversations) are read.
 DESKTOP_STATE_EVERY_SECONDS = 60.0
+# RFC-16: how often the conversations of busy Claude Code sessions are read for a user interrupt.
+INTERRUPT_CHECK_EVERY_SECONDS = 15.0
+
+
+def locate_transcript(provider: str, session_id: str):
+    return _locate(provider, session_id)
 # How long after an accepted Claude Desktop open the app's log is read for the cause.
 WAKE_DIAGNOSIS_SECONDS = 180.0
 # How often Codex and Antigravity titles are read (they change on rename).
@@ -81,6 +89,8 @@ class BridgeDaemon:
         # Accepted opens still worth looking at in the app's log: session -> attempt, last diagnosis.
         self._wake_diagnoses: dict = {}
         self._desktop_state_at = None
+        self._interrupts_at = None
+        self._interrupts_reported: Dict[str, datetime] = {}
         # Counts the Claude Desktop engines (Linux); the services pass one, tests do not.
         self.engine_counter = engine_counter
         self._reconciled_at: dict = {}
@@ -490,6 +500,33 @@ class BridgeDaemon:
         except Exception:
             return None
 
+    def check_interrupts(self, busy: List[dict], force: bool = False) -> None:
+        """
+        RFC-16: a busy Claude Code session whose conversation ends with the user's interrupt marker,
+        written after its turn started, was stopped in the app (no hook fires then). Reported once per
+        interrupt. Read-only, never raises.
+        """
+        now = time.monotonic()
+        if not force and self._interrupts_at is not None and now - self._interrupts_at < INTERRUPT_CHECK_EVERY_SECONDS:
+            return
+        self._interrupts_at = now
+        alive = {item.get('id') for item in busy}
+        self._interrupts_reported = {k: v for k, v in self._interrupts_reported.items() if k in alive}
+        for item in busy:
+            sid = item.get('id')
+            try:
+                since = datetime.fromisoformat(str(item.get('since')).replace('Z', '+00:00'))
+                when = last_turn_interrupted(locate_transcript('claude', sid))
+            except Exception:
+                continue
+            if when is None or when <= since or self._interrupts_reported.get(sid) == when:
+                continue
+            try:
+                self.store.report_interrupted(sid, when)
+                self._interrupts_reported[sid] = when
+            except Exception as exc:
+                logger.warning('Could not report the interrupt of %s (%s).', sid, type(exc).__name__)
+
     def diagnose_wakes(self) -> None:
         """
         For a few minutes after an accepted open, read the app's log for the cause when the session
@@ -527,6 +564,7 @@ class BridgeDaemon:
         self.refresh_usage(auto_renew=work.claude_auto_renew)
         self.diagnose_wakes()
         self.refresh_desktop_state()
+        self.check_interrupts(work.claude_busy)
         for sid, outcome in self.wake_claude_sessions(work.claude_wake_sessions).items():
             try:
                 self.store.report_wake(sid, outcome)
