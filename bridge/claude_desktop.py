@@ -21,6 +21,18 @@ MAX_RECORDS = 2000
 MAX_RECORD_BYTES = 1_000_000
 
 
+def _inside(cwd, recorded) -> bool:
+    """
+    The session's reported folder is the one the app recorded for the chat, or below it: an agent
+    that moved into a worktree of its project (`.worktrees/<task>`) is still that chat. Paths are
+    normalised without following links; a sibling folder sharing a prefix does not match.
+    """
+    if not cwd or not isinstance(recorded, str) or not recorded:
+        return False
+    here, base = os.path.normpath(cwd), os.path.normpath(recorded)
+    return here == base or here.startswith(base.rstrip(os.sep) + os.sep)
+
+
 class ClaudeDesktopWake:
     def __init__(self, sessions_dir=None, state_dir=None, run=subprocess.run, clock=time.time, log=None):
         self.sessions_dir = Path(sessions_dir or Path.home() / '.config/Claude/claude-code-sessions')
@@ -42,7 +54,7 @@ class ClaudeDesktopWake:
             local_id = data.get('sessionId', '')
             if (not isinstance(local_id, str) or not LOCAL_ID.fullmatch(local_id)
                     or path.stem != local_id or data.get('isArchived')
-                    or not cwd or data.get('cwd') != cwd):
+                    or not _inside(cwd, data.get('cwd'))):
                 raise ValueError('Desktop session metadata does not match')
             matches.append(local_id)
         if len(matches) != 1:

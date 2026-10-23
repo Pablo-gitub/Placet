@@ -13,7 +13,9 @@ first is in progress.
 The bridge reads the local metadata under
 `~/.config/Claude/claude-code-sessions/<account>/<org>/local_*.json`, looks for
 `cliSessionId` and requires a single match with the same project, not
-archived. It does not modify these files. It then invokes, through argv and
+archived. The session's reported folder must be the chat's recorded `cwd` or a
+folder below it (an agent working in `.worktrees/<task>` of its project); a
+sibling folder sharing a prefix does not match. It does not modify these files. It then invokes, through argv and
 without a shell:
 
 ```

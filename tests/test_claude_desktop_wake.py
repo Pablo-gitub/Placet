@@ -126,3 +126,25 @@ async def test_unavailable_or_untargeted_sessions_do_not_trigger_open(setup, con
     if condition == 'generic':
         # Not a reason to open the app, but still for the session's waiter.
         assert db.inbox_has_message(db.get_session(SID))
+
+
+def test_a_session_that_moved_into_a_worktree_of_its_folder_still_resolves(tmp_path):
+    """The app records the folder the chat was opened in; the hooks report where the agent cd'ed to."""
+    root = tmp_path / 'sessions'
+    metadata(root, tmp_path)
+    inner = tmp_path / '.worktrees' / 'feature' / 'frontend'
+    inner.mkdir(parents=True)
+    assert ClaudeDesktopWake(root, tmp_path / 'state').resolve(SID, str(inner)) == LOCAL
+
+
+def test_a_folder_outside_the_recorded_one_still_never_opens(tmp_path):
+    root = tmp_path / 'sessions'
+    project = tmp_path / 'project'
+    project.mkdir()
+    metadata(root, project)
+    sibling = tmp_path / 'project-evil'
+    sibling.mkdir()
+    with pytest.raises(ValueError):
+        ClaudeDesktopWake(root, tmp_path / 'state').resolve(SID, str(sibling))
+    with pytest.raises(ValueError):
+        ClaudeDesktopWake(root, tmp_path / 'state').resolve(SID, str(project / '..' / 'project-evil'))
