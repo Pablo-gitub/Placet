@@ -67,9 +67,10 @@ Placet sits between your agents and your phone. Every session registers itself; 
 - **Read and write to any session.** The conversation as you see it on the PC: Markdown, highlighted code, tool calls collapsed into one line. Write a message and it wakes the session, as if you had typed it at the desk.
 - **An approval bus between agents.** `placet_send_to_agent` lets an agent ask another one for a review, a test run or a second opinion. You approve, edit, reject or send it to another session; the reply returns after your separate approval, or you forward it elsewhere.
 - **Relations, projects and automation.** Name sessions as stable nodes and group them into projects. Connect nodes with typed relations, each `manual` or `automatic`. Projects can have their own rules, shared project and role instructions, and stricter anti-loop limits. Agents see the policy, read your effective rule before every automatic send, and stop at loop limits; **Stop all** pauses everything. Near a provider's 5-hour or weekly usage limit, its automatic relations can fall back to your review.
-- **Reserved commands (in progress).** Restarting the services from the phone, authorized with a passkey (Face ID) on a separate administrative origin; agents can propose, never authorize.
+- **Reserved commands.** Restarting the backend or the bridge from the phone, authorized with a passkey (Face ID) on a separate administrative origin; agents can propose, never authorize. Deploys from the phone are planned.
 - **Attachments both ways.** Images you pasted in the desktop apps, pictures an agent generated, PDFs it shared with `placet_share_file`, and photos or files you attach from the phone.
-- **Reliable by design.** Hooks write to a local queue and never block a turn. Each request tracks *delivery*, *execution* and *reply* separately; an uncertain delivery is never re-sent behind your back. One request at a time per session, and time alone never frees the queue.
+- **Undelivered messages, readable history.** A Settings page lists messages that have not reached their session (blocked, waiting for a usage reset, scheduled, awaiting approval) with cancel and forward; the history shows every request by number with its full text.
+- **Reliable by design.** Hooks write to a local queue and never block a turn. A turn stopped by an API error (such as a usage limit) or interrupted in the app is recognised and holds the queue instead of looking busy forever; Claude Desktop sessions the app unloads or archives are shown as such, with the app's loaded-session count. Each request tracks *delivery*, *execution* and *reply* separately; an uncertain delivery is never re-sent behind your back. One request at a time per session, and time alone never frees the queue.
 - **Adaptive.** Two columns on the desktop, a bottom bar on the phone, a theme per provider.
 
 ## How it works
@@ -137,14 +138,17 @@ Placet is **alpha**, used every day by its author on one machine. The interface 
 - ✅ Sessions on the phone: read, write, wake (Claude Code, Codex, Antigravity)
 - ✅ Reliability: local event queue, delivery / execution / reply, one request at a time
 - ✅ Attachments: viewing, `placet_share_file`, uploads from the phone; `@` mentions
-- 🚧 "Right now" messages inside a running turn, distinct notifications, waiter health
+- ✅ "Now" messages inside a running turn (Claude Code, Antigravity); scheduled messages and delivery at the provider's usage reset
+- ✅ Undelivered messages with cancel/forward; turns stopped by API errors or interrupted in the app
 - ✅ Nodes, typed relations with manual / automatic policy, a general rule for automatic relations, loop limits and Stop all; change of recipient on approval
 - ✅ Projects with per-project rules, limits and instructions; a live relations diagram; usage guard
 - ✅ Web Push to the installed PWA (a tap opens the request)
-- 🚧 Reserved commands confirmed with a passkey: restarts first, then deploys of attested GitHub releases
+- ✅ Reserved commands confirmed with a passkey: restart the backend or the bridge
+- 🚧 Deploys from the phone; verified session binding (RS-09, backend done, credential opt-in)
 - 🗺️ A graph editor for relations; a local model provider (OpenJarvis/Ollama)
 - ✅ Provider usage windows and session model/context/effort where provider data is available
-- 🗺️ Creating sessions from the phone; remote compact/effort controls
+- ✅ Remote compact/effort for Claude Code CLI sessions in tmux
+- 🗺️ A project-manager view (RFC-17), creating sessions from the phone, macOS/Windows and a local mode without Tailscale
 
 Documentation: [overview](docs/README.md) · [requirements](docs/requirements.md) · [architecture](docs/architecture.md) · [experiments](docs/experiments/provider-integration.md) · [contributing](CONTRIBUTING.md).
 

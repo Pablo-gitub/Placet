@@ -32,6 +32,7 @@ Some integrations rely on undocumented internals of the provider apps. These pag
 - [Provider integration laboratory](experiments/provider-integration.md), October 15–16, 2026.
 - [Session integration](experiments/2026-10-18-session-integration.md), October 18, 2026.
 - [Codex effort through `codex queue`](experiments/2026-10-18-codex-effort.md), October 18, 2026: overrides are not applied.
+- [Session credential lab](experiments/2026-10-23-session-credential-lab.md), October 23, 2026: RS-09 credential through SessionStart on Claude Code CLI.
 
 These describe observations at a point in time. Where they differ from the requirements or the architecture, the latter describe the current design.
 
