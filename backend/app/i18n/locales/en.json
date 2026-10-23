@@ -65,5 +65,8 @@
   "notify.wake_unconfirmed_title": "{label}: the session did not start",
   "notify.wake_unconfirmed_body": "Opening was requested, but the session did not start listening. The message is still in Placet.",
   "notify.wake_failed_title": "{label}: could not open",
-  "notify.wake_failed_body": "Placet could not ask Claude Desktop to open the session. The message is still in Placet."
+  "notify.wake_failed_body": "Placet could not ask Claude Desktop to open the session. The message is still in Placet.",
+  "notify.turn_failed_title": "{label} stopped",
+  "notify.turn_failed_rate_limit": "Usage limit reached: the session will not resume by itself. Write to it after the reset.",
+  "notify.turn_failed_other": "The turn ended on an API error ({error}): the session will not resume by itself."
 }

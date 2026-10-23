@@ -793,5 +793,9 @@
   "capacity": {
     "line": "Claude Desktop: {{engines}}/{{cap}} sessioni caricate",
     "hint": "I risvegli da Placet potrebbero non partire: archivia una conversazione inattiva nell'app"
+  },
+  "turnError": {
+    "rateLimit": "Il turno si è fermato per il limite di utilizzo. La sessione non riprende da sola: i messaggi restano in Placet finché non le scrivi nell'app dopo il reset.",
+    "other": "Il turno si è fermato per un errore dell'API ({{error}}). La sessione non riprende da sola: scrivile nell'app per farla ripartire."
   }
 }

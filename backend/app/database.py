@@ -516,6 +516,10 @@ class Database:
                 cursor.execute("ALTER TABLE sessions ADD COLUMN wake_alerted_at TEXT;")
             if "desktop_archived" not in session_cols:
                 cursor.execute("ALTER TABLE sessions ADD COLUMN desktop_archived INTEGER NOT NULL DEFAULT 0;")
+            if "turn_error" not in session_cols:
+                # The API error that ended the last turn (Claude Code StopFailure), until the next turn or start.
+                cursor.execute("ALTER TABLE sessions ADD COLUMN turn_error TEXT;")
+                cursor.execute("ALTER TABLE sessions ADD COLUMN turn_error_at TEXT;")
             if "desktop_unloaded" not in session_cols:
                 # Consecutive bridge reports that did not find the conversation loaded in Claude Desktop,
                 # and whether the suspension was made from them (only that one is undone by a loaded report).
@@ -2016,6 +2020,8 @@ class Database:
             wake_attempts=row["wake_attempts"] or 0,
             wake_cause=row["wake_cause"],
             desktop_archived=bool(row["desktop_archived"]),
+            turn_error=row["turn_error"],
+            turn_error_at=_ts(row["turn_error_at"]),
             wake_cause_at=_ts(row["wake_cause_at"]),
             mcp_checked_at=_ts(row["mcp_checked_at"]),
             node_id=row["node_id"],
@@ -2123,6 +2129,12 @@ class Database:
                 " WHERE id = ?",
                 (state, turn_request_id, now, now, session_id),
             )
+
+    def set_turn_error(self, session_id: str, error: Optional[str]) -> None:
+        """The API error that ended the session's last turn, or None to clear it."""
+        with self._get_connection() as conn:
+            conn.execute("UPDATE sessions SET turn_error = ?, turn_error_at = ? WHERE id = ?",
+                         (error, datetime.now(timezone.utc).isoformat() if error else None, session_id))
 
     SEEN_EVENTS_DAYS = 14
 

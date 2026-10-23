@@ -91,7 +91,9 @@ EXPIRY_SWEEP_SECONDS = 30.0
 
 class SessionEventPayload(BaseModel):
     """What an agent CLI / desktop app hook reports about one of its sessions."""
-    event: Literal["start", "prompt", "stop", "tool", "end", "steered"]
+    event: Literal["start", "prompt", "stop", "failed", "tool", "end", "steered"]
+    # failed: the provider's code for the API error that ended the turn.
+    error: Optional[str] = Field(None, pattern=r"^[a-z_]{1,40}$")
     # The hook script and its version: the provenance of execution proofs.
     adapter: Optional[str] = Field(None, max_length=64)
     # Set by the hooks' local queue: an event forwarded twice is applied once.
@@ -663,6 +665,16 @@ def create_app(
                             label=session_label(session.provider, session.title, session.project_root or session.cwd)),
                        text("notify.app_review_body", lang), f"/#/sessione/{session.id}",
                        f"app-review-{session.id}", "high")
+
+    def notify_turn_failed(session: SessionModel, error: str) -> None:
+        """A turn stopped on an API error: the session will not go on by itself (Claude Code StopFailure)."""
+        if not db.get_notification_preferences().get("needs_you", True):
+            return
+        lang = db.get_background_language()
+        web_push_later(text("notify.turn_failed_title", lang,
+                            label=session_label(session.provider, session.title, session.project_root or session.cwd)),
+                       text(f"notify.turn_failed_{'rate_limit' if error == 'rate_limit' else 'other'}", lang, error=error),
+                       f"/#/sessione/{session.id}", f"turn-failed-{session.id}", "high")
 
     def notify_turn_end(session: SessionModel, last_message: Optional[str], is_placet: bool = False) -> None:
         if not session.pinned or session.excluded:
@@ -1582,6 +1594,8 @@ def create_app(
             # Only a real start or turn brings a session back: a late event
             # of another kind must not reopen it.
             db.reopen_session(session_id)
+            if session.turn_error:
+                db.set_turn_error(session_id, None)
         if payload.event == "start":
             db.set_session_state(session_id, "idle")
             db.wake_evidence(session_id)  # a desktop wake-up got its evidence: the session started
@@ -1661,6 +1675,17 @@ def create_app(
                 # still holding the queue ended with it.
                 for released in db.release_on_observed_turn_end(session_id):
                     notify_change(released)
+        elif payload.event == "failed":
+            # The turn ended on an API error: no reply, the request stays open and keeps
+            # holding the queue; the user is told why the session stopped.
+            db.set_session_state(session_id, "idle")
+            db.set_turn_error(session_id, payload.error or "unknown")
+            if session.turn_request_id is not None and session.state == "busy":
+                db.set_execution(session.turn_request_id, "interrupted", actor=f"{who.actor}:hook", source=source)
+                db.log_event(session.turn_request_id, f"{who.actor}:hook", "turn_failed",
+                             {"error": payload.error or "unknown"})
+                notify_change(session.turn_request_id)
+            notify_turn_failed(session, payload.error or "unknown")
         elif payload.event == "steered" and payload.request_id is not None:
             # A "now" message entered the running turn (RF-35): delivered and
             # being executed; the turn now answers more than one message.
