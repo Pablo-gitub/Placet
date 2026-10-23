@@ -205,10 +205,8 @@ class LocalStore:
         if session is not None and session.state == "busy" and session.activity_at is not None \
                 and at > session.activity_at:
             if session.turn_request_id is not None:
-                self.db.set_execution(session.turn_request_id, "interrupted", actor=BRIDGE_ACTOR,
-                                      source="bridge transcript")
                 self.db.log_event(session.turn_request_id, BRIDGE_ACTOR, "cancelled_in_app", {"at": at.isoformat()})
-            self.db.set_session_state(session_id, "idle")
+            self.db.set_session_state(session_id, "idle", session.turn_request_id)
 
     def report_desktop_state(self, archived: List[str], not_archived: List[str], capacity: Optional[dict] = None,
                              loaded: Optional[List[str]] = None) -> None:

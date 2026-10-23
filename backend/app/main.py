@@ -1609,6 +1609,13 @@ def create_app(
                 turn_request_id = paused
                 db.log_event(paused, f"{who.actor}:hook", "turn_resumed", {})
                 notify_change(paused)
+            elif payload.request_id is None and session.state != "busy" and session.turn_request_id is not None \
+                    and (stopped := db.get_request(session.turn_request_id)) is not None \
+                    and stopped.status == RequestStatus.EXECUTING:
+                # The turn after one stopped in the app (or by an API error) continues that request.
+                turn_request_id = stopped.id
+                db.log_event(stopped.id, f"{who.actor}:hook", "turn_resumed", {})
+                notify_change(stopped.id)
             elif payload.request_id is not None:
                 try:
                     ack_request(who, payload.request_id, via="hook")
@@ -2613,9 +2620,10 @@ def create_app(
         when = body.at if body.at.tzinfo else body.at.replace(tzinfo=timezone.utc)
         if session.state != "busy" or session.activity_at is None or when <= session.activity_at:
             return {"session": session_id, "ended": False}
-        db.set_session_state(session_id, "idle")
+        # The request keeps its turn: still in flight (the queue stays held, nothing is pushed into the
+        # app the user is working in), and the next turn in the session resumes it.
+        db.set_session_state(session_id, "idle", session.turn_request_id)
         if session.turn_request_id is not None:
-            db.set_execution(session.turn_request_id, "interrupted", actor=who.actor, source="bridge transcript")
             db.log_event(session.turn_request_id, who.actor, "cancelled_in_app", {"at": when.isoformat()})
             notify_change(session.turn_request_id)
         notify_session(session_id)

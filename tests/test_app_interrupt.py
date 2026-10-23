@@ -121,10 +121,16 @@ async def test_an_interrupt_after_the_turn_started_ends_it_without_a_reply(setup
     resp = await report(app, datetime.now(timezone.utc) + timedelta(seconds=1))
     assert resp.status_code == 200 and resp.json()["ended"] is True
     session = db.get_session("c1")
-    assert session.state == "idle" and session.turn_request_id is None
+    assert session.state == "idle"
     after = db.get_request(req.id)
-    assert after.status == RequestStatus.EXECUTING and after.response is None and after.execution == "interrupted"
+    assert after.status == RequestStatus.EXECUTING and after.response is None
+    assert db.request_in_flight("c1") == req.id                     # the queue stays held (review #344)
     assert "cancelled_in_app" in [e.event for e in db.list_events(req.id)]
+    async with agent_client(app, "tok-claude") as claude:          # "continua" typed in the app
+        resumed = (await claude.post("/api/sessions/c1/events", json={"provider": "claude-code", "event": "prompt"})).json()
+        assert resumed["turn_request_id"] == req.id
+        await event(claude, "c1", event="stop", last_message="Finito.")
+    assert db.get_request(req.id).status == RequestStatus.COMPLETED
 
 
 @pytest.mark.asyncio
