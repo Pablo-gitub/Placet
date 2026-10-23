@@ -84,3 +84,58 @@ created by Placet; limits; human-only endpoint.
 3. Default model and effort, and whether Codex is in the first version.
 4. Whether a creation needs passkey confirmation like reserved commands
    (proposal: yes for a new folder, no otherwise).
+
+## Sessions requested by agents
+
+Status: **proposal** (October 23, 2026), after the maintainer's remark that
+Claude and Codex can already start sessions themselves.
+
+### Today
+
+Any agent with a shell can run `claude` or `codex` as the same Unix user; this
+cannot be prevented. The global hooks register such a session in Placet (the
+RS-09 lab did exactly this with `claude -p`), but as a session of **unknown
+origin**: no parent, no purpose, no relation.
+
+### Through Placet
+
+1. **Tool `placet_create_session(provider, model, effort, purpose)`.** It
+   starts nothing: it creates a request for the user's approval (push
+   notification) showing the requesting session, provider, model, effort,
+   folder (the requester's own, never chosen by the agent) and purpose.
+   Provider, model and effort come from the closed lists above.
+2. **The bridge starts it** after approval, with the fixed command line of
+   this plan (temporary session, RF-52 limits: number alive, lifetime).
+3. **Spawn ticket.** At approval Placet issues a one-time ticket
+   (`plsp_` + 128 random bits, short expiry) passed to the new process in its
+   environment by the bridge. The new session's SessionStart hook spools only
+   the ticket's SHA-256; the backend links the session atomically: *created
+   by session X, for request #N, approved by the user*. A ticket is single use
+   and bound to the provider; a session presenting none stays "unknown
+   origin". Tickets are redacted like RS-09 credentials.
+4. **Relation proposed at birth.** Placet proposes a temporary relation
+   requester → new session, **manual approval by default** for prompts and
+   replies; the user can make it automatic in the PWA. It closes with the
+   temporary session.
+5. **Depth 1.** A session created this way cannot request another one;
+   a limit on sessions alive per requester and in total.
+
+### Sessions created outside Placet
+
+Still listed, labelled "unknown origin", **never** given relations or grants
+automatically; the user can associate them by hand as today.
+
+### Tests to write first
+
+Ticket reuse, expiry, wrong provider, ticket from another requester; a
+session without ticket never linked; depth-1 refusal; limits; redaction of
+`plsp_`; approval refused or expired starts nothing; the relation proposed
+manual and closed with the session.
+
+### Open questions
+
+1. Whether the approval can be skipped for a requester the user trusts
+   (proposal: no, at least in the first version).
+2. Default lifetime and limits (proposal: 2 h, 2 per requester, 4 in total).
+3. Codex as requester and as created provider: its hooks run no async
+   waiter, so delivery to it goes through the bridge as today.
