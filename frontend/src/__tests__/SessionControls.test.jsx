@@ -44,17 +44,13 @@ describe("session controls menu", () => {
     expect(calls[0]).toMatchObject({ url: "/api/sessions/s1/effort", method: "POST", body: { level: "xhigh" } });
   });
 
-  it("is disabled with the reason when the control is PC-only or unsupported", () => {
-    const { unmount } = render(<SessionControls session={session({ compact: "pc_only", effort: "pc_only", effort_levels: [] })} />);
-    open();
-    expect(screen.getByTestId("control-compact")).toBeDisabled();
-    expect(screen.getByTestId("control-effort")).toBeDisabled();
-    expect(screen.getByTestId("control-explanation")).toHaveTextContent(i18n.t("controls.pcOnly"));
+  it("is not shown at all when the controls cannot be used for this session", () => {
+    // The user's feedback (#352): a control that can never work here is noise.
+    const { container, unmount } = render(<SessionControls session={session({ compact: "pc_only", effort: "pc_only", effort_levels: [] })} />);
+    expect(container).toBeEmptyDOMElement();
     unmount();
-    render(<SessionControls session={session({ compact: "unsupported", effort: "unsupported", effort_levels: [] }, { provider: "codex" })} />);
-    open();
-    expect(screen.getByTestId("control-compact")).toBeDisabled();
-    expect(screen.getByTestId("control-explanation")).toHaveTextContent(i18n.t("controls.unsupported"));
+    const other = render(<SessionControls session={session({ compact: "unsupported", effort: "unsupported", effort_levels: [] }, { provider: "codex" })} />);
+    expect(other.container).toBeEmptyDOMElement();
   });
 
   it("is disabled while the session is working", () => {
