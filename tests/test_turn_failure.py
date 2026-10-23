@@ -62,7 +62,8 @@ async def test_a_failed_turn_does_not_conclude_the_request(setup):
     assert "implicit_reply_for" not in result
     after = db.get_request(req.id)
     assert after.status == RequestStatus.EXECUTING and after.response is None
-    assert after.execution == "interrupted"
+    assert after.execution == "started"                                    # still in flight: holds the queue
+    assert db.request_in_flight("c1")
     failed = [e for e in db.list_events(req.id) if e.event == "turn_failed"]
     assert failed and failed[0].details == {"error": "rate_limit"}
     session = db.get_session("c1")
@@ -85,3 +86,19 @@ async def test_the_error_goes_away_with_the_next_turn_or_start(setup):
     async with human_client(app) as human:
         listed = {s["id"]: s for s in (await human.get("/api/sessions")).json()}
     assert "turn_error" in listed["c1"]
+
+
+@pytest.mark.asyncio
+async def test_the_next_turn_continues_the_failed_request_and_its_reply_concludes_it(setup):
+    """Review #343: the queue stays held, and "continua" typed in the app resumes the same request."""
+    app, db = setup
+    async with agent_client(app, "tok-claude") as claude:
+        req = await executing(app, db, claude)
+        await event(claude, "c1", event="failed", error="rate_limit")
+        resumed = (await claude.post("/api/sessions/c1/events",
+                                     json={"provider": "claude-code", "event": "prompt"})).json()
+        assert resumed["turn_request_id"] == req.id
+        done = await event(claude, "c1", event="stop", last_message="Finito.")
+    assert done["implicit_reply_for"] == req.id
+    assert db.get_request(req.id).status == RequestStatus.COMPLETED
+

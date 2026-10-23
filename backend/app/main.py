@@ -668,7 +668,7 @@ def create_app(
 
     def notify_turn_failed(session: SessionModel, error: str) -> None:
         """A turn stopped on an API error: the session will not go on by itself (Claude Code StopFailure)."""
-        if not db.get_notification_preferences().get("needs_you", True):
+        if session.excluded or not db.get_notification_preferences().get("needs_you", True):
             return
         lang = db.get_background_language()
         web_push_later(text("notify.turn_failed_title", lang,
@@ -1623,6 +1623,13 @@ def create_app(
                 turn_request_id = paused
                 db.log_event(paused, f"{who.actor}:hook", "turn_resumed", {})
                 notify_change(paused)
+            elif payload.request_id is None and session.turn_error and session.turn_request_id is not None \
+                    and (failed := db.get_request(session.turn_request_id)) is not None \
+                    and failed.status == RequestStatus.EXECUTING:
+                # The turn after an API error continues the request that error stopped.
+                turn_request_id = failed.id
+                db.log_event(failed.id, f"{who.actor}:hook", "turn_resumed", {})
+                notify_change(failed.id)
             elif payload.request_id is not None:
                 try:
                     ack_request(who, payload.request_id, via="hook")
@@ -1678,10 +1685,11 @@ def create_app(
         elif payload.event == "failed":
             # The turn ended on an API error: no reply, the request stays open and keeps
             # holding the queue; the user is told why the session stopped.
-            db.set_session_state(session_id, "idle")
+            # The request keeps its turn: it stays in flight (the queue is held) and the next turn
+            # in this session, e.g. "continue" typed in the app, resumes it.
+            db.set_session_state(session_id, "idle", session.turn_request_id)
             db.set_turn_error(session_id, payload.error or "unknown")
             if session.turn_request_id is not None and session.state == "busy":
-                db.set_execution(session.turn_request_id, "interrupted", actor=f"{who.actor}:hook", source=source)
                 db.log_event(session.turn_request_id, f"{who.actor}:hook", "turn_failed",
                              {"error": payload.error or "unknown"})
                 notify_change(session.turn_request_id)
