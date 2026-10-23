@@ -322,12 +322,7 @@ class AgentStatePayload(BaseModel):
     last_message: Optional[str] = None
 
 
-# RS-09: a session credential. Recognizable so it can be redacted wherever an agent's text is stored.
-SESSION_CREDENTIAL = re.compile(r"plst_[A-Za-z0-9_-]{16,}")
-
-
-def redact_credentials(text: Optional[str]) -> Optional[str]:
-    return SESSION_CREDENTIAL.sub("[redacted]", text) if text else text
+from backend.app.database import SESSION_CREDENTIAL, redact_credentials  # noqa: E402  (RS-09)
 
 
 class ReplyPayload(BaseModel):
@@ -680,6 +675,7 @@ def create_app(
     def notify_turn_end(session: SessionModel, last_message: Optional[str], is_placet: bool = False) -> None:
         if not session.pinned or session.excluded:
             return
+        last_message = redact_credentials(last_message)
         prefs = db.get_notification_preferences()
         mode = prefs.get("turn_end", "placet")
         if mode == "off":
@@ -1372,10 +1368,11 @@ def create_app(
     def require_bound_recipient(who: Principal, req: RequestModel, credential: Optional[str]) -> Optional[str]:
         """With a credential, only the request's own recipient session may act on it."""
         session_id = bound_session(who, credential)
-        if session_id is not None and session_id != req.recipient_session_id:
-            raise ProductError(403, "session.not_recipient",
-                               f"Request {req.id} was not sent to this session.")
-        return session_id
+        if session_id is None or session_id == req.recipient_session_id:
+            return session_id
+        if req.recipient_session_id is None and db.bind_recipient_session(req.id, session_id):
+            return session_id                                  # sent to the agent: the proven session takes it
+        raise ProductError(403, "session.not_recipient", f"Request {req.id} was not sent to this session.")
 
     @app.post("/api/requests/{request_id}/progress", response_model=RequestModel)
     async def progress_request(request_id: int, payload: ProgressPayload, who: Principal = Depends(principal),
@@ -1533,7 +1530,10 @@ def create_app(
         """The recipient confirms it received an injected prompt (placet_ack)."""
         require_agent(who)
         expire_and_notify()
-        require_bound_recipient(who, get_or_404(request_id), x_placet_session)
+        target = get_or_404(request_id)
+        require_party(who, target)                                 # another agent's request stays a 404/403 as before
+        if who.id == target.recipient_id:
+            require_bound_recipient(who, target, x_placet_session)
         acked = ack_request(who, request_id, via="mcp")
         db.mark_mcp_seen(acked.recipient_session_id)
         return acked

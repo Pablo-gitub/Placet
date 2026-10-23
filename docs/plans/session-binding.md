@@ -153,7 +153,14 @@ but holds no per-node grants.
    reply event; `plst_` redacted in replies, progress and the transcript
    reader). Still to do in this step: the hook generating the credential and
    the MCP client sending the header (they need a deploy and the hook
-   installer), revocation, and levels on requests and events.
+   installer), revocation by the user, and levels on requests and events.
+   After review #344: a request sent to an agent without a session is
+   claimed atomically by the session the credential proves; redaction is
+   central (replies including implicit ones, progress, agent prompts, the
+   turn-end notification, transcripts; exactly `plst_` + 22 characters); a
+   credential dies with its session's end or continuation. Known and out of
+   scope as stated above: any process with the agent's token can register a
+   credential for a session it names by posting a start event.
 3. PWA shows the level per session and request; enrollment and revocation.
 4. RFC-17 / RF-69 grants require `credential` on a gated provider (or
    `transport`), for reads, lists, history and export as well as writes.

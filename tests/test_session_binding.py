@@ -168,3 +168,60 @@ def test_the_transcript_reader_redacts_an_echoed_credential():
                                                         {"type": "tool_use", "name": "Bash", "input": {"command": f"echo {A}"}}]}}
     rendered = str(parse_claude(obj))
     assert A not in rendered and "[redacted]" in rendered
+
+
+@pytest.mark.asyncio
+async def test_an_implicit_reply_and_an_agents_prompt_are_redacted_too(setup):
+    """Review #344 P1-b: the turn's last message and agent-created prompts are the main leak paths."""
+    app, db = setup
+    async with agent_client(app, "tok-claude") as claude:
+        await start(claude, "c1", A)
+        req = await running(app, db)
+        await claude.post("/api/sessions/c1/events", json={"event": "stop", "provider": "claude-code",
+                                                           "last_message": f"ecco {A}"})
+    assert A not in db.get_request(req.id).response.content
+    sent = db.create_request(RequestCreate(sender_id="claude", recipient_id="codex", prompt=f"usa {A}"))
+    assert A not in sent.prompt and "[redacted]" in sent.prompt
+
+
+@pytest.mark.asyncio
+async def test_a_request_without_a_recipient_session_is_claimed_by_the_proven_session(setup):
+    """Review #344 P1-a: tmux deliveries carry no recipient session; the credential's session takes it."""
+    app, db = setup
+    req = db.create_request(RequestCreate(sender_id="codex", recipient_id="claude", prompt="fai"))
+    async with human_client(app) as human:
+        await human.post(f"/api/requests/{req.id}/decision", json={"status": "APPROVED"})
+    assert db.claim_injection(req.id)
+    async with agent_client(app, "tok-claude") as claude:
+        await start(claude, "c1", A)
+        await start(claude, "c2", B)
+        assert (await claude.post(f"/api/requests/{req.id}/ack", headers=with_cred(A))).status_code == 200
+        assert db.get_request(req.id).recipient_session_id == "c1"
+        assert (await claude.post(f"/api/requests/{req.id}/reply", json={"content": "x"},
+                                  headers=with_cred(B))).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_the_credential_of_an_ended_session_is_dead(setup):
+    app, db = setup
+    async with agent_client(app, "tok-claude") as claude:
+        await start(claude, "c1", A)
+        req = await running(app, db)
+        db.end_session("c1")
+        resp = await claude.post(f"/api/requests/{req.id}/progress", json={"content": "x"}, headers=with_cred(A))
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_ack_on_another_agents_request_stays_hidden(setup):
+    app, db = setup
+    other = db.create_request(RequestCreate(sender_id="human", recipient_id="codex", prompt="x"))
+    async with agent_client(app, "tok-claude") as claude:
+        await start(claude, "c1", A)
+        assert (await claude.post(f"/api/requests/{other.id}/ack", headers=with_cred(A))).status_code == 404
+
+
+def test_code_identifiers_starting_with_the_prefix_are_not_redacted():
+    from backend.app.database import redact_credentials
+    assert redact_credentials("plst_credential_hash_value_x") == "plst_credential_hash_value_x"
+    assert redact_credentials(f"({A})") == "([redacted])"

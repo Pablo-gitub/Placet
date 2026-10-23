@@ -1,3 +1,4 @@
+import re
 import sqlite3
 import json
 from contextlib import contextmanager
@@ -132,6 +133,14 @@ def _normalize_utc_iso(val: Union[str, datetime, None]) -> Optional[str]:
 
 class ControlPending(Exception):
     """RF-62: the session already has a control being sent."""
+
+
+# RS-09: a session credential (`plst_` + token_urlsafe(16)) never stored in an agent's text.
+SESSION_CREDENTIAL = re.compile(r"(?<![A-Za-z0-9_-])plst_[A-Za-z0-9_-]{22}(?![A-Za-z0-9_-])")
+
+
+def redact_credentials(text):
+    return SESSION_CREDENTIAL.sub("[redacted]", text) if isinstance(text, str) and text else text
 
 
 class Database:
@@ -793,6 +802,9 @@ class Database:
             ]
 
     def create_request(self, req: RequestCreate, actor: Optional[str] = None) -> RequestModel:
+        if req.sender_id != "human":
+            req = req.model_copy(update={"prompt": redact_credentials(req.prompt),
+                                         "context": redact_credentials(req.context)})
         now = datetime.now(timezone.utc)
         scheduled_at = _normalize_utc_iso(getattr(req, "scheduled_at", None))
         base_time = now
@@ -984,6 +996,9 @@ class Database:
                                " WHERE sha256 = ?", (sha256,)).fetchone()
         if row is None or row["state"] not in ("active", "superseded"):
             return None
+        session = self.get_session(row["session_id"])
+        if session is None or session.ended_at is not None or session.continued_to is not None:
+            return None                                       # a closed or continued session's credential is dead
         if row["state"] == "superseded":
             try:
                 since = datetime.fromisoformat(row["superseded_at"])
@@ -992,6 +1007,12 @@ class Database:
             if datetime.now(timezone.utc) - since > timedelta(minutes=self.BINDING_GRACE_MINUTES):
                 return None
         return {"session_id": row["session_id"], "agent_id": row["agent_id"], "generation": row["generation"]}
+
+    def bind_recipient_session(self, request_id: int, session_id: str) -> bool:
+        """A request sent to an agent without a session is claimed by the session a credential proves."""
+        with self._get_connection() as conn:
+            return conn.execute("UPDATE requests SET recipient_session_id = ? WHERE id = ?"
+                                " AND recipient_session_id IS NULL", (session_id, request_id)).rowcount > 0
 
     def session_bindings(self, session_id: str) -> List[Dict[str, Any]]:
         with self._get_connection() as conn:
@@ -1009,6 +1030,7 @@ class Database:
                              (shift(r["created_at"]), shift(r["superseded_at"]), r["id"]))
 
     def set_progress(self, request_id: int, text: str) -> None:
+        text = redact_credentials(text)
         now = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
             conn.execute("UPDATE requests SET progress_text = ?, progress_at = ?, updated_at = ? WHERE id = ?",
@@ -1180,6 +1202,7 @@ class Database:
         DELIVERING also proves the prompt arrived. Returns None if the
         request can no longer be replied to.
         """
+        content = redact_credentials(content)
         now = datetime.now(timezone.utc).isoformat()
         sources = [st.value for st in _REPLYABLE]
 

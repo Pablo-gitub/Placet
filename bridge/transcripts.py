@@ -67,7 +67,7 @@ def _clip(text: str, limit: int = MAX_TEXT_CHARS) -> str:
 
 
 # RS-09: a session credential the agent echoed is never shown (the provider's own file keeps it).
-_CREDENTIAL = re.compile(r"plst_[A-Za-z0-9_-]{16,}")
+_CREDENTIAL = re.compile(r"(?<![A-Za-z0-9_-])plst_[A-Za-z0-9_-]{22}(?![A-Za-z0-9_-])")
 
 
 def _entry(role: str, text: str = "", at: Optional[str] = None, **extra) -> dict:
