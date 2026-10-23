@@ -157,6 +157,20 @@ class PlacetClient:
             resp.raise_for_status()
             return resp.json()
 
+    def project_view(self, project_id: int, session_token: str, cursor: Optional[str] = None,
+                     limit: Optional[int] = None) -> Dict[str, Any]:
+        """RFC-17: one page of the coordinator view; the credential travels in the header, never in the URL."""
+        params: Dict[str, Any] = {}
+        if cursor:
+            params["cursor"] = cursor
+        if limit:
+            params["limit"] = limit
+        with httpx.Client(timeout=15.0) as client:
+            resp = client.get(f"{self.base_url}/api/projects/{project_id}/coordinator-view",
+                              headers=self._headers(session_token), params=params)
+            resp.raise_for_status()
+            return resp.json()
+
     def ack(self, request_id: int, session_token: Optional[str] = None) -> Dict[str, Any]:
         url = f"{self.base_url}/api/requests/{request_id}/ack"
         with httpx.Client(timeout=10.0) as client:
