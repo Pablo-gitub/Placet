@@ -165,3 +165,18 @@ def test_the_bridge_reports_an_interrupt_once_and_never_breaks(tmp_path, monkeyp
     monkeypatch.setattr("bridge.bridge_daemon.locate_transcript", lambda provider, sid: (_ for _ in ()).throw(OSError()))
     bridge.check_interrupts([{"id": "c2", "since": at(-5)}], force=True)       # swallowed
     store.report_interrupted.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_resumed_turn_after_esc_is_mixed_and_a_restart_keeps_the_link(setup):
+    """Review #345: after Esc the user often asks for something else; a start must not lose the request."""
+    app, db = setup
+    req = await running(app, db)
+    assert (await report(app, datetime.now(timezone.utc) + timedelta(seconds=1))).json()["ended"] is True
+    async with agent_client(app, "tok-claude") as claude:
+        await event(claude, "c1", event="start")
+        assert db.get_session("c1").turn_request_id == req.id
+        resumed = (await claude.post("/api/sessions/c1/events", json={"provider": "claude-code", "event": "prompt"})).json()
+        assert resumed["turn_request_id"] == req.id
+        await event(claude, "c1", event="stop", last_message="Fatto altro.")
+    assert db.get_request(req.id).reply == "ambiguous"

@@ -1583,7 +1583,12 @@ def create_app(
             # of another kind must not reopen it.
             db.reopen_session(session_id)
         if payload.event == "start":
-            db.set_session_state(session_id, "idle")
+            # A restart, resume or compaction keeps a request stopped mid-turn (Esc, API error) linked,
+            # so the next turn can still continue it.
+            kept = session.turn_request_id if session.state != "busy" else None
+            kept_req = db.get_request(kept) if kept is not None else None
+            db.set_session_state(session_id, "idle",
+                                 kept if kept_req is not None and kept_req.status == RequestStatus.EXECUTING else None)
             db.wake_evidence(session_id)  # a desktop wake-up got its evidence: the session started
             if payload.mcp is not None:
                 db.set_mcp_config_state(session_id, payload.mcp)
@@ -1612,8 +1617,10 @@ def create_app(
             elif payload.request_id is None and session.state != "busy" and session.turn_request_id is not None \
                     and (stopped := db.get_request(session.turn_request_id)) is not None \
                     and stopped.status == RequestStatus.EXECUTING:
-                # The turn after one stopped in the app (or by an API error) continues that request.
+                # The turn after one stopped in the app (Esc) or by an API error continues that request.
+                # The user may have asked for something else: its last answer may not be the reply.
                 turn_request_id = stopped.id
+                db.mark_turn_mixed(stopped.id)
                 db.log_event(stopped.id, f"{who.actor}:hook", "turn_resumed", {})
                 notify_change(stopped.id)
             elif payload.request_id is not None:
