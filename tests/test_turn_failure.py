@@ -102,3 +102,19 @@ async def test_the_next_turn_continues_the_failed_request_and_its_reply_conclude
     assert done["implicit_reply_for"] == req.id
     assert db.get_request(req.id).status == RequestStatus.COMPLETED
 
+
+
+@pytest.mark.asyncio
+async def test_a_resumed_turn_is_mixed_and_a_restart_keeps_the_link(setup):
+    """Review #345: after the error the user may ask for something else; a start must not lose the request."""
+    app, db = setup
+    async with agent_client(app, "tok-claude") as claude:
+        req = await executing(app, db, claude)
+        await event(claude, "c1", event="failed", error="rate_limit")
+        await event(claude, "c1", event="start")                           # the app restarted, or a compaction
+        assert db.get_session("c1").turn_request_id == req.id
+        resumed = (await claude.post("/api/sessions/c1/events",
+                                     json={"provider": "claude-code", "event": "prompt"})).json()
+        assert resumed["turn_request_id"] == req.id
+        await event(claude, "c1", event="stop", last_message="Fatto altro.")
+    assert db.get_request(req.id).reply == "ambiguous"
