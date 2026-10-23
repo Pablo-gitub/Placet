@@ -205,7 +205,9 @@
     "wakeNothing": "Nessun messaggio aspetta questa sessione.",
     "wakeReachable": "La sessione sta già ascoltando.",
     "wakeUnsupported": "Solo una sessione di Claude Desktop si può aprire così.",
-    "desktopArchived": "La conversazione è archiviata in Claude: ripristinala nell'app."
+    "desktopArchived": "La conversazione è archiviata in Claude: ripristinala nell'app.",
+    "undeliveredNotAvailable": "Il messaggio è già iniziato a essere consegnato: non si può più annullare o inoltrare.",
+    "undeliveredSame": "Il messaggio è già destinato a questa sessione."
   },
   "sessions": {
     "closed": "Chiusa",
@@ -627,7 +629,9 @@
     "nodeInstructionsPlaceholder": "Es. Ruolo specifico di questo nodo nel progetto…",
     "saveNodeInstructions": "Salva istruzioni nodo",
     "graphWaiting": "In attesa di te",
-    "graphQueued": "In coda"
+    "graphQueued": "In coda",
+    "graphScheduled": "Programmato",
+    "graphScheduledAt": "Parte il {{time}}"
   },
   "settings": {
     "title": "Impostazioni",
@@ -794,5 +798,31 @@
   "capacity": {
     "line": "Claude Desktop: {{engines}}/{{cap}} sessioni caricate",
     "hint": "I risvegli da Placet potrebbero non partire: archivia una conversazione inattiva nell'app"
+  },
+  "turnError": {
+    "rateLimit": "Il turno si è fermato per il limite di utilizzo. La sessione non riprende da sola: i messaggi restano in Placet finché non le scrivi nell'app dopo il reset.",
+    "other": "Il turno si è fermato per un errore dell'API ({{error}}). La sessione non riprende da sola: scrivile nell'app per farla ripartire."
+  },
+  "undelivered": {
+    "title": "Messaggi non consegnati",
+    "hint": "Messaggi per gli agenti che non sono ancora arrivati: puoi leggerli, annullarli o mandarli a un’altra sessione.",
+    "empty": "Nessun messaggio in attesa di consegna.",
+    "cause": {
+      "blocked": "Bloccati",
+      "awaiting_refresh": "In attesa del refresh",
+      "scheduled": "Programmati",
+      "awaiting_approval": "In attesa di approvazione"
+    },
+    "due": "parte {{time}}",
+    "cancel": "Annulla messaggio",
+    "cancelConfirm": "Annullare il messaggio #{{id}}? Il mittente verrà avvisato.",
+    "cancelYes": "Sì, annulla",
+    "back": "Indietro",
+    "forward": "Inoltra",
+    "forwardTo": "Inoltra a…",
+    "forwardGo": "Inoltra a questa sessione",
+    "pick": "Scegli una sessione",
+    "noSession": "Nessun’altra sessione aperta",
+    "title_detail": "Messaggio #{{id}}"
   }
 }

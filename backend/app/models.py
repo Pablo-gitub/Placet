@@ -417,6 +417,9 @@ class SessionModel(BaseModel):
     wake_cause: Optional[str] = None
     # The user archived this conversation in Claude Desktop (the app stopped its engine); read by the bridge.
     desktop_archived: bool = False
+    # The API error that ended the last turn (Claude Code StopFailure: rate_limit, overloaded...).
+    turn_error: Optional[str] = None
+    turn_error_at: Optional[datetime] = None
     wake_cause_at: Optional[datetime] = None
     # When the hook last reported the configuration (each start): a use before it does not
     # prove the configuration of this start.
@@ -489,6 +492,19 @@ class ProjectDetailModel(ProjectModel):
     effective_rule: Optional[str] = None
     effective_max_hops: Optional[int] = None
     effective_max_per_hour: Optional[int] = None
+
+
+class UndeliveredItem(BaseModel):
+    """A prompt that has not reached its recipient yet, with why and what the user may do (RF-65/66)."""
+    request: RequestModel
+    # awaiting_approval | awaiting_refresh (held until a usage reset) | scheduled (the user's time) | blocked
+    cause: str
+    # When it will be delivered, if a time is known.
+    due_at: Optional[datetime] = None
+    sender_node: Optional[str] = None
+    recipient_node: Optional[str] = None
+    can_cancel: bool = True
+    can_forward: bool = True
 
 
 class RequestEvent(BaseModel):

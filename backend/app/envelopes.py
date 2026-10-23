@@ -90,7 +90,8 @@ def outcome(req: RequestModel, channel="tmux", language=None) -> str:
         lines = [text("envelope.outcome", language, id=req.id, recipient=req.recipient_id, status=req.status.value)]
         if req.edited_prompt is not None and req.edited_prompt != req.prompt:
             lines.append(text("envelope.prompt_changed", language, recipient=req.recipient_id, prompt=req.edited_prompt))
-        note = {RequestStatus.DELIVERY_FAILED: "failed", RequestStatus.STALLED: "stalled", RequestStatus.EXPIRED: "expired"}.get(req.status)
+        note = {RequestStatus.DELIVERY_FAILED: "failed", RequestStatus.STALLED: "stalled", RequestStatus.EXPIRED: "expired",
+                RequestStatus.CANCELLED: "cancelled"}.get(req.status)
         if note:
             lines.append(text(f"envelope.{note}", language))
         if req.return_decision == "forwarded":

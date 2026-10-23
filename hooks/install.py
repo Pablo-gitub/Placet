@@ -66,6 +66,8 @@ def claude_hooks(hooks_dir: str) -> dict:
         "UserPromptSubmit": [{"hooks": [hook]}],
         "PostToolUse": [{"matcher": "mcp__placet__.*", "hooks": [hook]}, {"hooks": [steer]}],
         "Stop": [{"hooks": [hook, waiter]}],
+        # Fired instead of Stop on an API error; its output is ignored, so no waiter here.
+        "StopFailure": [{"hooks": [hook]}],
         "SessionEnd": [{"hooks": [hook]}],
     }
 

@@ -44,6 +44,7 @@ from backend.app.models import (
     UsageReport,
     RequestCreate,
     RequestEvent,
+    UndeliveredItem,
     RequestModel,
     RequestStatus,
     Priority,
@@ -91,7 +92,9 @@ EXPIRY_SWEEP_SECONDS = 30.0
 
 class SessionEventPayload(BaseModel):
     """What an agent CLI / desktop app hook reports about one of its sessions."""
-    event: Literal["start", "prompt", "stop", "tool", "end", "steered"]
+    event: Literal["start", "prompt", "stop", "failed", "tool", "end", "steered"]
+    # failed: the provider's code for the API error that ended the turn.
+    error: Optional[str] = Field(None, pattern=r"^[a-z_]{1,40}$")
     # The hook script and its version: the provenance of execution proofs.
     adapter: Optional[str] = Field(None, max_length=64)
     # Set by the hooks' local queue: an event forwarded twice is applied once.
@@ -664,6 +667,16 @@ def create_app(
                        text("notify.app_review_body", lang), f"/#/sessione/{session.id}",
                        f"app-review-{session.id}", "high")
 
+    def notify_turn_failed(session: SessionModel, error: str) -> None:
+        """A turn stopped on an API error: the session will not go on by itself (Claude Code StopFailure)."""
+        if session.excluded or not db.get_notification_preferences().get("needs_you", True):
+            return
+        lang = db.get_background_language()
+        web_push_later(text("notify.turn_failed_title", lang,
+                            label=session_label(session.provider, session.title, session.project_root or session.cwd)),
+                       text(f"notify.turn_failed_{'rate_limit' if error == 'rate_limit' else 'other'}", lang, error=error),
+                       f"/#/sessione/{session.id}", f"turn-failed-{session.id}", "high")
+
     def notify_turn_end(session: SessionModel, last_message: Optional[str], is_placet: bool = False) -> None:
         if not session.pinned or session.excluded:
             return
@@ -1132,6 +1145,106 @@ def create_app(
         expire_and_notify()
         return db.list_requests(status=status, limit=limit, hide_excluded=True)
 
+    BLOCKED_AFTER = timedelta(minutes=2)
+
+    def undelivered_cause(req: RequestModel, now: datetime):
+        """(cause, due_at) of a prompt that has not reached its recipient yet."""
+        if req.status == RequestStatus.PENDING:
+            return "awaiting_approval", req.scheduled_at
+        if req.scheduled_at is not None and req.scheduled_at.astimezone(timezone.utc) > now:
+            # Held back by the usage guard (a system actor scheduled it) or planned by the user.
+            scheduled = [e for e in db.list_events(req.id) if e.event == "scheduled"]
+            by_system = bool(scheduled) and (scheduled[-1].actor.startswith("system:")
+                                             or (scheduled[-1].details or {}).get("reason") == "usage")
+            return ("awaiting_refresh" if by_system else "scheduled"), req.scheduled_at
+        target = db.get_session(req.recipient_session_id) if req.recipient_session_id else None
+        waited = now - (req.updated_at or req.created_at).astimezone(timezone.utc)
+        if (target is not None and not target.reachable) or waited > BLOCKED_AFTER:
+            return "blocked", None
+        return None, None                                # on its way: the bridge delivers it in moments
+
+    @app.get("/api/requests/undelivered", response_model=List[UndeliveredItem])
+    async def list_undelivered(response: Response, who: Principal = Depends(principal)):
+        """The user's view of prompts that have not been delivered, by cause (RF-65/66)."""
+        require_human(who)
+        response.headers["Cache-Control"] = "no-store"
+        now = datetime.now(timezone.utc)
+        items = []
+        for req in db.undelivered_requests():
+            cause, due_at = undelivered_cause(req, now)
+            if cause is None:
+                continue
+            sender = db.get_session(req.sender_session_id) if req.sender_session_id else None
+            target = db.get_session(req.recipient_session_id) if req.recipient_session_id else None
+            items.append(UndeliveredItem(
+                request=req, cause=cause, due_at=due_at,
+                sender_node=sender.node_name if sender else None,
+                recipient_node=target.node_name if target else None))
+        return items
+
+    def undelivered_or_refuse(request_id: int) -> RequestModel:
+        req = get_or_404(request_id)
+        if (req.recipient_id == "human"
+                or req.status not in (RequestStatus.PENDING, RequestStatus.APPROVED)
+                or (req.status == RequestStatus.APPROVED and req.delivery != "waiting")):
+            raise ProductError(409, "undelivered.not_available",
+                               "This message has already started to be delivered, or is not a prompt to an agent.")
+        return req
+
+    @app.post("/api/requests/{request_id}/undelivered/cancel", response_model=RequestModel)
+    async def cancel_undelivered(request_id: int, who: Principal = Depends(principal)):
+        """The user withdraws a prompt before it is delivered; the sender is told like for an expiry."""
+        require_human(who)
+        undelivered_or_refuse(request_id)
+        if not db.cancel_undelivered(request_id, actor=who.actor):
+            raise ProductError(409, "undelivered.not_available",
+                               "This message has already started to be delivered, or is not a prompt to an agent.")
+        notify_change(request_id)
+        return get_or_404(request_id)
+
+    class ForwardUndelivered(BaseModel):
+        session_id: str
+
+    @app.post("/api/requests/{request_id}/undelivered/forward", response_model=RequestModel)
+    async def forward_undelivered(request_id: int, payload: ForwardUndelivered, who: Principal = Depends(principal)):
+        """The user sends a prompt that has not been delivered to another open session instead."""
+        require_human(who)
+        req = undelivered_or_refuse(request_id)
+        target = db.get_session(payload.session_id)
+        if target is None:
+            raise ProductError(422, "session.unavailable", f"Session {payload.session_id} is not an open session.")
+        if target.id == req.sender_session_id:
+            raise ProductError(422, "decision.self_target", "A session cannot send a request to itself.")
+        if target.id == req.recipient_session_id:
+            raise ProductError(422, "undelivered.same_session", "The message is already addressed to this session.")
+        check_target_session(target.id, target.agent_id)
+        relation = relation_of(req.sender_session_id, target.id)
+        moved = db.redirect_request(
+            request_id, target.agent_id if target.agent_id != req.recipient_id else None,
+            relation.id if relation else None, target.id, who.actor, approved_too=True)
+        if not moved:
+            raise ProductError(409, "undelivered.not_available",
+                               "This message has already started to be delivered, or is not a prompt to an agent.")
+        if undelivered_cause(req, datetime.now(timezone.utc))[0] == "awaiting_refresh":
+            db.schedule_request(request_id, None, actor=who.actor)   # the old recipient's reset is not the new one's
+        cfg = usage_guard()
+        if req.status == RequestStatus.APPROVED and cfg.get("deliver_at_reset"):
+            # Whatever held it before, the new recipient's limit applies (review #345).
+            if db.is_provider_over_limit(
+                    target.provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"]):
+                reset = db.provider_reset_time(target.provider, cfg["five_hour"], cfg["seven_day"],
+                                               check_near_limit=cfg["enabled"])
+                if reset is not None:
+                    db.schedule_request(request_id, reset, actor="system:limits")
+        if req.status == RequestStatus.APPROVED:
+            # The reply policy and "now" belonged to the old recipient: the new one's apply.
+            db.set_allow_auto_return(request_id, reply_is_automatic(relation) if relation else False)
+            if req.delivery_mode == "now":
+                db.set_delivery_mode(request_id, "queue")
+        notify_change(request_id)
+        notify_session(target.id)
+        return get_or_404(request_id)
+
     def mark_mcp_seen_by(who: Principal, req: RequestModel) -> None:
         """
         RF-27: an agent reading a request (placet_check_status) used the MCP; the session it
@@ -1261,6 +1374,7 @@ def create_app(
             delivery_mode=decision.delivery_mode if decision.status == RequestStatus.APPROVED and req.recipient_id != "human" else None,
             recipient_session_id=decision.recipient_session_id,
             scheduled_at=effective_schedule,
+            schedule_reason="usage" if effective_schedule is not None and effective_schedule != req.scheduled_at else None,
         )
         if updated is None:
             # State changed between the check and the update (e.g. expired or cancelled).
@@ -1582,6 +1696,8 @@ def create_app(
             # Only a real start or turn brings a session back: a late event
             # of another kind must not reopen it.
             db.reopen_session(session_id)
+            if session.turn_error:
+                db.set_turn_error(session_id, None)
         if payload.event == "start":
             # A restart, resume or compaction keeps a request stopped mid-turn (Esc, API error) linked,
             # so the next turn can still continue it.
@@ -1675,6 +1791,18 @@ def create_app(
                 # still holding the queue ended with it.
                 for released in db.release_on_observed_turn_end(session_id):
                     notify_change(released)
+        elif payload.event == "failed":
+            # The turn ended on an API error: no reply, the request stays open and keeps
+            # holding the queue; the user is told why the session stopped.
+            # The request keeps its turn: it stays in flight (the queue is held) and the next turn
+            # in this session, e.g. "continue" typed in the app, resumes it.
+            db.set_session_state(session_id, "idle", session.turn_request_id)
+            db.set_turn_error(session_id, payload.error or "unknown")
+            if session.turn_request_id is not None and session.state == "busy":
+                db.log_event(session.turn_request_id, f"{who.actor}:hook", "turn_failed",
+                             {"error": payload.error or "unknown"})
+                notify_change(session.turn_request_id)
+            notify_turn_failed(session, payload.error or "unknown")
         elif payload.event == "steered" and payload.request_id is not None:
             # A "now" message entered the running turn (RF-35): delivered and
             # being executed; the turn now answers more than one message.
@@ -1981,6 +2109,7 @@ def create_app(
         cfg = usage_guard()
         rec_provider = session.provider
         sched_at = body.scheduled_at
+        reset_hold = False
         hold_for_usage = False
         if (
             body.mode != "now"
@@ -1994,6 +2123,7 @@ def create_app(
                 )
                 if rec_reset is not None:
                     sched_at = rec_reset.isoformat()
+                    reset_hold = True
                 else:
                     hold_for_usage = True
             else:
@@ -2007,6 +2137,7 @@ def create_app(
                 scheduled_at=sched_at,
             ),
             actor=who.actor,
+            schedule_reason="usage" if reset_hold else None,
         )
         if body.mode == "now":
             db.set_delivery_mode(created.id, "now")
