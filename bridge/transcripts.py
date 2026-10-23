@@ -66,9 +66,14 @@ def _clip(text: str, limit: int = MAX_TEXT_CHARS) -> str:
     return text if len(text) <= limit else text[:limit] + "…"
 
 
+# RS-09: a session credential the agent echoed is never shown (the provider's own file keeps it).
+_CREDENTIAL = re.compile(r"plst_[A-Za-z0-9_-]{16,}")
+
+
 def _entry(role: str, text: str = "", at: Optional[str] = None, **extra) -> dict:
-    entry = {"role": role, "text": text, "at": at}
-    entry.update({k: v for k, v in extra.items() if v is not None})
+    entry = {"role": role, "text": _CREDENTIAL.sub("[redacted]", text) if text else text, "at": at}
+    entry.update({k: (_CREDENTIAL.sub("[redacted]", v) if isinstance(v, str) else v)
+                  for k, v in extra.items() if v is not None})
     return entry
 
 

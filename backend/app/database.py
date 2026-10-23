@@ -433,6 +433,18 @@ class Database:
             )
             # RF-62: remote controls typed into a session (/compact, /effort), for the audit.
             cursor.execute("""
+            CREATE TABLE IF NOT EXISTS session_bindings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                agent_id TEXT NOT NULL,
+                generation INTEGER NOT NULL,
+                sha256 TEXT NOT NULL UNIQUE,
+                state TEXT NOT NULL DEFAULT 'active',
+                created_at TEXT NOT NULL,
+                superseded_at TEXT
+            );
+            """)
+            cursor.execute("""
             CREATE TABLE IF NOT EXISTS session_control_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT NOT NULL,
@@ -942,6 +954,60 @@ class Database:
             row = conn.execute(sql + " ORDER BY id DESC LIMIT 1", params).fetchone()
             return row["id"] if row else None
 
+    # RS-09: how long the previous credential generation stays valid after a renewal (a compaction or a
+    # resume during a running request).
+    BINDING_GRACE_MINUTES = 10
+
+    def register_binding(self, session_id: str, agent_id: str, sha256: str) -> Optional[int]:
+        """
+        A new credential generation for a session, from its own hook: only the hash is stored. The
+        previous active one becomes superseded (valid for the grace period). A hash seen before is
+        refused (None): never reused across sessions or generations.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            if conn.execute("SELECT 1 FROM session_bindings WHERE sha256 = ?", (sha256,)).fetchone():
+                return None
+            row = conn.execute("SELECT MAX(generation) AS g FROM session_bindings WHERE session_id = ?",
+                               (session_id,)).fetchone()
+            generation = (row["g"] or 0) + 1
+            conn.execute("UPDATE session_bindings SET state = 'superseded', superseded_at = ?"
+                         " WHERE session_id = ? AND state = 'active'", (now, session_id))
+            conn.execute("INSERT INTO session_bindings (session_id, agent_id, generation, sha256, state, created_at)"
+                         " VALUES (?, ?, ?, ?, 'active', ?)", (session_id, agent_id, generation, sha256, now))
+            return generation
+
+    def resolve_binding(self, sha256: str) -> Optional[Dict[str, Any]]:
+        """The session a presented credential's hash is bound to, if that generation is still valid."""
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT session_id, agent_id, generation, state, superseded_at FROM session_bindings"
+                               " WHERE sha256 = ?", (sha256,)).fetchone()
+        if row is None or row["state"] not in ("active", "superseded"):
+            return None
+        if row["state"] == "superseded":
+            try:
+                since = datetime.fromisoformat(row["superseded_at"])
+            except (TypeError, ValueError):
+                return None
+            if datetime.now(timezone.utc) - since > timedelta(minutes=self.BINDING_GRACE_MINUTES):
+                return None
+        return {"session_id": row["session_id"], "agent_id": row["agent_id"], "generation": row["generation"]}
+
+    def session_bindings(self, session_id: str) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            return [dict(r) for r in conn.execute(
+                "SELECT generation, sha256, state, created_at, superseded_at FROM session_bindings"
+                " WHERE session_id = ? ORDER BY generation", (session_id,)).fetchall()]
+
+    def age_bindings(self, session_id: str, delta: timedelta) -> None:
+        """Tests only: move a session's binding times into the past."""
+        with self._get_connection() as conn:
+            for r in conn.execute("SELECT id, created_at, superseded_at FROM session_bindings WHERE session_id = ?",
+                                  (session_id,)).fetchall():
+                shift = lambda v: (datetime.fromisoformat(v) - delta).isoformat() if v else None  # noqa: E731
+                conn.execute("UPDATE session_bindings SET created_at = ?, superseded_at = ? WHERE id = ?",
+                             (shift(r["created_at"]), shift(r["superseded_at"]), r["id"]))
+
     def set_progress(self, request_id: int, text: str) -> None:
         now = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
@@ -1107,6 +1173,7 @@ class Database:
         content: str,
         actor: Optional[str] = None,
         implicit: bool = False,
+        assurance: Optional[str] = None,
     ) -> Optional[RequestModel]:
         """
         Completes a request with the recipient's reply. A reply while still
@@ -1160,6 +1227,8 @@ class Database:
             details: Dict[str, Any] = {"length": len(content)}
             if implicit:
                 details["implicit"] = True
+            if assurance:
+                details["assurance"] = assurance
             self._log(cursor, request_id, actor or f"agent:{responder_id}", "replied", details, at=now)
 
             if schedule_action:

@@ -146,7 +146,14 @@ but holds no per-node grants.
    lost spool events, compaction, `/clear`, continuation and revocation.
 2. Storage, header, levels recorded on requests/replies/events; reply, ack
    and progress checked against the bound session when a credential is
-   present. No behaviour change for `declared`.
+   present. No behaviour change for `declared`. **Backend part done** October 23, 2026
+   (`session_bindings`: hash, generation, active/superseded with a
+   10-minute grace; `credential_sha256` on the start event;
+   `X-Placet-Session` checked on reply, ack and progress; `assurance` on the
+   reply event; `plst_` redacted in replies, progress and the transcript
+   reader). Still to do in this step: the hook generating the credential and
+   the MCP client sending the header (they need a deploy and the hook
+   installer), revocation, and levels on requests and events.
 3. PWA shows the level per session and request; enrollment and revocation.
 4. RFC-17 / RF-69 grants require `credential` on a gated provider (or
    `transport`), for reads, lists, history and export as well as writes.
