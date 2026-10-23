@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft } from "lucide-react";
 import MessageBody from "./MessageBody";
@@ -12,20 +12,23 @@ export default function MessageDetail({ requestId, requests = [], sessions = [],
   const known = requests.find((r) => r.id === requestId);
   const [fetched, setFetched] = useState(null);
   const [missing, setMissing] = useState(false);
+  const top = useRef(null);
+  // Opened from a long list: start at the top of the message.
+  useEffect(() => { top.current?.scrollIntoView?.({ block: "start" }); }, [requestId]);
 
   useEffect(() => {
     if (known) return undefined;
     let live = true;
     fetch(`/api/requests/${requestId}`)
       .then((res) => (res.ok ? res.json() : null))
-      .then((data) => { if (live) { setFetched(data); setMissing(!data); } })
+      .then((data) => { const ok = data && data.id === requestId; if (live) { setFetched(ok ? data : null); setMissing(!ok); } })
       .catch(() => { if (live) setMissing(true); });
     return () => { live = false; };
   }, [requestId, known]);
 
   const req = known || fetched;
   return (
-    <div className="card message-detail" data-testid="message-detail">
+    <div className="card message-detail" data-testid="message-detail" ref={top}>
       <button type="button" className="link-button project-detail-back-btn" data-testid="message-back" onClick={onBack}>
         <ArrowLeft size={16} /> {t("undelivered.back")}
       </button>

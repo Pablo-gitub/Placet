@@ -28,6 +28,7 @@ function serve() {
     ["/api/requests", requests],
     ["/api/sessions?include_ended=true", sessions],
     ["/api/requests/undelivered", []],
+    ["/api/requests/98", {}],
     ["/api/requests/99", Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({ detail: "Request not found" }) })],
     [(url) => url.startsWith("/api/"), {}],
   ]);
@@ -88,6 +89,14 @@ describe("a message in the right pane", () => {
     screenWide(false);
     serve();
     window.location.hash = "#/messaggio/99";
+    render(<App />);
+    expect(await screen.findByTestId("message-missing")).toBeInTheDocument();
+  });
+
+  it("does not break on an answer that is not a request", async () => {
+    screenWide(false);
+    serve();
+    window.location.hash = "#/messaggio/98";
     render(<App />);
     expect(await screen.findByTestId("message-missing")).toBeInTheDocument();
   });
