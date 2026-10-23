@@ -205,7 +205,9 @@
     "wakeNothing": "No message is waiting for this session.",
     "wakeReachable": "The session is already listening.",
     "wakeUnsupported": "Only a Claude Desktop session can be opened this way.",
-    "desktopArchived": "The conversation is archived in Claude: restore it in the app."
+    "desktopArchived": "The conversation is archived in Claude: restore it in the app.",
+    "undeliveredNotAvailable": "The message has already started to be delivered: it can no longer be cancelled or forwarded.",
+    "undeliveredSame": "The message is already addressed to this session."
   },
   "sessions": {
     "closed": "Closed",
@@ -626,7 +628,9 @@
     "nodeInstructionsPlaceholder": "E.g. Specific role of this node in the project…",
     "saveNodeInstructions": "Save node instructions",
     "graphWaiting": "Waiting for you",
-    "graphQueued": "Queued"
+    "graphQueued": "Queued",
+    "graphScheduled": "Scheduled",
+    "graphScheduledAt": "Leaves {{time}}"
   },
   "settings": {
     "title": "Settings",
@@ -793,5 +797,27 @@
   "capacity": {
     "line": "Claude Desktop: {{engines}}/{{cap}} sessions loaded",
     "hint": "Wake-ups from Placet may not start: archive an inactive conversation in the app"
+  },
+  "undelivered": {
+    "title": "Undelivered messages",
+    "hint": "Messages for agents that have not arrived yet: read them, cancel them or send them to another session.",
+    "empty": "No message is waiting to be delivered.",
+    "cause": {
+      "blocked": "Blocked",
+      "awaiting_refresh": "Waiting for the refresh",
+      "scheduled": "Scheduled",
+      "awaiting_approval": "Waiting for approval"
+    },
+    "due": "leaves {{time}}",
+    "cancel": "Cancel message",
+    "cancelConfirm": "Cancel message #{{id}}? The sender will be told.",
+    "cancelYes": "Yes, cancel",
+    "back": "Back",
+    "forward": "Forward",
+    "forwardTo": "Forward to…",
+    "forwardGo": "Forward to this session",
+    "pick": "Choose a session",
+    "noSession": "No other open session",
+    "title_detail": "Message #{{id}}"
   }
 }

@@ -780,7 +780,8 @@ class Database:
                 for r in cursor.fetchall()
             ]
 
-    def create_request(self, req: RequestCreate, actor: Optional[str] = None) -> RequestModel:
+    def create_request(self, req: RequestCreate, actor: Optional[str] = None,
+                       schedule_reason: Optional[str] = None) -> RequestModel:
         now = datetime.now(timezone.utc)
         scheduled_at = _normalize_utc_iso(getattr(req, "scheduled_at", None))
         base_time = now
@@ -829,7 +830,7 @@ class Database:
             if scheduled_at:
                 self._log(
                     cursor, req_id, actor or f"agent:{req.sender_id}", "scheduled",
-                    {"scheduled_at": scheduled_at},
+                    {"scheduled_at": scheduled_at, **({"reason": schedule_reason} if schedule_reason else {})},
                     at=now.isoformat(),
                 )
         return self.get_request(req_id)
@@ -1009,6 +1010,7 @@ class Database:
         delivery_mode: Optional[str] = None,
         recipient_session_id: Optional[str] = None,
         scheduled_at: Optional[Union[str, datetime]] = None,
+        schedule_reason: Optional[str] = None,
     ) -> Optional[RequestModel]:
         """
         Applies the human decision (PENDING -> APPROVED/REJECTED). Returns
@@ -1096,7 +1098,9 @@ class Database:
                 details["custom_text"] = custom_text
             if scheduled_at_iso is not None:
                 details["scheduled_at"] = scheduled_at_iso
-                self._log(cursor, request_id, actor, "scheduled", {"scheduled_at": scheduled_at_iso}, at=now)
+                self._log(cursor, request_id, actor, "scheduled",
+                          {"scheduled_at": scheduled_at_iso, **({"reason": schedule_reason} if schedule_reason else {})},
+                          at=now)
             self._log(cursor, request_id, actor, "decided", details, at=now)
         return self.get_request(request_id)
 
@@ -1275,6 +1279,37 @@ class Database:
                 return False
             self._log(cursor, request_id, actor, "delivery_retried", at=now)
             return True
+
+    def cancel_undelivered(self, request_id: int, actor: str) -> bool:
+        """
+        The user withdraws a prompt that has not started to be delivered (still PENDING, or APPROVED and
+        waiting, scheduled or not). One conditional update: if the bridge claimed it first, this loses.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"UPDATE requests SET status = ?, updated_at = ?, delivered_at = NULL, scheduled_at = NULL"
+                f"{_CANCEL_DELIVERY_SQL}"
+                " WHERE id = ? AND recipient_id != 'human'"
+                " AND (status = ? OR (status = ? AND (delivery_state IS NULL OR delivery_state = 'waiting')))",
+                (RequestStatus.CANCELLED.value, now, request_id,
+                 RequestStatus.PENDING.value, RequestStatus.APPROVED.value),
+            )
+            if cursor.rowcount == 0:
+                return False
+            self._log(cursor, request_id, actor, "cancelled", {"undelivered": True}, at=now)
+            return True
+
+    def undelivered_requests(self) -> List[RequestModel]:
+        """Prompts to agents that are still PENDING or APPROVED (not yet claimed for delivery), oldest first."""
+        with self._get_connection() as conn:
+            ids = [r["id"] for r in conn.execute(
+                "SELECT r.id FROM requests r WHERE r.recipient_id != 'human' AND r.status IN (?, ?)"
+                " AND (r.status = ? OR r.delivery_state IS NULL OR r.delivery_state = 'waiting')"
+                f" AND {_NOT_EXCLUDED_SQL} ORDER BY r.id ASC",
+                (RequestStatus.PENDING.value, RequestStatus.APPROVED.value, RequestStatus.PENDING.value)).fetchall()]
+        return [req for req in (self.get_request(i) for i in ids) if req is not None]
 
     def cancel_delivery(self, request_id: int, actor: str) -> bool:
         """
@@ -1511,6 +1546,10 @@ class Database:
             return True
 
     # --- "Subito": a message inside the running turn (RF-35) -------------------------
+
+    def set_allow_auto_return(self, request_id: int, allow: bool) -> None:
+        with self._get_connection() as conn:
+            conn.execute("UPDATE requests SET allow_auto_return = ? WHERE id = ?", (int(allow), request_id))
 
     def set_delivery_mode(self, request_id: int, mode: str) -> None:
         with self._get_connection() as conn:
@@ -2564,16 +2603,20 @@ class Database:
         return self._row_to_relation(rows[0]) if len(rows) == 1 else None
 
     def redirect_request(self, request_id: int, recipient_id: Optional[str],
-                         relation_id: Optional[int], recipient_session_id: str, actor: str) -> bool:
+                         relation_id: Optional[int], recipient_session_id: str, actor: str,
+                         approved_too: bool = False) -> bool:
         """
         The user sends a pending prompt to another session, possibly of
         another agent (recipient_id None keeps the agent). False if no
-        longer pending.
+        longer pending; with `approved_too` also while approved and still
+        waiting for its delivery (scheduled or held).
         """
+        where = ("(status = 'PENDING' OR (status = 'APPROVED' AND (delivery_state IS NULL OR delivery_state = 'waiting')))"
+                 if approved_too else "status = 'PENDING'")
         with self._get_connection() as conn:
             cur = conn.cursor()
             row = cur.execute("SELECT recipient_id, recipient_session_id FROM requests"
-                              " WHERE id = ? AND status = 'PENDING'", (request_id,)).fetchone()
+                              f" WHERE id = ? AND {where}", (request_id,)).fetchone()
             if row is None:
                 return False
             type_name = None
@@ -2587,7 +2630,7 @@ class Database:
             cur.execute(
                 "UPDATE requests SET recipient_id = COALESCE(?, recipient_id), relation_id = ?,"
                 " relation_type_name = COALESCE(?, relation_type_name),"
-                " recipient_session_id = ? WHERE id = ? AND status = 'PENDING'",
+                f" recipient_session_id = ? WHERE id = ? AND {where}",
                 (recipient_id, relation_id, type_name, recipient_session_id, request_id))
             if cur.rowcount == 0:
                 return False

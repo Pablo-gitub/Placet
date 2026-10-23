@@ -6,6 +6,7 @@ import BackgroundLanguage from "./i18n/BackgroundLanguage";
 import PushControl from "./PushControl";
 import NotificationPreferences from "./NotificationPreferences";
 import UsageGuard from "./UsageGuard";
+import Undelivered from "./Undelivered";
 
 function Row({ title, hint, children }) {
   return (
@@ -20,7 +21,7 @@ function Row({ title, hint, children }) {
 }
 
 /** Settings: language, notifications, and the way to the history. */
-export default function Settings({ onOpenHistory, onOpenCommands, onOpenStats }) {
+export default function Settings({ onOpenHistory, onOpenCommands, onOpenStats, onOpenMessage, requests = [], sessions = [] }) {
   const { t } = useTranslation();
   return (
     <div className="settings" data-testid="settings-section">
@@ -42,6 +43,8 @@ export default function Settings({ onOpenHistory, onOpenCommands, onOpenStats })
         <h3 className="section-label">{t("settings.automation")}</h3>
         <UsageGuard />
       </section>
+
+      <Undelivered requests={requests} sessions={sessions} onOpenMessage={onOpenMessage} />
 
       <section className="card settings-group">
         <button type="button" className="settings-link" data-testid="settings-commands" onClick={onOpenCommands}>

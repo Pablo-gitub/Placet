@@ -491,6 +491,19 @@ class ProjectDetailModel(ProjectModel):
     effective_max_per_hour: Optional[int] = None
 
 
+class UndeliveredItem(BaseModel):
+    """A prompt that has not reached its recipient yet, with why and what the user may do (RF-65/66)."""
+    request: RequestModel
+    # awaiting_approval | awaiting_refresh (held until a usage reset) | scheduled (the user's time) | blocked
+    cause: str
+    # When it will be delivered, if a time is known.
+    due_at: Optional[datetime] = None
+    sender_node: Optional[str] = None
+    recipient_node: Optional[str] = None
+    can_cancel: bool = True
+    can_forward: bool = True
+
+
 class RequestEvent(BaseModel):
     """One entry of the audit log (RF-13)."""
     id: int
