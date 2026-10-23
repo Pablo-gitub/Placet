@@ -1,4 +1,6 @@
 from dataclasses import replace
+import hashlib
+import re
 import os
 import time
 import json
@@ -9,7 +11,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, List, Literal, Optional, Dict, Set
-from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, status, Request, Depends
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, status, Request, Depends, Header
 from fastapi import Path as FastAPIPath
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -118,6 +120,9 @@ class SessionEventPayload(BaseModel):
     request_id: Optional[int] = None
     # stop: the agent's last message, used as implicit reply if needed.
     last_message: Optional[str] = None
+    # start (RS-09): the SHA-256 of the credential the hook just put in the session's context;
+    # never the credential itself.
+    credential_sha256: Optional[str] = Field(None, pattern=r"^[0-9a-f]{64}$")
     # start: why the session started (Claude Code: startup, resume, clear, compact).
     start_source: Optional[str] = Field(None, max_length=32)
     # RF-29d: UUID of the session being continued
@@ -318,6 +323,9 @@ class AgentStatePayload(BaseModel):
     state: Literal["busy", "idle"]
     request_id: Optional[int] = None
     last_message: Optional[str] = None
+
+
+from backend.app.database import SESSION_CREDENTIAL, redact_credentials  # noqa: E402  (RS-09)
 
 
 class ReplyPayload(BaseModel):
@@ -680,6 +688,7 @@ def create_app(
     def notify_turn_end(session: SessionModel, last_message: Optional[str], is_placet: bool = False) -> None:
         if not session.pinned or session.excluded:
             return
+        last_message = redact_credentials(last_message)
         prefs = db.get_notification_preferences()
         mode = prefs.get("turn_end", "placet")
         if mode == "off":
@@ -1455,19 +1464,45 @@ def create_app(
         notify_change(request_id)
         return updated
 
+    def bound_session(who: Principal, credential: Optional[str]) -> Optional[str]:
+        """
+        RS-09: the session a presented credential binds this call to, or None when none is presented
+        (today's declared behaviour). A present but invalid, expired or foreign credential is refused:
+        it never falls back to declared.
+        """
+        if credential is None:
+            return None
+        found = None
+        if SESSION_CREDENTIAL.fullmatch(credential.strip()):
+            found = db.resolve_binding(hashlib.sha256(credential.strip().encode()).hexdigest())
+        if found is None or found["agent_id"] != who.id:
+            raise ProductError(401, "session.credential_invalid", "The session credential is not valid.")
+        return found["session_id"]
+
+    def require_bound_recipient(who: Principal, req: RequestModel, credential: Optional[str]) -> Optional[str]:
+        """With a credential, only the request's own recipient session may act on it."""
+        session_id = bound_session(who, credential)
+        if session_id is None or session_id == req.recipient_session_id:
+            return session_id
+        if req.recipient_session_id is None and db.bind_recipient_session(req.id, session_id):
+            return session_id                                  # sent to the agent: the proven session takes it
+        raise ProductError(403, "session.not_recipient", f"Request {req.id} was not sent to this session.")
+
     @app.post("/api/requests/{request_id}/progress", response_model=RequestModel)
-    async def progress_request(request_id: int, payload: ProgressPayload, who: Principal = Depends(principal)):
+    async def progress_request(request_id: int, payload: ProgressPayload, who: Principal = Depends(principal),
+                               x_placet_session: Optional[str] = Header(None)):
         """RFC-16: a progress update from the recipient; the request stays open."""
         require_agent(who)
         req = get_or_404(request_id)
         if who.id != req.recipient_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                                 detail=f"Only {req.recipient_id} can report progress on request {request_id}.")
+        require_bound_recipient(who, req, x_placet_session)
         if req.status not in (RequestStatus.DELIVERING, RequestStatus.EXECUTING):
             raise ProductError(409, "request.not_running",
                                f"Request {request_id} is {req.status.value}: progress applies only while it runs.")
         db.mark_mcp_seen(req.recipient_session_id)
-        text_ = payload.content.strip()
+        text_ = redact_credentials(payload.content.strip())
         db.set_progress(request_id, text_)
         db.log_event(request_id, who.actor, "progress", {"content": text_})
         notify_change(request_id)
@@ -1478,6 +1513,7 @@ def create_app(
         request_id: int,
         payload: ReplyPayload,
         who: Principal = Depends(principal),
+        x_placet_session: Optional[str] = Header(None),
     ):
         require_agent(who)
         expire_and_notify()
@@ -1488,6 +1524,7 @@ def create_app(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Only {req.recipient_id} can reply to request {request_id}.",
             )
+        bound = require_bound_recipient(who, req, x_placet_session)
         if payload.responder_id is not None and payload.responder_id != who.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -1504,8 +1541,9 @@ def create_app(
         completed = db.record_reply(
             request_id=request_id,
             responder_id=who.id,
-            content=payload.content,
+            content=redact_credentials(payload.content),
             actor=who.actor,
+            assurance="credential" if bound else None,
         )
         if completed is None:
             current = db.get_request(request_id)
@@ -1602,10 +1640,14 @@ def create_app(
         )
 
     @app.post("/api/requests/{request_id}/ack", response_model=RequestModel)
-    async def ack(request_id: int, who: Principal = Depends(principal)):
+    async def ack(request_id: int, who: Principal = Depends(principal), x_placet_session: Optional[str] = Header(None)):
         """The recipient confirms it received an injected prompt (placet_ack)."""
         require_agent(who)
         expire_and_notify()
+        target = get_or_404(request_id)
+        require_party(who, target)                                 # another agent's request stays a 404/403 as before
+        if who.id == target.recipient_id:
+            require_bound_recipient(who, target, x_placet_session)
         acked = ack_request(who, request_id, via="mcp")
         db.mark_mcp_seen(acked.recipient_session_id)
         return acked
@@ -1705,6 +1747,8 @@ def create_app(
             kept_req = db.get_request(kept) if kept is not None else None
             db.set_session_state(session_id, "idle",
                                  kept if kept_req is not None and kept_req.status == RequestStatus.EXECUTING else None)
+            if payload.credential_sha256:
+                db.register_binding(session_id, who.id, payload.credential_sha256)
             db.wake_evidence(session_id)  # a desktop wake-up got its evidence: the session started
             if payload.mcp is not None:
                 db.set_mcp_config_state(session_id, payload.mcp)
