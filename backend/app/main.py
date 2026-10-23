@@ -76,6 +76,7 @@ from backend.app.models import (
     is_settled,
 )
 from backend.app import envelopes
+from backend.app import coordinator_view as coordinator_view_module
 from backend.app.upload_limits import MessageBodyLimit
 from backend.app import bridge_jobs as bridge_jobs_module
 from backend.app.bridge_jobs import BridgeJobs, BridgeNotTaken, BridgeOffline, BridgeTimeout
@@ -2542,6 +2543,38 @@ def create_app(
             raise ProductError(404, "project.not_found", "Project not found")
         ok, removed = db.remove_node_from_project(project_id, node_id)
         return {"ok": True, "removed_relations": removed}
+
+    @app.get("/api/projects/{project_id}/coordinator-view")
+    async def coordinator_view(project_id: int, who: Principal = Depends(principal),
+                               limit: int = Query(coordinator_view_module.DEFAULT_LIMIT, ge=1, le=coordinator_view_module.MAX_LIMIT),
+                               cursor: Optional[str] = Query(None, max_length=200),
+                               x_placet_session: Optional[str] = Header(None)):
+        """
+        RFC-17: a coordinator node's read-only view of its project. Needs a verified session credential (a
+        declared or guessed session is refused), the session must be the current one of a node of the project
+        that holds an active grant, re-checked on every call. Metadata only; reading authorizes no send.
+        """
+        require_agent(who)
+        if x_placet_session is None:
+            raise ProductError(403, "coordinator.credential_required",
+                               "The coordinator view needs a verified session credential (session_token).")
+        session_id = bound_session(who, x_placet_session)
+        session = db.get_session(session_id) if session_id else None
+        node = db.get_node(session.node_id) if session is not None and session.node_id else None
+        project = db.get_project(project_id)
+        allowed = (project is not None and node is not None and node.session_id == session_id
+                   and db.is_node_in_project(project_id, node.id) and db.has_view_grant(project_id, node.id))
+        if not allowed:
+            if project is not None:
+                db.log_view_event(project_id, node.id if node else None, f"agent:{who.id}", "denied",
+                                  {"session": session_id})
+            raise ProductError(403, "coordinator.not_granted", "This session holds no coordinator-view grant on this project.")
+        try:
+            result = coordinator_view_module.build(db, project_id, limit, cursor)
+        except coordinator_view_module.BadCursor:
+            raise ProductError(422, "coordinator.cursor_invalid", "The cursor is not valid.")
+        db.log_view_event(project_id, node.id, f"agent:{who.id}", "read", {"session": session_id, "requests": len(result["requests"])})
+        return result
 
     def view_target(project_id: int, node_id: int) -> None:
         if not db.get_project(project_id):

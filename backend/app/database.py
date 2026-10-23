@@ -4245,6 +4245,22 @@ class Database:
         with self._get_connection() as conn:
             self._log_view(conn, project_id, node_id, actor, event, details)
 
+    def node_project_counts(self) -> Dict[int, int]:
+        """How many projects each node belongs to (a node in several shows only a generic activity)."""
+        with self._get_connection() as conn:
+            return {r["node_id"]: r["n"] for r in conn.execute(
+                "SELECT node_id, COUNT(*) AS n FROM project_nodes GROUP BY node_id").fetchall()}
+
+    def project_open_requests(self, project_id: int, after_id: int, limit: int) -> List[RequestModel]:
+        """Requests attributed to this project that are still open, or whose reply awaits the user (ids ascending)."""
+        with self._get_connection() as conn:
+            ids = [r["id"] for r in conn.execute(
+                "SELECT id FROM requests WHERE project_id = ? AND id > ? AND (status IN ('PENDING', 'APPROVED', 'DELIVERING', 'EXECUTING')"
+                " OR (status = 'COMPLETED' AND delivered_at IS NULL AND allow_auto_return = 0 AND return_decision IS NULL"
+                " AND sender_id != 'human' AND recipient_id != 'human')) ORDER BY id ASC LIMIT ?",
+                (project_id, after_id, limit)).fetchall()]
+        return [r for r in (self.get_request(i) for i in ids) if r is not None]
+
     def set_public_role(self, project_id: int, node_id: int, text: Optional[str], actor: str) -> Optional[str]:
         """The human's public description of a node's role, per project. False-y text clears it; None if not in the project."""
         value = text.strip() if text and text.strip() else None
