@@ -2542,6 +2542,10 @@ def create_app(
             # Codex and Antigravity sessions: the bridge reads their titles.
             "titles": [{"id": s.id, "provider": s.provider} for s in db.untitled_bridge_sessions()],
             "claude_auto_renew": db.get_setting("claude_auto_renew") == "true",
+            # RFC-16: busy Claude Code sessions, whose conversation the bridge reads for a user interrupt.
+            "claude_busy": [{"id": s.id, "since": s.activity_at.isoformat() if s.activity_at else None}
+                            for s in db.list_sessions()
+                            if s.provider == "claude-code" and s.state == "busy" and s.ended_at is None],
         }
 
     @app.post("/api/bridge/requests/{request_id}/steer")
@@ -2592,6 +2596,30 @@ def create_app(
             raise HTTPException(status_code=404, detail="Session not found")
         notify_session(session_id)
         return {"session": session_id, "cause": body.cause}
+
+    class InterruptReport(BaseModel):
+        at: datetime
+
+    @app.post("/api/bridge/sessions/{session_id}/interrupted")
+    async def bridge_interrupted(session_id: str, body: InterruptReport, who: Principal = Depends(principal)):
+        """
+        RFC-16: the user stopped the session's turn in the app (Claude Code runs no hook then). Only an
+        interrupt newer than the start of the running turn ends it: no reply, the request stays open.
+        """
+        require_bridge(who)
+        session = db.get_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        when = body.at if body.at.tzinfo else body.at.replace(tzinfo=timezone.utc)
+        if session.state != "busy" or session.activity_at is None or when <= session.activity_at:
+            return {"session": session_id, "ended": False}
+        db.set_session_state(session_id, "idle")
+        if session.turn_request_id is not None:
+            db.set_execution(session.turn_request_id, "interrupted", actor=who.actor, source="bridge transcript")
+            db.log_event(session.turn_request_id, who.actor, "cancelled_in_app", {"at": when.isoformat()})
+            notify_change(session.turn_request_id)
+        notify_session(session_id)
+        return {"session": session_id, "ended": True}
 
     @app.post("/api/sessions/{session_id}/wake")
     async def retry_wake(session_id: str, who: Principal = Depends(principal)):
