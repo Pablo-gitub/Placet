@@ -161,6 +161,12 @@ but holds no per-node grants.
    credential dies with its session's end or continuation. Known and out of
    scope as stated above: any process with the agent's token can register a
    credential for a session it names by posting a start event.
+   The hook and MCP parts exist behind an opt-in: with
+   `PLACET_SESSION_CREDENTIALS=1` in the environment Claude Code passes to
+   its hooks, every Claude Code start issues a credential (only its hash is
+   spooled; a dropped spool event hands out none) and `placet_reply`,
+   `placet_ack` and `placet_progress` accept `session_token`, sent as
+   `X-Placet-Session`. Off by default: deploying changes nothing.
 3. PWA shows the level per session and request; enrollment and revocation.
 4. RFC-17 / RF-69 grants require `credential` on a gated provider (or
    `transport`), for reads, lists, history and export as well as writes.

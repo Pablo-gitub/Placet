@@ -22,10 +22,13 @@ class PlacetClient:
         self.agent_id = agent_id or os.environ.get("PLACET_AGENT_ID") or None
         self.api_token = api_token or os.environ.get("PLACET_API_TOKEN", "")
 
-    def _headers(self) -> Dict[str, str]:
+    def _headers(self, session_token: Optional[str] = None) -> Dict[str, str]:
         headers = {"Content-Type": "application/json"}
         if self.api_token:
             headers["Authorization"] = f"Bearer {self.api_token}"
+        # RS-09: the session credential the model passed, never sent empty (the backend refuses that).
+        if session_token and session_token.strip():
+            headers["X-Placet-Session"] = session_token.strip()
         return headers
 
     def ask_human(
@@ -119,27 +122,28 @@ class PlacetClient:
         request_id: int,
         response: str,
         status: str = "completed",
+        session_token: Optional[str] = None,
     ) -> Dict[str, Any]:
         url = f"{self.base_url}/api/requests/{request_id}/reply"
         payload = {"content": response}
         if self.agent_id:
             payload["responder_id"] = self.agent_id
         with httpx.Client(timeout=10.0) as client:
-            resp = client.post(url, json=payload, headers=self._headers())
+            resp = client.post(url, json=payload, headers=self._headers(session_token))
             resp.raise_for_status()
             return resp.json()
 
-    def progress(self, request_id: int, message: str) -> Dict[str, Any]:
+    def progress(self, request_id: int, message: str, session_token: Optional[str] = None) -> Dict[str, Any]:
         url = f"{self.base_url}/api/requests/{request_id}/progress"
         with httpx.Client(timeout=10.0) as client:
-            resp = client.post(url, json={"content": message}, headers=self._headers())
+            resp = client.post(url, json={"content": message}, headers=self._headers(session_token))
             resp.raise_for_status()
             return resp.json()
 
-    def ack(self, request_id: int) -> Dict[str, Any]:
+    def ack(self, request_id: int, session_token: Optional[str] = None) -> Dict[str, Any]:
         url = f"{self.base_url}/api/requests/{request_id}/ack"
         with httpx.Client(timeout=10.0) as client:
-            resp = client.post(url, headers=self._headers())
+            resp = client.post(url, headers=self._headers(session_token))
             resp.raise_for_status()
             return resp.json()
 
