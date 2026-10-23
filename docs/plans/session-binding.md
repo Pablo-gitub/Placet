@@ -146,7 +146,31 @@ but holds no per-node grants.
    lost spool events, compaction, `/clear`, continuation and revocation.
 2. Storage, header, levels recorded on requests/replies/events; reply, ack
    and progress checked against the bound session when a credential is
-   present. No behaviour change for `declared`.
+   present. No behaviour change for `declared`. **Backend part done** October 23, 2026
+   (`session_bindings`: hash, generation, active/superseded with a
+   10-minute grace; `credential_sha256` on the start event;
+   `X-Placet-Session` checked on reply, ack and progress; `assurance` on the
+   reply event; `plst_` redacted in replies, progress and the transcript
+   reader). Still to do in this step: the hook generating the credential and
+   the MCP client sending the header (they need a deploy and the hook
+   installer), revocation by the user, and levels on requests and events.
+   After review #344: a request sent to an agent without a session is
+   claimed atomically by the session the credential proves; redaction is
+   central (replies including implicit ones, progress, agent prompts, the
+   turn-end notification, transcripts; exactly `plst_` + 22 characters); a
+   credential dies with its session's end or continuation. Known and out of
+   scope as stated above: any process with the agent's token can register a
+   credential for a session it names by posting a start event.
+   The hook and MCP parts exist behind an opt-in: with
+   `PLACET_SESSION_CREDENTIALS=1` in the environment Claude Code passes to
+   its hooks, every Claude Code start issues a credential (only its hash is
+   spooled; a dropped spool event hands out none) and `placet_reply`,
+   `placet_ack` and `placet_progress` accept `session_token`, sent as
+   `X-Placet-Session` (retried up to three times, 2 s apart, on
+   `session.credential_invalid`, since the hash reaches the backend through
+   the spool; never resent without it). Off by default: deploying changes
+   nothing. To try it, the variable must reach the hooks: Claude Desktop
+   passes its own environment, so it must be verified there first.
 3. PWA shows the level per session and request; enrollment and revocation.
 4. RFC-17 / RF-69 grants require `credential` on a gated provider (or
    `transport`), for reads, lists, history and export as well as writes.

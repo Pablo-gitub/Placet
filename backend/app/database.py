@@ -1,3 +1,4 @@
+import re
 import sqlite3
 import json
 from contextlib import contextmanager
@@ -132,6 +133,14 @@ def _normalize_utc_iso(val: Union[str, datetime, None]) -> Optional[str]:
 
 class ControlPending(Exception):
     """RF-62: the session already has a control being sent."""
+
+
+# RS-09: a session credential (`plst_` + token_urlsafe(16)) never stored in an agent's text.
+SESSION_CREDENTIAL = re.compile(r"(?<![A-Za-z0-9_-])plst_[A-Za-z0-9_-]{22}(?![A-Za-z0-9_-])")
+
+
+def redact_credentials(text):
+    return SESSION_CREDENTIAL.sub("[redacted]", text) if isinstance(text, str) and text else text
 
 
 class Database:
@@ -433,6 +442,18 @@ class Database:
             )
             # RF-62: remote controls typed into a session (/compact, /effort), for the audit.
             cursor.execute("""
+            CREATE TABLE IF NOT EXISTS session_bindings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                agent_id TEXT NOT NULL,
+                generation INTEGER NOT NULL,
+                sha256 TEXT NOT NULL UNIQUE,
+                state TEXT NOT NULL DEFAULT 'active',
+                created_at TEXT NOT NULL,
+                superseded_at TEXT
+            );
+            """)
+            cursor.execute("""
             CREATE TABLE IF NOT EXISTS session_control_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT NOT NULL,
@@ -516,6 +537,10 @@ class Database:
                 cursor.execute("ALTER TABLE sessions ADD COLUMN wake_alerted_at TEXT;")
             if "desktop_archived" not in session_cols:
                 cursor.execute("ALTER TABLE sessions ADD COLUMN desktop_archived INTEGER NOT NULL DEFAULT 0;")
+            if "turn_error" not in session_cols:
+                # The API error that ended the last turn (Claude Code StopFailure), until the next turn or start.
+                cursor.execute("ALTER TABLE sessions ADD COLUMN turn_error TEXT;")
+                cursor.execute("ALTER TABLE sessions ADD COLUMN turn_error_at TEXT;")
             if "desktop_unloaded" not in session_cols:
                 # Consecutive bridge reports that did not find the conversation loaded in Claude Desktop,
                 # and whether the suspension was made from them (only that one is undone by a loaded report).
@@ -780,7 +805,11 @@ class Database:
                 for r in cursor.fetchall()
             ]
 
-    def create_request(self, req: RequestCreate, actor: Optional[str] = None) -> RequestModel:
+    def create_request(self, req: RequestCreate, actor: Optional[str] = None,
+                       schedule_reason: Optional[str] = None) -> RequestModel:
+        if req.sender_id != "human":
+            req = req.model_copy(update={"prompt": redact_credentials(req.prompt),
+                                         "context": redact_credentials(req.context)})
         now = datetime.now(timezone.utc)
         scheduled_at = _normalize_utc_iso(getattr(req, "scheduled_at", None))
         base_time = now
@@ -829,7 +858,7 @@ class Database:
             if scheduled_at:
                 self._log(
                     cursor, req_id, actor or f"agent:{req.sender_id}", "scheduled",
-                    {"scheduled_at": scheduled_at},
+                    {"scheduled_at": scheduled_at, **({"reason": schedule_reason} if schedule_reason else {})},
                     at=now.isoformat(),
                 )
         return self.get_request(req_id)
@@ -942,7 +971,71 @@ class Database:
             row = conn.execute(sql + " ORDER BY id DESC LIMIT 1", params).fetchone()
             return row["id"] if row else None
 
+    # RS-09: how long the previous credential generation stays valid after a renewal (a compaction or a
+    # resume during a running request).
+    BINDING_GRACE_MINUTES = 10
+
+    def register_binding(self, session_id: str, agent_id: str, sha256: str) -> Optional[int]:
+        """
+        A new credential generation for a session, from its own hook: only the hash is stored. The
+        previous active one becomes superseded (valid for the grace period). A hash seen before is
+        refused (None): never reused across sessions or generations.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            if conn.execute("SELECT 1 FROM session_bindings WHERE sha256 = ?", (sha256,)).fetchone():
+                return None
+            row = conn.execute("SELECT MAX(generation) AS g FROM session_bindings WHERE session_id = ?",
+                               (session_id,)).fetchone()
+            generation = (row["g"] or 0) + 1
+            conn.execute("UPDATE session_bindings SET state = 'superseded', superseded_at = ?"
+                         " WHERE session_id = ? AND state = 'active'", (now, session_id))
+            conn.execute("INSERT INTO session_bindings (session_id, agent_id, generation, sha256, state, created_at)"
+                         " VALUES (?, ?, ?, ?, 'active', ?)", (session_id, agent_id, generation, sha256, now))
+            return generation
+
+    def resolve_binding(self, sha256: str) -> Optional[Dict[str, Any]]:
+        """The session a presented credential's hash is bound to, if that generation is still valid."""
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT session_id, agent_id, generation, state, superseded_at FROM session_bindings"
+                               " WHERE sha256 = ?", (sha256,)).fetchone()
+        if row is None or row["state"] not in ("active", "superseded"):
+            return None
+        session = self.get_session(row["session_id"])
+        if session is None or session.ended_at is not None or session.continued_to is not None:
+            return None                                       # a closed or continued session's credential is dead
+        if row["state"] == "superseded":
+            try:
+                since = datetime.fromisoformat(row["superseded_at"])
+            except (TypeError, ValueError):
+                return None
+            if datetime.now(timezone.utc) - since > timedelta(minutes=self.BINDING_GRACE_MINUTES):
+                return None
+        return {"session_id": row["session_id"], "agent_id": row["agent_id"], "generation": row["generation"]}
+
+    def bind_recipient_session(self, request_id: int, session_id: str) -> bool:
+        """A request sent to an agent without a session is claimed by the session a credential proves."""
+        with self._get_connection() as conn:
+            return conn.execute("UPDATE requests SET recipient_session_id = ? WHERE id = ?"
+                                " AND recipient_session_id IS NULL", (session_id, request_id)).rowcount > 0
+
+    def session_bindings(self, session_id: str) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            return [dict(r) for r in conn.execute(
+                "SELECT generation, sha256, state, created_at, superseded_at FROM session_bindings"
+                " WHERE session_id = ? ORDER BY generation", (session_id,)).fetchall()]
+
+    def age_bindings(self, session_id: str, delta: timedelta) -> None:
+        """Tests only: move a session's binding times into the past."""
+        with self._get_connection() as conn:
+            for r in conn.execute("SELECT id, created_at, superseded_at FROM session_bindings WHERE session_id = ?",
+                                  (session_id,)).fetchall():
+                shift = lambda v: (datetime.fromisoformat(v) - delta).isoformat() if v else None  # noqa: E731
+                conn.execute("UPDATE session_bindings SET created_at = ?, superseded_at = ? WHERE id = ?",
+                             (shift(r["created_at"]), shift(r["superseded_at"]), r["id"]))
+
     def set_progress(self, request_id: int, text: str) -> None:
+        text = redact_credentials(text)
         now = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
             conn.execute("UPDATE requests SET progress_text = ?, progress_at = ?, updated_at = ? WHERE id = ?",
@@ -1009,6 +1102,7 @@ class Database:
         delivery_mode: Optional[str] = None,
         recipient_session_id: Optional[str] = None,
         scheduled_at: Optional[Union[str, datetime]] = None,
+        schedule_reason: Optional[str] = None,
     ) -> Optional[RequestModel]:
         """
         Applies the human decision (PENDING -> APPROVED/REJECTED). Returns
@@ -1096,7 +1190,9 @@ class Database:
                 details["custom_text"] = custom_text
             if scheduled_at_iso is not None:
                 details["scheduled_at"] = scheduled_at_iso
-                self._log(cursor, request_id, actor, "scheduled", {"scheduled_at": scheduled_at_iso}, at=now)
+                self._log(cursor, request_id, actor, "scheduled",
+                          {"scheduled_at": scheduled_at_iso, **({"reason": schedule_reason} if schedule_reason else {})},
+                          at=now)
             self._log(cursor, request_id, actor, "decided", details, at=now)
         return self.get_request(request_id)
 
@@ -1107,12 +1203,14 @@ class Database:
         content: str,
         actor: Optional[str] = None,
         implicit: bool = False,
+        assurance: Optional[str] = None,
     ) -> Optional[RequestModel]:
         """
         Completes a request with the recipient's reply. A reply while still
         DELIVERING also proves the prompt arrived. Returns None if the
         request can no longer be replied to.
         """
+        content = redact_credentials(content)
         now = datetime.now(timezone.utc).isoformat()
         sources = [st.value for st in _REPLYABLE]
 
@@ -1160,6 +1258,8 @@ class Database:
             details: Dict[str, Any] = {"length": len(content)}
             if implicit:
                 details["implicit"] = True
+            if assurance:
+                details["assurance"] = assurance
             self._log(cursor, request_id, actor or f"agent:{responder_id}", "replied", details, at=now)
 
             if schedule_action:
@@ -1275,6 +1375,37 @@ class Database:
                 return False
             self._log(cursor, request_id, actor, "delivery_retried", at=now)
             return True
+
+    def cancel_undelivered(self, request_id: int, actor: str) -> bool:
+        """
+        The user withdraws a prompt that has not started to be delivered (still PENDING, or APPROVED and
+        waiting, scheduled or not). One conditional update: if the bridge claimed it first, this loses.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"UPDATE requests SET status = ?, updated_at = ?, delivered_at = NULL, scheduled_at = NULL"
+                f"{_CANCEL_DELIVERY_SQL}"
+                " WHERE id = ? AND recipient_id != 'human'"
+                " AND (status = ? OR (status = ? AND (delivery_state IS NULL OR delivery_state = 'waiting')))",
+                (RequestStatus.CANCELLED.value, now, request_id,
+                 RequestStatus.PENDING.value, RequestStatus.APPROVED.value),
+            )
+            if cursor.rowcount == 0:
+                return False
+            self._log(cursor, request_id, actor, "cancelled", {"undelivered": True}, at=now)
+            return True
+
+    def undelivered_requests(self) -> List[RequestModel]:
+        """Prompts to agents that are still PENDING or APPROVED (not yet claimed for delivery), oldest first."""
+        with self._get_connection() as conn:
+            ids = [r["id"] for r in conn.execute(
+                "SELECT r.id FROM requests r WHERE r.recipient_id != 'human' AND r.status IN (?, ?)"
+                " AND (r.status = ? OR r.delivery_state IS NULL OR r.delivery_state = 'waiting')"
+                f" AND {_NOT_EXCLUDED_SQL} ORDER BY r.id ASC",
+                (RequestStatus.PENDING.value, RequestStatus.APPROVED.value, RequestStatus.PENDING.value)).fetchall()]
+        return [req for req in (self.get_request(i) for i in ids) if req is not None]
 
     def cancel_delivery(self, request_id: int, actor: str) -> bool:
         """
@@ -1511,6 +1642,10 @@ class Database:
             return True
 
     # --- "Subito": a message inside the running turn (RF-35) -------------------------
+
+    def set_allow_auto_return(self, request_id: int, allow: bool) -> None:
+        with self._get_connection() as conn:
+            conn.execute("UPDATE requests SET allow_auto_return = ? WHERE id = ?", (int(allow), request_id))
 
     def set_delivery_mode(self, request_id: int, mode: str) -> None:
         with self._get_connection() as conn:
@@ -2016,6 +2151,8 @@ class Database:
             wake_attempts=row["wake_attempts"] or 0,
             wake_cause=row["wake_cause"],
             desktop_archived=bool(row["desktop_archived"]),
+            turn_error=row["turn_error"],
+            turn_error_at=_ts(row["turn_error_at"]),
             wake_cause_at=_ts(row["wake_cause_at"]),
             mcp_checked_at=_ts(row["mcp_checked_at"]),
             node_id=row["node_id"],
@@ -2123,6 +2260,12 @@ class Database:
                 " WHERE id = ?",
                 (state, turn_request_id, now, now, session_id),
             )
+
+    def set_turn_error(self, session_id: str, error: Optional[str]) -> None:
+        """The API error that ended the session's last turn, or None to clear it."""
+        with self._get_connection() as conn:
+            conn.execute("UPDATE sessions SET turn_error = ?, turn_error_at = ? WHERE id = ?",
+                         (error, datetime.now(timezone.utc).isoformat() if error else None, session_id))
 
     SEEN_EVENTS_DAYS = 14
 
@@ -2564,16 +2707,20 @@ class Database:
         return self._row_to_relation(rows[0]) if len(rows) == 1 else None
 
     def redirect_request(self, request_id: int, recipient_id: Optional[str],
-                         relation_id: Optional[int], recipient_session_id: str, actor: str) -> bool:
+                         relation_id: Optional[int], recipient_session_id: str, actor: str,
+                         approved_too: bool = False) -> bool:
         """
         The user sends a pending prompt to another session, possibly of
         another agent (recipient_id None keeps the agent). False if no
-        longer pending.
+        longer pending; with `approved_too` also while approved and still
+        waiting for its delivery (scheduled or held).
         """
+        where = ("(status = 'PENDING' OR (status = 'APPROVED' AND (delivery_state IS NULL OR delivery_state = 'waiting')))"
+                 if approved_too else "status = 'PENDING'")
         with self._get_connection() as conn:
             cur = conn.cursor()
             row = cur.execute("SELECT recipient_id, recipient_session_id FROM requests"
-                              " WHERE id = ? AND status = 'PENDING'", (request_id,)).fetchone()
+                              f" WHERE id = ? AND {where}", (request_id,)).fetchone()
             if row is None:
                 return False
             type_name = None
@@ -2587,7 +2734,7 @@ class Database:
             cur.execute(
                 "UPDATE requests SET recipient_id = COALESCE(?, recipient_id), relation_id = ?,"
                 " relation_type_name = COALESCE(?, relation_type_name),"
-                " recipient_session_id = ? WHERE id = ? AND status = 'PENDING'",
+                f" recipient_session_id = ? WHERE id = ? AND {where}",
                 (recipient_id, relation_id, type_name, recipient_session_id, request_id))
             if cur.rowcount == 0:
                 return False

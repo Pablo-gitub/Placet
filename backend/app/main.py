@@ -1,4 +1,6 @@
 from dataclasses import replace
+import hashlib
+import re
 import os
 import time
 import json
@@ -9,7 +11,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, List, Literal, Optional, Dict, Set
-from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, status, Request, Depends
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks, status, Request, Depends, Header
 from fastapi import Path as FastAPIPath
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -44,6 +46,7 @@ from backend.app.models import (
     UsageReport,
     RequestCreate,
     RequestEvent,
+    UndeliveredItem,
     RequestModel,
     RequestStatus,
     Priority,
@@ -91,7 +94,9 @@ EXPIRY_SWEEP_SECONDS = 30.0
 
 class SessionEventPayload(BaseModel):
     """What an agent CLI / desktop app hook reports about one of its sessions."""
-    event: Literal["start", "prompt", "stop", "tool", "end", "steered"]
+    event: Literal["start", "prompt", "stop", "failed", "tool", "end", "steered"]
+    # failed: the provider's code for the API error that ended the turn.
+    error: Optional[str] = Field(None, pattern=r"^[a-z_]{1,40}$")
     # The hook script and its version: the provenance of execution proofs.
     adapter: Optional[str] = Field(None, max_length=64)
     # Set by the hooks' local queue: an event forwarded twice is applied once.
@@ -115,6 +120,9 @@ class SessionEventPayload(BaseModel):
     request_id: Optional[int] = None
     # stop: the agent's last message, used as implicit reply if needed.
     last_message: Optional[str] = None
+    # start (RS-09): the SHA-256 of the credential the hook just put in the session's context;
+    # never the credential itself.
+    credential_sha256: Optional[str] = Field(None, pattern=r"^[0-9a-f]{64}$")
     # start: why the session started (Claude Code: startup, resume, clear, compact).
     start_source: Optional[str] = Field(None, max_length=32)
     # RF-29d: UUID of the session being continued
@@ -315,6 +323,9 @@ class AgentStatePayload(BaseModel):
     state: Literal["busy", "idle"]
     request_id: Optional[int] = None
     last_message: Optional[str] = None
+
+
+from backend.app.database import SESSION_CREDENTIAL, redact_credentials  # noqa: E402  (RS-09)
 
 
 class ReplyPayload(BaseModel):
@@ -664,9 +675,20 @@ def create_app(
                        text("notify.app_review_body", lang), f"/#/sessione/{session.id}",
                        f"app-review-{session.id}", "high")
 
+    def notify_turn_failed(session: SessionModel, error: str) -> None:
+        """A turn stopped on an API error: the session will not go on by itself (Claude Code StopFailure)."""
+        if session.excluded or not db.get_notification_preferences().get("needs_you", True):
+            return
+        lang = db.get_background_language()
+        web_push_later(text("notify.turn_failed_title", lang,
+                            label=session_label(session.provider, session.title, session.project_root or session.cwd)),
+                       text(f"notify.turn_failed_{'rate_limit' if error == 'rate_limit' else 'other'}", lang, error=error),
+                       f"/#/sessione/{session.id}", f"turn-failed-{session.id}", "high")
+
     def notify_turn_end(session: SessionModel, last_message: Optional[str], is_placet: bool = False) -> None:
         if not session.pinned or session.excluded:
             return
+        last_message = redact_credentials(last_message)
         prefs = db.get_notification_preferences()
         mode = prefs.get("turn_end", "placet")
         if mode == "off":
@@ -1132,6 +1154,106 @@ def create_app(
         expire_and_notify()
         return db.list_requests(status=status, limit=limit, hide_excluded=True)
 
+    BLOCKED_AFTER = timedelta(minutes=2)
+
+    def undelivered_cause(req: RequestModel, now: datetime):
+        """(cause, due_at) of a prompt that has not reached its recipient yet."""
+        if req.status == RequestStatus.PENDING:
+            return "awaiting_approval", req.scheduled_at
+        if req.scheduled_at is not None and req.scheduled_at.astimezone(timezone.utc) > now:
+            # Held back by the usage guard (a system actor scheduled it) or planned by the user.
+            scheduled = [e for e in db.list_events(req.id) if e.event == "scheduled"]
+            by_system = bool(scheduled) and (scheduled[-1].actor.startswith("system:")
+                                             or (scheduled[-1].details or {}).get("reason") == "usage")
+            return ("awaiting_refresh" if by_system else "scheduled"), req.scheduled_at
+        target = db.get_session(req.recipient_session_id) if req.recipient_session_id else None
+        waited = now - (req.updated_at or req.created_at).astimezone(timezone.utc)
+        if (target is not None and not target.reachable) or waited > BLOCKED_AFTER:
+            return "blocked", None
+        return None, None                                # on its way: the bridge delivers it in moments
+
+    @app.get("/api/requests/undelivered", response_model=List[UndeliveredItem])
+    async def list_undelivered(response: Response, who: Principal = Depends(principal)):
+        """The user's view of prompts that have not been delivered, by cause (RF-65/66)."""
+        require_human(who)
+        response.headers["Cache-Control"] = "no-store"
+        now = datetime.now(timezone.utc)
+        items = []
+        for req in db.undelivered_requests():
+            cause, due_at = undelivered_cause(req, now)
+            if cause is None:
+                continue
+            sender = db.get_session(req.sender_session_id) if req.sender_session_id else None
+            target = db.get_session(req.recipient_session_id) if req.recipient_session_id else None
+            items.append(UndeliveredItem(
+                request=req, cause=cause, due_at=due_at,
+                sender_node=sender.node_name if sender else None,
+                recipient_node=target.node_name if target else None))
+        return items
+
+    def undelivered_or_refuse(request_id: int) -> RequestModel:
+        req = get_or_404(request_id)
+        if (req.recipient_id == "human"
+                or req.status not in (RequestStatus.PENDING, RequestStatus.APPROVED)
+                or (req.status == RequestStatus.APPROVED and req.delivery != "waiting")):
+            raise ProductError(409, "undelivered.not_available",
+                               "This message has already started to be delivered, or is not a prompt to an agent.")
+        return req
+
+    @app.post("/api/requests/{request_id}/undelivered/cancel", response_model=RequestModel)
+    async def cancel_undelivered(request_id: int, who: Principal = Depends(principal)):
+        """The user withdraws a prompt before it is delivered; the sender is told like for an expiry."""
+        require_human(who)
+        undelivered_or_refuse(request_id)
+        if not db.cancel_undelivered(request_id, actor=who.actor):
+            raise ProductError(409, "undelivered.not_available",
+                               "This message has already started to be delivered, or is not a prompt to an agent.")
+        notify_change(request_id)
+        return get_or_404(request_id)
+
+    class ForwardUndelivered(BaseModel):
+        session_id: str
+
+    @app.post("/api/requests/{request_id}/undelivered/forward", response_model=RequestModel)
+    async def forward_undelivered(request_id: int, payload: ForwardUndelivered, who: Principal = Depends(principal)):
+        """The user sends a prompt that has not been delivered to another open session instead."""
+        require_human(who)
+        req = undelivered_or_refuse(request_id)
+        target = db.get_session(payload.session_id)
+        if target is None:
+            raise ProductError(422, "session.unavailable", f"Session {payload.session_id} is not an open session.")
+        if target.id == req.sender_session_id:
+            raise ProductError(422, "decision.self_target", "A session cannot send a request to itself.")
+        if target.id == req.recipient_session_id:
+            raise ProductError(422, "undelivered.same_session", "The message is already addressed to this session.")
+        check_target_session(target.id, target.agent_id)
+        relation = relation_of(req.sender_session_id, target.id)
+        moved = db.redirect_request(
+            request_id, target.agent_id if target.agent_id != req.recipient_id else None,
+            relation.id if relation else None, target.id, who.actor, approved_too=True)
+        if not moved:
+            raise ProductError(409, "undelivered.not_available",
+                               "This message has already started to be delivered, or is not a prompt to an agent.")
+        if undelivered_cause(req, datetime.now(timezone.utc))[0] == "awaiting_refresh":
+            db.schedule_request(request_id, None, actor=who.actor)   # the old recipient's reset is not the new one's
+        cfg = usage_guard()
+        if req.status == RequestStatus.APPROVED and cfg.get("deliver_at_reset"):
+            # Whatever held it before, the new recipient's limit applies (review #345).
+            if db.is_provider_over_limit(
+                    target.provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"]):
+                reset = db.provider_reset_time(target.provider, cfg["five_hour"], cfg["seven_day"],
+                                               check_near_limit=cfg["enabled"])
+                if reset is not None:
+                    db.schedule_request(request_id, reset, actor="system:limits")
+        if req.status == RequestStatus.APPROVED:
+            # The reply policy and "now" belonged to the old recipient: the new one's apply.
+            db.set_allow_auto_return(request_id, reply_is_automatic(relation) if relation else False)
+            if req.delivery_mode == "now":
+                db.set_delivery_mode(request_id, "queue")
+        notify_change(request_id)
+        notify_session(target.id)
+        return get_or_404(request_id)
+
     def mark_mcp_seen_by(who: Principal, req: RequestModel) -> None:
         """
         RF-27: an agent reading a request (placet_check_status) used the MCP; the session it
@@ -1261,6 +1383,7 @@ def create_app(
             delivery_mode=decision.delivery_mode if decision.status == RequestStatus.APPROVED and req.recipient_id != "human" else None,
             recipient_session_id=decision.recipient_session_id,
             scheduled_at=effective_schedule,
+            schedule_reason="usage" if effective_schedule is not None and effective_schedule != req.scheduled_at else None,
         )
         if updated is None:
             # State changed between the check and the update (e.g. expired or cancelled).
@@ -1341,19 +1464,45 @@ def create_app(
         notify_change(request_id)
         return updated
 
+    def bound_session(who: Principal, credential: Optional[str]) -> Optional[str]:
+        """
+        RS-09: the session a presented credential binds this call to, or None when none is presented
+        (today's declared behaviour). A present but invalid, expired or foreign credential is refused:
+        it never falls back to declared.
+        """
+        if credential is None:
+            return None
+        found = None
+        if SESSION_CREDENTIAL.fullmatch(credential.strip()):
+            found = db.resolve_binding(hashlib.sha256(credential.strip().encode()).hexdigest())
+        if found is None or found["agent_id"] != who.id:
+            raise ProductError(401, "session.credential_invalid", "The session credential is not valid.")
+        return found["session_id"]
+
+    def require_bound_recipient(who: Principal, req: RequestModel, credential: Optional[str]) -> Optional[str]:
+        """With a credential, only the request's own recipient session may act on it."""
+        session_id = bound_session(who, credential)
+        if session_id is None or session_id == req.recipient_session_id:
+            return session_id
+        if req.recipient_session_id is None and db.bind_recipient_session(req.id, session_id):
+            return session_id                                  # sent to the agent: the proven session takes it
+        raise ProductError(403, "session.not_recipient", f"Request {req.id} was not sent to this session.")
+
     @app.post("/api/requests/{request_id}/progress", response_model=RequestModel)
-    async def progress_request(request_id: int, payload: ProgressPayload, who: Principal = Depends(principal)):
+    async def progress_request(request_id: int, payload: ProgressPayload, who: Principal = Depends(principal),
+                               x_placet_session: Optional[str] = Header(None)):
         """RFC-16: a progress update from the recipient; the request stays open."""
         require_agent(who)
         req = get_or_404(request_id)
         if who.id != req.recipient_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                                 detail=f"Only {req.recipient_id} can report progress on request {request_id}.")
+        require_bound_recipient(who, req, x_placet_session)
         if req.status not in (RequestStatus.DELIVERING, RequestStatus.EXECUTING):
             raise ProductError(409, "request.not_running",
                                f"Request {request_id} is {req.status.value}: progress applies only while it runs.")
         db.mark_mcp_seen(req.recipient_session_id)
-        text_ = payload.content.strip()
+        text_ = redact_credentials(payload.content.strip())
         db.set_progress(request_id, text_)
         db.log_event(request_id, who.actor, "progress", {"content": text_})
         notify_change(request_id)
@@ -1364,6 +1513,7 @@ def create_app(
         request_id: int,
         payload: ReplyPayload,
         who: Principal = Depends(principal),
+        x_placet_session: Optional[str] = Header(None),
     ):
         require_agent(who)
         expire_and_notify()
@@ -1374,6 +1524,7 @@ def create_app(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Only {req.recipient_id} can reply to request {request_id}.",
             )
+        bound = require_bound_recipient(who, req, x_placet_session)
         if payload.responder_id is not None and payload.responder_id != who.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -1390,8 +1541,9 @@ def create_app(
         completed = db.record_reply(
             request_id=request_id,
             responder_id=who.id,
-            content=payload.content,
+            content=redact_credentials(payload.content),
             actor=who.actor,
+            assurance="credential" if bound else None,
         )
         if completed is None:
             current = db.get_request(request_id)
@@ -1488,10 +1640,14 @@ def create_app(
         )
 
     @app.post("/api/requests/{request_id}/ack", response_model=RequestModel)
-    async def ack(request_id: int, who: Principal = Depends(principal)):
+    async def ack(request_id: int, who: Principal = Depends(principal), x_placet_session: Optional[str] = Header(None)):
         """The recipient confirms it received an injected prompt (placet_ack)."""
         require_agent(who)
         expire_and_notify()
+        target = get_or_404(request_id)
+        require_party(who, target)                                 # another agent's request stays a 404/403 as before
+        if who.id == target.recipient_id:
+            require_bound_recipient(who, target, x_placet_session)
         acked = ack_request(who, request_id, via="mcp")
         db.mark_mcp_seen(acked.recipient_session_id)
         return acked
@@ -1582,8 +1738,17 @@ def create_app(
             # Only a real start or turn brings a session back: a late event
             # of another kind must not reopen it.
             db.reopen_session(session_id)
+            if session.turn_error:
+                db.set_turn_error(session_id, None)
         if payload.event == "start":
-            db.set_session_state(session_id, "idle")
+            # A restart, resume or compaction keeps a request stopped mid-turn (Esc, API error) linked,
+            # so the next turn can still continue it.
+            kept = session.turn_request_id if session.state != "busy" else None
+            kept_req = db.get_request(kept) if kept is not None else None
+            db.set_session_state(session_id, "idle",
+                                 kept if kept_req is not None and kept_req.status == RequestStatus.EXECUTING else None)
+            if payload.credential_sha256:
+                db.register_binding(session_id, who.id, payload.credential_sha256)
             db.wake_evidence(session_id)  # a desktop wake-up got its evidence: the session started
             if payload.mcp is not None:
                 db.set_mcp_config_state(session_id, payload.mcp)
@@ -1609,6 +1774,15 @@ def create_app(
                 turn_request_id = paused
                 db.log_event(paused, f"{who.actor}:hook", "turn_resumed", {})
                 notify_change(paused)
+            elif payload.request_id is None and session.state != "busy" and session.turn_request_id is not None \
+                    and (stopped := db.get_request(session.turn_request_id)) is not None \
+                    and stopped.status == RequestStatus.EXECUTING:
+                # The turn after one stopped in the app (Esc) or by an API error continues that request.
+                # The user may have asked for something else: its last answer may not be the reply.
+                turn_request_id = stopped.id
+                db.mark_turn_mixed(stopped.id)
+                db.log_event(stopped.id, f"{who.actor}:hook", "turn_resumed", {})
+                notify_change(stopped.id)
             elif payload.request_id is not None:
                 try:
                     ack_request(who, payload.request_id, via="hook")
@@ -1661,6 +1835,18 @@ def create_app(
                 # still holding the queue ended with it.
                 for released in db.release_on_observed_turn_end(session_id):
                     notify_change(released)
+        elif payload.event == "failed":
+            # The turn ended on an API error: no reply, the request stays open and keeps
+            # holding the queue; the user is told why the session stopped.
+            # The request keeps its turn: it stays in flight (the queue is held) and the next turn
+            # in this session, e.g. "continue" typed in the app, resumes it.
+            db.set_session_state(session_id, "idle", session.turn_request_id)
+            db.set_turn_error(session_id, payload.error or "unknown")
+            if session.turn_request_id is not None and session.state == "busy":
+                db.log_event(session.turn_request_id, f"{who.actor}:hook", "turn_failed",
+                             {"error": payload.error or "unknown"})
+                notify_change(session.turn_request_id)
+            notify_turn_failed(session, payload.error or "unknown")
         elif payload.event == "steered" and payload.request_id is not None:
             # A "now" message entered the running turn (RF-35): delivered and
             # being executed; the turn now answers more than one message.
@@ -1967,6 +2153,7 @@ def create_app(
         cfg = usage_guard()
         rec_provider = session.provider
         sched_at = body.scheduled_at
+        reset_hold = False
         hold_for_usage = False
         if (
             body.mode != "now"
@@ -1980,6 +2167,7 @@ def create_app(
                 )
                 if rec_reset is not None:
                     sched_at = rec_reset.isoformat()
+                    reset_hold = True
                 else:
                     hold_for_usage = True
             else:
@@ -1993,6 +2181,7 @@ def create_app(
                 scheduled_at=sched_at,
             ),
             actor=who.actor,
+            schedule_reason="usage" if reset_hold else None,
         )
         if body.mode == "now":
             db.set_delivery_mode(created.id, "now")
@@ -2542,6 +2731,10 @@ def create_app(
             # Codex and Antigravity sessions: the bridge reads their titles.
             "titles": [{"id": s.id, "provider": s.provider} for s in db.untitled_bridge_sessions()],
             "claude_auto_renew": db.get_setting("claude_auto_renew") == "true",
+            # RFC-16: busy Claude Code sessions, whose conversation the bridge reads for a user interrupt.
+            "claude_busy": [{"id": s.id, "since": s.activity_at.isoformat() if s.activity_at else None}
+                            for s in db.list_sessions()
+                            if s.provider == "claude-code" and s.state == "busy" and s.ended_at is None],
         }
 
     @app.post("/api/bridge/requests/{request_id}/steer")
@@ -2592,6 +2785,31 @@ def create_app(
             raise HTTPException(status_code=404, detail="Session not found")
         notify_session(session_id)
         return {"session": session_id, "cause": body.cause}
+
+    class InterruptReport(BaseModel):
+        at: datetime
+
+    @app.post("/api/bridge/sessions/{session_id}/interrupted")
+    async def bridge_interrupted(session_id: str, body: InterruptReport, who: Principal = Depends(principal)):
+        """
+        RFC-16: the user stopped the session's turn in the app (Claude Code runs no hook then). Only an
+        interrupt newer than the start of the running turn ends it: no reply, the request stays open.
+        """
+        require_bridge(who)
+        session = db.get_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        when = body.at if body.at.tzinfo else body.at.replace(tzinfo=timezone.utc)
+        if session.state != "busy" or session.activity_at is None or when <= session.activity_at:
+            return {"session": session_id, "ended": False}
+        # The request keeps its turn: still in flight (the queue stays held, nothing is pushed into the
+        # app the user is working in), and the next turn in the session resumes it.
+        db.set_session_state(session_id, "idle", session.turn_request_id)
+        if session.turn_request_id is not None:
+            db.log_event(session.turn_request_id, who.actor, "cancelled_in_app", {"at": when.isoformat()})
+            notify_change(session.turn_request_id)
+        notify_session(session_id)
+        return {"session": session_id, "ended": True}
 
     @app.post("/api/sessions/{session_id}/wake")
     async def retry_wake(session_id: str, who: Principal = Depends(principal)):

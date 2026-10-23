@@ -189,7 +189,7 @@ def placet_list_relations(session_id: Optional[str] = None) -> str:
 
 
 @mcp.tool()
-def placet_ack(request_id: int) -> str:
+def placet_ack(request_id: int, session_token: Optional[str] = None) -> str:
     """
     Acknowledge a Placet request delivered through a terminal (a message
     beginning with "[Placet Request #N"). Call before starting the task when
@@ -197,7 +197,7 @@ def placet_ack(request_id: int) -> str:
     delivery may be considered unconfirmed and retried.
     """
     try:
-        res = client.ack(request_id=request_id)
+        res = client.ack(request_id=request_id, session_token=session_token)
         return json.dumps(res, indent=2, ensure_ascii=False)
     except Exception as e:
         return _format_error(e)
@@ -207,22 +207,25 @@ def placet_ack(request_id: int) -> str:
 def placet_reply(
     request_id: int,
     response: str,
+    session_token: Optional[str] = None,
 ) -> str:
     """
     Record the result of another agent's Placet request, identified by request_id.
     Call after completing the requested analysis or task. This completes the
     task but does not bypass human approval of forwarding the reply to the
     requesting session. Direct user messages do not require this tool.
+    If your context holds a "Placet session credential", pass the newest one
+    as session_token (or omit it); never write it anywhere else.
     """
     try:
-        res = client.reply(request_id=request_id, response=response)
+        res = client.reply(request_id=request_id, response=response, session_token=session_token)
         return json.dumps(res, indent=2, ensure_ascii=False)
     except Exception as e:
         return _format_error(e)
 
 
 @mcp.tool()
-def placet_progress(request_id: int, message: str) -> str:
+def placet_progress(request_id: int, message: str, session_token: Optional[str] = None) -> str:
     """
     Report progress on a Placet request you are running (for example "part 1
     of 4 done, tests green"), without concluding it. The sender and the user
@@ -231,7 +234,7 @@ def placet_progress(request_id: int, message: str) -> str:
     the request runs. One short line per meaningful step, not a running log.
     """
     try:
-        res = client.progress(request_id=request_id, message=message)
+        res = client.progress(request_id=request_id, message=message, session_token=session_token)
         return json.dumps({"status": res.get("status"), "progress_text": res.get("progress_text")},
                           indent=2, ensure_ascii=False)
     except Exception as e:

@@ -1,6 +1,7 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { edgeActivities } from "./graphActivity";
+import { edgeActivities, edgeSchedules } from "./graphActivity";
+import { formatWhen } from "./i18n/formatters";
 
 const SIZE = 320;
 const CENTER = SIZE / 2;
@@ -81,6 +82,7 @@ export default function RelationGraph({ nodes = [], relations = [], sessions = [
 
   const busy = new Set(sessions.filter((x) => x.state === "busy" && !x.ended_at).map((x) => x.id));
   const activity = edgeActivities(requests);
+  const schedules = edgeSchedules(requests);
   const still = reducedMotion();
 
   const handleNodeClick = (n) => {
@@ -123,13 +125,21 @@ export default function RelationGraph({ nodes = [], relations = [], sessions = [
             </text>
             {ball && (
               <circle data-testid={`graph-ball-${rel.id}`} r={4.5} className={`rg-ball rg-ball-${now}`}
-                {...(now === "queued" ? { cx: near.x, cy: near.y }
+                {...(now === "queued" || now === "scheduled" ? { cx: near.x, cy: near.y }
                   : now === "waiting" || still ? { cx: label.x, cy: label.y } : {})}>
-                {now !== "waiting" && now !== "queued" && !still && (
+                {now !== "waiting" && now !== "queued" && now !== "scheduled" && !still && (
                   <animateMotion dur="1.6s" repeatCount="indefinite" path={d} calcMode="linear"
                     keyPoints={now === "returning" ? "1;0" : "0;1"} keyTimes="0;1" />
                 )}
               </circle>
+            )}
+            {now === "scheduled" && (
+              // A small clock beside the resting ball: held for its time, not stuck.
+              <g data-testid={`graph-clock-${rel.id}`} className="rg-clock" transform={`translate(${near.x + 7} ${near.y - 7})`}>
+                <title>{t("projects.graphScheduledAt", { time: formatWhen(schedules[rel.id]) })}</title>
+                <circle r={5} />
+                <path d="M0 -3 V0 L2.5 1.5" />
+              </g>
             )}
           </g>
           );
@@ -173,6 +183,9 @@ export default function RelationGraph({ nodes = [], relations = [], sessions = [
         )}
         {Object.values(activity).includes("queued") && (
           <span data-testid="graph-legend-queued"><i className="rg-dot rg-ball-queued" /> {t("projects.graphQueued")}</span>
+        )}
+        {Object.values(activity).includes("scheduled") && (
+          <span data-testid="graph-legend-scheduled"><i className="rg-dot rg-ball-scheduled" /> {t("projects.graphScheduled")}</span>
         )}
         {Object.values(activity).includes("waiting") && (
           <span data-testid="graph-legend-waiting"><i className="rg-dot rg-ball-waiting" /> {t("projects.graphWaiting")}</span>
