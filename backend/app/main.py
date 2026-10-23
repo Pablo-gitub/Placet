@@ -1215,8 +1215,10 @@ def create_app(
                                "This message has already started to be delivered, or is not a prompt to an agent.")
         if undelivered_cause(req, datetime.now(timezone.utc))[0] == "awaiting_refresh":
             db.schedule_request(request_id, None, actor=who.actor)   # the old recipient's reset is not the new one's
-            cfg = usage_guard()
-            if cfg.get("deliver_at_reset") and db.is_provider_over_limit(
+        cfg = usage_guard()
+        if req.status == RequestStatus.APPROVED and cfg.get("deliver_at_reset"):
+            # Whatever held it before, the new recipient's limit applies (review #345).
+            if db.is_provider_over_limit(
                     target.provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"]):
                 reset = db.provider_reset_time(target.provider, cfg["five_hour"], cfg["seven_day"],
                                                check_near_limit=cfg["enabled"])

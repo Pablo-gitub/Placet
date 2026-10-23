@@ -363,3 +363,17 @@ async def test_forwarding_drops_the_old_recipients_now_mode_and_reply_policy(env
     assert (await forward(app, rid, "cx-spare")).status_code == 200
     req = db.get_request(rid)
     assert req.delivery_mode == "queue" and req.allow_auto_return is False
+
+
+@pytest.mark.asyncio
+async def test_forwarding_a_blocked_prompt_to_a_provider_over_its_limit_also_waits(env):
+    """Review #345 P2: the guard applies whatever held the prompt before."""
+    from tests.test_scheduled_messages import set_provider_usage
+    app, db = env
+    await world(app)
+    await guard_on(app)
+    rid = await send(app)
+    await approve(app, rid)
+    set_provider_usage(db, "codex", five=95)
+    assert (await forward(app, rid, "cx-spare")).status_code == 200
+    assert db.get_request(rid).scheduled_at is not None
