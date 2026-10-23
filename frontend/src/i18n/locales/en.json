@@ -637,7 +637,11 @@
     "publicRoleHint": "Readable by the coordinator nodes of this project. It is not the node's private instruction.",
     "savePublicRole": "Save role",
     "coordinatorView": "Coordinator view",
-    "coordinatorHint": "Lets this node see the project's nodes, relations and request states, never message text. It requires a verified session and authorizes no send."
+    "coordinatorHint": "Lets this node see the project's nodes, relations and request states, never message text. It requires a verified session and authorizes no send.",
+    "coordinatorUnsupported": "The {{provider}} provider has no verified channel yet: the view will be refused.",
+    "coordinatorNoSession": "No session serves this node: you will have to confirm the first one that arrives.",
+    "coordinatorPending": "Session to confirm: {{title}} ({{provider}}), started {{when}}. The view stays closed until you confirm it.",
+    "confirmSession": "Confirm session"
   },
   "settings": {
     "title": "Settings",

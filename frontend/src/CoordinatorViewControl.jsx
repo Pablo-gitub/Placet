@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { apiErrorDescriptor } from "./i18n/errors";
+import { formatWhen } from "./i18n/formatters";
 
 const ROLE_MAX = 500;
 
@@ -44,6 +45,9 @@ export default function CoordinatorViewControl({ projectId, node, onChanged }) {
     }
   };
 
+  const pendingSession = node.coordinator_view && node.coordinator_session?.state === "pending_confirmation"
+    ? node.coordinator_session.session : null;
+  const confirm = () => run(() => call("POST", `${base}/view-grant/confirm`, { session_id: pendingSession.id }));
   const toggle = () => run(() => call(node.coordinator_view ? "DELETE" : "PUT", `${base}/view-grant`));
   const saveRole = () => run(async () => {
     await call("PUT", `${base}/public-role`, { text: role.trim() || null });
@@ -76,6 +80,27 @@ export default function CoordinatorViewControl({ projectId, node, onChanged }) {
         <span>{t("projects.coordinatorView")}</span>
       </label>
       <small className="composer-note" data-testid={`coordinator-hint-${node.id}`}>{t("projects.coordinatorHint")}</small>
+      {node.coordinator_supported === false && (
+        <small className="composer-note error-text" data-testid={`coordinator-unsupported-${node.id}`}>
+          {t("projects.coordinatorUnsupported", { provider: node.provider })}
+        </small>
+      )}
+      {node.coordinator_view && node.coordinator_session?.state === "no_session" && (
+        <small className="composer-note" data-testid={`coordinator-nosession-${node.id}`}>{t("projects.coordinatorNoSession")}</small>
+      )}
+      {pendingSession && (
+        <div className="coordinator-pending" data-testid={`coordinator-pending-${node.id}`}>
+          <p>
+            {t("projects.coordinatorPending", {
+              title: pendingSession.title || pendingSession.id.slice(0, 8), provider: pendingSession.provider,
+              when: formatWhen(pendingSession.started_at),
+            })}
+          </p>
+          <button type="button" className="btn btn-primary" disabled={busy} onClick={confirm}>
+            {t("projects.confirmSession")}
+          </button>
+        </div>
+      )}
       {error && <p role="alert" className="error-message">{t(error.key, error.params)}</p>}
     </div>
   );

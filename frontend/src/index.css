@@ -2246,3 +2246,5 @@ body.chat-open { overflow: hidden; }
 .project-node-coordinator { margin-top: 0.75rem; padding-top: 0.6rem; border-top: 1px dashed var(--border-color); }
 .coordinator-switch { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.6rem; min-height: 2.75rem; cursor: pointer; font-weight: 600; }
 .coordinator-switch input { width: 1.2rem; height: 1.2rem; accent-color: var(--primary); }
+.coordinator-pending { margin-top: 0.5rem; padding: 0.6rem; border: 1px solid var(--warning); border-radius: 8px; }
+.coordinator-pending p { margin: 0 0 0.5rem; overflow-wrap: anywhere; }
