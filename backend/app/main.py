@@ -1142,7 +1142,8 @@ def create_app(
         if req.scheduled_at is not None and req.scheduled_at.astimezone(timezone.utc) > now:
             # Held back by the usage guard (a system actor scheduled it) or planned by the user.
             scheduled = [e for e in db.list_events(req.id) if e.event == "scheduled"]
-            by_system = bool(scheduled) and scheduled[-1].actor.startswith("system:")
+            by_system = bool(scheduled) and (scheduled[-1].actor.startswith("system:")
+                                             or (scheduled[-1].details or {}).get("reason") == "usage")
             return ("awaiting_refresh" if by_system else "scheduled"), req.scheduled_at
         target = db.get_session(req.recipient_session_id) if req.recipient_session_id else None
         waited = now - (req.updated_at or req.created_at).astimezone(timezone.utc)
@@ -1214,6 +1215,18 @@ def create_app(
                                "This message has already started to be delivered, or is not a prompt to an agent.")
         if undelivered_cause(req, datetime.now(timezone.utc))[0] == "awaiting_refresh":
             db.schedule_request(request_id, None, actor=who.actor)   # the old recipient's reset is not the new one's
+            cfg = usage_guard()
+            if cfg.get("deliver_at_reset") and db.is_provider_over_limit(
+                    target.provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"]):
+                reset = db.provider_reset_time(target.provider, cfg["five_hour"], cfg["seven_day"],
+                                               check_near_limit=cfg["enabled"])
+                if reset is not None:
+                    db.schedule_request(request_id, reset, actor="system:limits")
+        if req.status == RequestStatus.APPROVED:
+            # The reply policy and "now" belonged to the old recipient: the new one's apply.
+            db.set_allow_auto_return(request_id, reply_is_automatic(relation) if relation else False)
+            if req.delivery_mode == "now":
+                db.set_delivery_mode(request_id, "queue")
         notify_change(request_id)
         notify_session(target.id)
         return get_or_404(request_id)
@@ -1347,6 +1360,7 @@ def create_app(
             delivery_mode=decision.delivery_mode if decision.status == RequestStatus.APPROVED and req.recipient_id != "human" else None,
             recipient_session_id=decision.recipient_session_id,
             scheduled_at=effective_schedule,
+            schedule_reason="usage" if effective_schedule is not None and effective_schedule != req.scheduled_at else None,
         )
         if updated is None:
             # State changed between the check and the update (e.g. expired or cancelled).
@@ -2053,6 +2067,7 @@ def create_app(
         cfg = usage_guard()
         rec_provider = session.provider
         sched_at = body.scheduled_at
+        reset_hold = False
         hold_for_usage = False
         if (
             body.mode != "now"
@@ -2066,6 +2081,7 @@ def create_app(
                 )
                 if rec_reset is not None:
                     sched_at = rec_reset.isoformat()
+                    reset_hold = True
                 else:
                     hold_for_usage = True
             else:
@@ -2079,6 +2095,7 @@ def create_app(
                 scheduled_at=sched_at,
             ),
             actor=who.actor,
+            schedule_reason="usage" if reset_hold else None,
         )
         if body.mode == "now":
             db.set_delivery_mode(created.id, "now")

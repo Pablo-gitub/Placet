@@ -780,7 +780,8 @@ class Database:
                 for r in cursor.fetchall()
             ]
 
-    def create_request(self, req: RequestCreate, actor: Optional[str] = None) -> RequestModel:
+    def create_request(self, req: RequestCreate, actor: Optional[str] = None,
+                       schedule_reason: Optional[str] = None) -> RequestModel:
         now = datetime.now(timezone.utc)
         scheduled_at = _normalize_utc_iso(getattr(req, "scheduled_at", None))
         base_time = now
@@ -829,7 +830,7 @@ class Database:
             if scheduled_at:
                 self._log(
                     cursor, req_id, actor or f"agent:{req.sender_id}", "scheduled",
-                    {"scheduled_at": scheduled_at},
+                    {"scheduled_at": scheduled_at, **({"reason": schedule_reason} if schedule_reason else {})},
                     at=now.isoformat(),
                 )
         return self.get_request(req_id)
@@ -1009,6 +1010,7 @@ class Database:
         delivery_mode: Optional[str] = None,
         recipient_session_id: Optional[str] = None,
         scheduled_at: Optional[Union[str, datetime]] = None,
+        schedule_reason: Optional[str] = None,
     ) -> Optional[RequestModel]:
         """
         Applies the human decision (PENDING -> APPROVED/REJECTED). Returns
@@ -1096,7 +1098,9 @@ class Database:
                 details["custom_text"] = custom_text
             if scheduled_at_iso is not None:
                 details["scheduled_at"] = scheduled_at_iso
-                self._log(cursor, request_id, actor, "scheduled", {"scheduled_at": scheduled_at_iso}, at=now)
+                self._log(cursor, request_id, actor, "scheduled",
+                          {"scheduled_at": scheduled_at_iso, **({"reason": schedule_reason} if schedule_reason else {})},
+                          at=now)
             self._log(cursor, request_id, actor, "decided", details, at=now)
         return self.get_request(request_id)
 
@@ -1285,7 +1289,8 @@ class Database:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                f"UPDATE requests SET status = ?, updated_at = ?, delivered_at = NULL{_CANCEL_DELIVERY_SQL}"
+                f"UPDATE requests SET status = ?, updated_at = ?, delivered_at = NULL, scheduled_at = NULL"
+                f"{_CANCEL_DELIVERY_SQL}"
                 " WHERE id = ? AND recipient_id != 'human'"
                 " AND (status = ? OR (status = ? AND (delivery_state IS NULL OR delivery_state = 'waiting')))",
                 (RequestStatus.CANCELLED.value, now, request_id,
@@ -1541,6 +1546,10 @@ class Database:
             return True
 
     # --- "Subito": a message inside the running turn (RF-35) -------------------------
+
+    def set_allow_auto_return(self, request_id: int, allow: bool) -> None:
+        with self._get_connection() as conn:
+            conn.execute("UPDATE requests SET allow_auto_return = ? WHERE id = ?", (int(allow), request_id))
 
     def set_delivery_mode(self, request_id: int, mode: str) -> None:
         with self._get_connection() as conn:

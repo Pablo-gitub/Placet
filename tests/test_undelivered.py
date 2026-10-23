@@ -296,3 +296,70 @@ async def test_forwarding_a_prompt_the_user_scheduled_keeps_the_time(env):
     db.schedule_request(mine, datetime.now(timezone.utc) + timedelta(hours=1), actor="human:local")
     assert (await forward(app, mine, "cx-spare")).status_code == 200
     assert db.get_request(mine).scheduled_at is not None
+
+
+async def guard_on(app):
+    async with human_client(app) as human:
+        await human.put("/api/settings/usage-guard", json={"enabled": True, "five_hour": 90, "seven_day": 95})
+        await human.put("/api/settings/deliver-at-reset", json={"enabled": True})
+
+
+@pytest.mark.asyncio
+async def test_a_prompt_the_user_approved_while_the_recipient_was_over_limit_waits_for_the_refresh(env):
+    """Review #343 P1-a: the hold set by a human approval is a usage hold, not the user's schedule."""
+    from tests.test_scheduled_messages import set_provider_usage
+    app, db = env
+    await world(app)
+    await guard_on(app)
+    set_provider_usage(db, "antigravity", seven=97)
+    rid = await send(app)
+    await approve(app, rid)
+    assert db.get_request(rid).scheduled_at is not None
+    assert (await listing(app))[rid]["cause"] == "awaiting_refresh"
+    assert (await forward(app, rid, "cx-spare")).status_code == 200            # codex is not over limit
+    assert db.get_request(rid).scheduled_at is None
+
+
+@pytest.mark.asyncio
+async def test_forwarding_to_a_provider_over_its_limit_waits_for_that_providers_reset(env):
+    from tests.test_scheduled_messages import set_provider_usage
+    app, db = env
+    await world(app)
+    await guard_on(app)
+    set_provider_usage(db, "antigravity", seven=97)
+    rid = await send(app)
+    await approve(app, rid)
+    later = datetime.now(timezone.utc) + timedelta(hours=5)
+    set_provider_usage(db, "codex", five=95, resets_at=later.isoformat())
+    assert (await forward(app, rid, "cx-spare")).status_code == 200
+    sched = db.get_request(rid).scheduled_at
+    assert sched is not None and abs((sched - later).total_seconds()) < 5
+
+
+@pytest.mark.asyncio
+async def test_cancelling_a_prompt_scheduled_for_later_tells_the_sender_now(env):
+    """Review #343 P1-b: the sender's notice must not wait for the old schedule."""
+    app, db = env
+    await world(app)
+    rid = await send(app)
+    await approve(app, rid)
+    db.schedule_request(rid, datetime.now(timezone.utc) + timedelta(days=3), actor="system:relation#8")
+    assert (await cancel(app, rid)).status_code == 200
+    req = db.get_request(rid)
+    assert req.status.value == "CANCELLED" and req.scheduled_at is None
+    assert rid in [r.id for r in db.list_undelivered_results(
+        settled_before=datetime.now(timezone.utc) + timedelta(seconds=1),
+        settled_after=datetime.now(timezone.utc) - timedelta(hours=1))]
+
+
+@pytest.mark.asyncio
+async def test_forwarding_drops_the_old_recipients_now_mode_and_reply_policy(env):
+    app, db = env
+    await world(app)
+    rid = await send(app)
+    await approve(app, rid)
+    db.set_delivery_mode(rid, "now")
+    db.set_allow_auto_return(rid, True)
+    assert (await forward(app, rid, "cx-spare")).status_code == 200
+    req = db.get_request(rid)
+    assert req.delivery_mode == "queue" and req.allow_auto_return is False
