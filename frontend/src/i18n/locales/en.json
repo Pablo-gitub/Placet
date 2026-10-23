@@ -631,7 +631,13 @@
     "graphWaiting": "Waiting for you",
     "graphQueued": "Queued",
     "graphScheduled": "Scheduled",
-    "graphScheduledAt": "Leaves {{time}}"
+    "graphScheduledAt": "Leaves {{time}}",
+    "publicRoleTitle": "Node public role",
+    "publicRolePlaceholder": "E.g. Plans the work and assigns it to the developers",
+    "publicRoleHint": "Readable by the coordinator nodes of this project. It is not the node's private instruction.",
+    "savePublicRole": "Save role",
+    "coordinatorView": "Coordinator view",
+    "coordinatorHint": "Lets this node see the project's nodes, relations and request states, never message text. It requires a verified session and authorizes no send."
   },
   "settings": {
     "title": "Settings",

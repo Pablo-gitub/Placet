@@ -631,7 +631,13 @@
     "graphWaiting": "In attesa di te",
     "graphQueued": "In coda",
     "graphScheduled": "Programmato",
-    "graphScheduledAt": "Parte il {{time}}"
+    "graphScheduledAt": "Parte il {{time}}",
+    "publicRoleTitle": "Ruolo pubblico del nodo",
+    "publicRolePlaceholder": "Es. Pianifica il lavoro e lo assegna agli sviluppatori",
+    "publicRoleHint": "Visibile ai nodi coordinatori di questo progetto. Non è l’istruzione privata del nodo.",
+    "savePublicRole": "Salva ruolo",
+    "coordinatorView": "Vista coordinatore",
+    "coordinatorHint": "Permette a questo nodo di vedere nodi, relazioni e stato delle richieste del progetto, mai i testi dei messaggi. Richiede una sessione verificata e non autorizza nessun invio."
   },
   "settings": {
     "title": "Impostazioni",
