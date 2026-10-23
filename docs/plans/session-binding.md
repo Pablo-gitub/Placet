@@ -166,7 +166,11 @@ but holds no per-node grants.
    its hooks, every Claude Code start issues a credential (only its hash is
    spooled; a dropped spool event hands out none) and `placet_reply`,
    `placet_ack` and `placet_progress` accept `session_token`, sent as
-   `X-Placet-Session`. Off by default: deploying changes nothing.
+   `X-Placet-Session` (retried up to three times, 2 s apart, on
+   `session.credential_invalid`, since the hash reaches the backend through
+   the spool; never resent without it). Off by default: deploying changes
+   nothing. To try it, the variable must reach the hooks: Claude Desktop
+   passes its own environment, so it must be verified there first.
 3. PWA shows the level per session and request; enrollment and revocation.
 4. RFC-17 / RF-69 grants require `credential` on a gated provider (or
    `transport`), for reads, lists, history and export as well as writes.

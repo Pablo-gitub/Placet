@@ -1,5 +1,7 @@
 import os
 from typing import List, Optional, Dict, Any
+import time
+
 import httpx
 
 
@@ -21,6 +23,21 @@ class PlacetClient:
         # the backend checks it matches the token, catching misconfigured clients.
         self.agent_id = agent_id or os.environ.get("PLACET_AGENT_ID") or None
         self.api_token = api_token or os.environ.get("PLACET_API_TOKEN", "")
+
+    # RS-09: a credential issued at SessionStart reaches the backend through the hook spool a few
+    # seconds later; a call made right away is retried, never sent without the credential.
+    CREDENTIAL_RETRIES = 3
+    CREDENTIAL_RETRY_SECONDS = 2.0
+
+    def _post(self, client, url: str, session_token: Optional[str] = None, **kwargs):
+        resp = client.post(url, headers=self._headers(session_token), **kwargs)
+        attempts = 0
+        while (session_token and resp.status_code == 401 and attempts < self.CREDENTIAL_RETRIES
+               and "session.credential_invalid" in resp.text):
+            attempts += 1
+            time.sleep(self.CREDENTIAL_RETRY_SECONDS)
+            resp = client.post(url, headers=self._headers(session_token), **kwargs)
+        return resp
 
     def _headers(self, session_token: Optional[str] = None) -> Dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -129,21 +146,21 @@ class PlacetClient:
         if self.agent_id:
             payload["responder_id"] = self.agent_id
         with httpx.Client(timeout=10.0) as client:
-            resp = client.post(url, json=payload, headers=self._headers(session_token))
+            resp = self._post(client, url, session_token, json=payload)
             resp.raise_for_status()
             return resp.json()
 
     def progress(self, request_id: int, message: str, session_token: Optional[str] = None) -> Dict[str, Any]:
         url = f"{self.base_url}/api/requests/{request_id}/progress"
         with httpx.Client(timeout=10.0) as client:
-            resp = client.post(url, json={"content": message}, headers=self._headers(session_token))
+            resp = self._post(client, url, session_token, json={"content": message})
             resp.raise_for_status()
             return resp.json()
 
     def ack(self, request_id: int, session_token: Optional[str] = None) -> Dict[str, Any]:
         url = f"{self.base_url}/api/requests/{request_id}/ack"
         with httpx.Client(timeout=10.0) as client:
-            resp = client.post(url, headers=self._headers(session_token))
+            resp = self._post(client, url, session_token)
             resp.raise_for_status()
             return resp.json()
 

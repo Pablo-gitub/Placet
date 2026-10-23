@@ -49,3 +49,19 @@ def test_the_mcp_client_sends_the_token_as_a_header_only_when_given(monkeypatch)
     client.ack(1, session_token="  ")
     assert seen[0]["X-Placet-Session"] == "plst_" + "a" * 22
     assert "X-Placet-Session" not in seen[1] and "X-Placet-Session" not in seen[2]
+
+
+def test_a_credential_not_registered_yet_is_retried_never_dropped(monkeypatch):
+    """Review #345: the hash travels through the spool; a call right after SessionStart may come first."""
+    sent, answers = [], [401, 401, 200]
+
+    def fake_post(self, url, json=None, headers=None, **kw):
+        sent.append(headers or {})
+        code = answers.pop(0)
+        body = {"code": "session.credential_invalid"} if code == 401 else {"status": "EXECUTING"}
+        return httpx.Response(code, json=body, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx.Client, "post", fake_post)
+    monkeypatch.setattr(PlacetClient, "CREDENTIAL_RETRY_SECONDS", 0)
+    PlacetClient(base_url="http://x", api_token="t").ack(1, session_token="plst_" + "a" * 22)
+    assert len(sent) == 3 and all(h.get("X-Placet-Session") for h in sent)
