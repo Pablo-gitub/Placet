@@ -12,6 +12,10 @@ from typing import Any, Dict, List, Optional
 
 from backend.app.models import RequestModel, RequestStatus
 
+# Providers whose session credential channel passed the lab (docs/plans/session-binding.md): the only ones that
+# may read the view. Add a provider only after its lab.
+COORDINATOR_PROVIDERS = frozenset({"claude-code"})
+OUTSIDE = {"outside_project": True}
 STALE_AFTER = timedelta(minutes=30)
 MAX_CHAIN = 50
 DEFAULT_LIMIT, MAX_LIMIT = 50, 200
@@ -73,8 +77,13 @@ class Projection:
             if stale:
                 activity = {"state": "unknown", "reason": "stale"}
         if self.shared.get(node.id, 0) > 1:
-            # The node also works for another project: what it does now may be outside this one.
-            activity = {"state": "unavailable", "reason": "shared_node"}
+            # The node also works for another project: its session says things about work outside this one.
+            return {
+                "id": node.id, "name": labelled(node.name), "provider": node.provider,
+                "public_role": labelled(node.public_role),
+                "reachability": "unavailable", "activity": {"state": "unavailable", "reason": "shared_node"},
+                "suspended": None, "observed_at": None, "stale": None,
+            }
         return {
             "id": node.id, "name": labelled(node.name), "provider": node.provider,
             "public_role": labelled(node.public_role),
@@ -111,12 +120,22 @@ class Projection:
             return {"id": None, "name": None, "in_project": False}
         return {"id": node.id, "name": labelled(node.name), "in_project": True}
 
-    def chain_root(self, req: RequestModel) -> int:
+    def parent_ref(self, req: RequestModel):
+        """The parent's id while it belongs to this project; a marker, never an id, once it does not."""
+        if req.parent_request_id is None:
+            return None
+        parent = self.db.get_request(req.parent_request_id)
+        return req.parent_request_id if parent is not None and parent.project_id == self.project_id else dict(OUTSIDE)
+
+    def chain_root(self, req: RequestModel):
+        """The root of the chain as far as it stays inside this project."""
         current, seen = req, 0
         while current.parent_request_id is not None and seen < MAX_CHAIN:
             parent = self.db.get_request(current.parent_request_id)
             if parent is None:
                 break
+            if parent.project_id != self.project_id:
+                return dict(OUTSIDE)
             current, seen = parent, seen + 1
         return current.id
 
@@ -134,7 +153,10 @@ class Projection:
         elif req.status == RequestStatus.APPROVED:
             if req.scheduled_at is not None and req.scheduled_at.astimezone(timezone.utc) > self.now:
                 codes.append("scheduled")
-            if recipient is not None and not recipient.reachable:
+            shared = recipient is not None and recipient.node_id is not None and self.shared.get(recipient.node_id, 0) > 1
+            if shared:
+                codes.append("shared_node")          # the recipient also works for another project: no session state
+            elif recipient is not None and not recipient.reachable:
                 codes.append("recipient_unreachable")
             elif recipient is not None and recipient.state == "busy":
                 codes.append("recipient_busy")
@@ -155,7 +177,7 @@ class Projection:
             "from_node": self.node_ref(req.sender_session_id),
             "to_node": self.node_ref(req.recipient_session_id, human=req.recipient_id == "human"),
             "relation": ({"id": req.relation_id, "type": labelled(req.relation_type_name)} if req.relation_id else None),
-            "parent_request_id": req.parent_request_id, "chain_root_id": self.chain_root(req), "chain_hops": req.chain_hops,
+            "parent_request_id": self.parent_ref(req), "chain_root_id": self.chain_root(req), "chain_hops": req.chain_hops,
             "status": req.status.value,
             "states": {
                 "approval": {"state": self.approval_state(req), "mode": req.approval, "at": _iso(req.decided_at)},

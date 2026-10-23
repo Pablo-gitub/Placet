@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Set,
 
 import uuid
 from pathlib import Path
+from backend.app.coordinator_view import COORDINATOR_PROVIDERS
 from backend.app.models import (
     BRIDGE_PROVIDERS,
     STEER_PROVIDERS,
@@ -629,6 +630,11 @@ class Database:
                 revoked_at TEXT
             );
             """)
+            grant_cols = [r["name"] for r in cursor.execute("PRAGMA table_info(project_view_grants);").fetchall()]
+            if "enrolled_session_id" not in grant_cols:
+                # The session the user confirmed for this grant, and since when another one waits for the user.
+                cursor.execute("ALTER TABLE project_view_grants ADD COLUMN enrolled_session_id TEXT;")
+                cursor.execute("ALTER TABLE project_view_grants ADD COLUMN pending_since TEXT;")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_view_grants ON project_view_grants (project_id, node_id, revoked_at);")
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS project_view_events (
@@ -638,9 +644,12 @@ class Database:
                 at TEXT NOT NULL,
                 actor TEXT NOT NULL,
                 event TEXT NOT NULL,
-                details TEXT
+                details TEXT,
+                session_id TEXT
             );
             """)
+            if "session_id" not in [r["name"] for r in cursor.execute("PRAGMA table_info(project_view_events);").fetchall()]:
+                cursor.execute("ALTER TABLE project_view_events ADD COLUMN session_id TEXT;")
             if "suspended_at" not in session_cols:
                 # Codex sessions "ended" before were only unloaded by the app.
                 cursor.execute(
@@ -3889,6 +3898,17 @@ class Database:
                 (project_id,),
             ).fetchall()
             nodes = [self._row_to_node(nr) for nr in node_rows]
+            for node in nodes:
+                node.coordinator_supported = node.provider in COORDINATOR_PROVIDERS
+                if node.coordinator_view:
+                    state = self._grant_state(conn, project_id, node.id)
+                    shown: Dict[str, Any] = {"state": state["state"]}
+                    if state["state"] == "pending_confirmation":
+                        sess = conn.execute("SELECT id, title, provider, started_at FROM sessions WHERE id = ?",
+                                            (state["session_id"],)).fetchone()
+                        shown["session"] = {"id": sess["id"], "title": sess["title"], "provider": sess["provider"],
+                                            "started_at": sess["started_at"]}
+                    node.coordinator_session = shown
 
             rel_rows = conn.execute(
                 f"""
@@ -4015,8 +4035,11 @@ class Database:
             row = cur.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
             return self._row_to_project(row)
 
-    def delete_project(self, project_id: int) -> bool:
+    def delete_project(self, project_id: int, actor: str = "system") -> bool:
         with self._get_connection() as conn:
+            for row in conn.execute("SELECT DISTINCT node_id FROM project_view_grants WHERE project_id = ?"
+                                    " AND revoked_at IS NULL", (project_id,)).fetchall():
+                self._log_view(conn, project_id, row["node_id"], actor, "revoked", {"reason": "project_deleted"})
             conn.execute("DELETE FROM project_nodes WHERE project_id = ?", (project_id,))
             conn.execute("DELETE FROM project_relations WHERE project_id = ?", (project_id,))
             conn.execute("DELETE FROM project_view_grants WHERE project_id = ?", (project_id,))
@@ -4188,6 +4211,67 @@ class Database:
                      (project_id, node_id, datetime.now(timezone.utc).isoformat(), actor, event,
                       json.dumps(details) if details else None))
 
+    @staticmethod
+    def _node_session_id(conn, node_id: int) -> Optional[str]:
+        """The node's current session: the attached one seen most recently (as in _NODES_SQL)."""
+        row = conn.execute("SELECT s.id FROM sessions s WHERE s.node_id = ? ORDER BY s.ended_at IS NOT NULL,"
+                           " s.last_seen_at DESC LIMIT 1", (node_id,)).fetchone()
+        return row["id"] if row else None
+
+    def _grant_state(self, conn, project_id: int, node_id: int) -> Optional[Dict[str, Any]]:
+        grant = conn.execute("SELECT enrolled_session_id, pending_since FROM project_view_grants WHERE project_id = ?"
+                             " AND node_id = ? AND revoked_at IS NULL", (project_id, node_id)).fetchone()
+        if grant is None:
+            return None
+        current = self._node_session_id(conn, node_id)
+        if current is None:
+            state = "no_session"
+        elif current == grant["enrolled_session_id"]:
+            state = "confirmed"
+        else:
+            state = "pending_confirmation"
+        return {"state": state, "session_id": current, "enrolled_session_id": grant["enrolled_session_id"],
+                "pending_since": grant["pending_since"]}
+
+    def view_grant_state(self, project_id: int, node_id: int) -> Optional[Dict[str, Any]]:
+        """None without an active grant; else confirmed / pending_confirmation / no_session (nothing written)."""
+        with self._get_connection() as conn:
+            return self._grant_state(conn, project_id, node_id)
+
+    def session_may_view(self, project_id: int, node_id: int, session_id: str) -> bool:
+        """The grant is active and the user confirmed exactly this session, which is the node's current one."""
+        state = self.view_grant_state(project_id, node_id)
+        return bool(state and state["state"] == "confirmed" and state["session_id"] == session_id)
+
+    def refresh_view_grants(self, project_id: int) -> None:
+        """Notes (once, in the audit) that a granted node is now served by a session the user has not confirmed."""
+        with self._get_connection() as conn:
+            for row in conn.execute("SELECT node_id FROM project_view_grants WHERE project_id = ?"
+                                    " AND revoked_at IS NULL", (project_id,)).fetchall():
+                state = self._grant_state(conn, project_id, row["node_id"])
+                if state["state"] == "pending_confirmation" and state["pending_since"] is None:
+                    conn.execute("UPDATE project_view_grants SET pending_since = ? WHERE project_id = ? AND node_id = ?"
+                                 " AND revoked_at IS NULL", (datetime.now(timezone.utc).isoformat(), project_id, row["node_id"]))
+                    self._log_view(conn, project_id, row["node_id"], "system", "pending_confirmation",
+                                   {"session": state["session_id"]})
+                elif state["state"] == "confirmed" and state["pending_since"] is not None:
+                    conn.execute("UPDATE project_view_grants SET pending_since = NULL WHERE project_id = ? AND node_id = ?"
+                                 " AND revoked_at IS NULL", (project_id, row["node_id"]))
+
+    def confirm_view_session(self, project_id: int, node_id: int, session_id: str, actor: str) -> str:
+        """The user confirms the session now serving the node: "ok", "none" (no grant) or "changed" (another session now)."""
+        with self._get_connection() as conn:
+            state = self._grant_state(conn, project_id, node_id)
+            if state is None:
+                return "none"
+            if state["session_id"] != session_id:
+                return "changed"
+            conn.execute("UPDATE project_view_grants SET enrolled_session_id = ?, pending_since = NULL WHERE project_id = ?"
+                         " AND node_id = ? AND revoked_at IS NULL", (session_id, project_id, node_id))
+            if state["state"] != "confirmed":
+                self._log_view(conn, project_id, node_id, actor, "session_confirmed", {"session": session_id})
+            return "ok"
+
     def has_view_grant(self, project_id: int, node_id: int) -> bool:
         """Whether this node holds an active coordinator-view grant on this project (checked on every read)."""
         with self._get_connection() as conn:
@@ -4206,9 +4290,12 @@ class Database:
             row = conn.execute("SELECT id, granted_at, granted_by FROM project_view_grants WHERE project_id = ?"
                                " AND node_id = ? AND revoked_at IS NULL", (project_id, node_id)).fetchone()
             if row is None:
-                cur = conn.execute("INSERT INTO project_view_grants (project_id, node_id, granted_at, granted_by)"
-                                   " VALUES (?, ?, ?, ?)", (project_id, node_id, now, actor))
-                self._log_view(conn, project_id, node_id, actor, "granted")
+                # Granting while a session serves the node confirms that session at once.
+                current = self._node_session_id(conn, node_id)
+                cur = conn.execute("INSERT INTO project_view_grants (project_id, node_id, granted_at, granted_by,"
+                                   " enrolled_session_id) VALUES (?, ?, ?, ?, ?)",
+                                   (project_id, node_id, now, actor, current))
+                self._log_view(conn, project_id, node_id, actor, "granted", {"session": current} if current else None)
                 return {"id": cur.lastrowid, "granted_at": now, "granted_by": actor}
             return {"id": row["id"], "granted_at": row["granted_at"], "granted_by": row["granted_by"]}
 
@@ -4244,6 +4331,27 @@ class Database:
                        details: Optional[Dict[str, Any]] = None) -> None:
         with self._get_connection() as conn:
             self._log_view(conn, project_id, node_id, actor, event, details)
+
+    VIEW_EVENT_WINDOW_SECONDS = 60
+
+    def log_view_access(self, project_id: int, node_id: Optional[int], actor: str, event: str, session_id: Optional[str],
+                        details: Optional[Dict[str, Any]] = None) -> None:
+        """A read or a refusal: one row per session and event kind per minute, the rest counted in that row."""
+        now = datetime.now(timezone.utc)
+        horizon = (now - timedelta(seconds=self.VIEW_EVENT_WINDOW_SECONDS)).isoformat()
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT id, details FROM project_view_events WHERE project_id = ? AND event = ?"
+                               " AND session_id IS ? AND at >= ? ORDER BY id DESC LIMIT 1",
+                               (project_id, event, session_id, horizon)).fetchone()
+            if row is not None:
+                data = json.loads(row["details"]) if row["details"] else {}
+                data["count"] = int(data.get("count", 1)) + 1
+                conn.execute("UPDATE project_view_events SET details = ? WHERE id = ?", (json.dumps(data), row["id"]))
+                return
+            conn.execute("INSERT INTO project_view_events (project_id, node_id, at, actor, event, details, session_id)"
+                         " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                         (project_id, node_id, now.isoformat(), actor, event,
+                          json.dumps({**(details or {}), "count": 1}), session_id))
 
     def node_project_counts(self) -> Dict[int, int]:
         """How many projects each node belongs to (a node in several shows only a generic activity)."""

@@ -17,6 +17,7 @@ CONFIG = PlacetConfig(agents={
     "claude": AgentSpec(tmux_session="agent-claude", token="tok-claude", allowed_targets=["human", "codex"]),
     "codex": AgentSpec(tmux_session="agent-codex", token="tok-codex", allowed_targets=["human", "claude"]),
 })
+CRED_NEW = "plst_" + "n" * 22
 PM_CRED, OTHER_CRED, DEV_CRED = "plst_" + "p" * 22, "plst_" + "o" * 22, "plst_" + "d" * 22
 MARKERS = ["PROMPT-MARKER", "REPLY-MARKER", "INSTR-MARKER", "PROJINSTR-MARKER", "CONTEXT-MARKER", "OtherProjectQ",
            "tok-claude", "tok-codex", "tok-bridge", PM_CRED, DEV_CRED, "SECRET-TRANSCRIPT"]
@@ -140,15 +141,13 @@ async def test_the_grant_is_rechecked_on_every_call(env):
 
 
 @pytest.mark.asyncio
-async def test_a_node_that_moved_to_another_session_takes_the_view_with_it(env):
+async def test_a_node_that_moved_to_another_session_keeps_nothing_until_the_user_confirms(env):
     app, db = env
     p, q, pm, dev, rel = await world(app, db)
     await start(app, "claude", "pm-new", "plst_" + "n" * 22)
-    with db._get_connection() as conn:                                  # the node's current session is now pm-new
-        conn.execute("UPDATE sessions SET node_id = NULL WHERE id = 'pm-s'")
-        conn.execute("UPDATE sessions SET node_id = ? WHERE id = 'pm-new'", (pm.id,))
-    assert (await view(app, p, PM_CRED)).status_code == 403
-    assert (await view(app, p, "plst_" + "n" * 22)).status_code == 200
+    db.continue_session("pm-s", "pm-new")                                # RF-29d: the node moves on
+    assert (await view(app, p, PM_CRED)).status_code == 401              # a continued session's credential is dead
+    assert (await view(app, p, "plst_" + "n" * 22)).status_code == 403   # the new one is not confirmed yet
 
 
 # --- what is read ----------------------------------------------------------------------------------
@@ -164,8 +163,8 @@ async def test_the_projection_has_the_project_nodes_relations_and_requests(env):
     assert body["generated_at"]
     nodes = {n["id"]: n for n in body["nodes"]}
     assert nodes[pm.id]["name"]["text"] == "pm" and nodes[pm.id]["public_role"] == {"origin": "human", "text": "Plans and assigns the work"}
-    assert nodes[dev.id]["provider"] == "codex" and nodes[dev.id]["reachability"] in ("reachable", "unreachable", "unknown")
-    assert nodes[pm.id]["observed_at"] and "suspended" in nodes[pm.id]
+    assert nodes[dev.id]["provider"] == "codex" and nodes[dev.id]["reachability"] == "unavailable"   # dev is shared with Q
+    assert nodes[pm.id]["reachability"] in ("reachable", "unreachable") and nodes[pm.id]["observed_at"] and "suspended" in nodes[pm.id]
     assert [(r["from_node"]["id"], r["to_node"]["id"]) for r in body["relations"]] == [(pm.id, dev.id)]
     relation = body["relations"][0]
     assert relation["type"]["name"]["text"] == "develop" and relation["type"]["description"]["text"] == "Implement what is asked"
@@ -232,15 +231,20 @@ async def test_a_relation_only_in_another_project_is_not_listed(env):
 async def test_old_observations_are_marked_stale_and_unknown_is_explicit(env):
     app, db = env
     p, q, pm, dev, rel = await world(app, db)
+    await start(app, "codex", "solo-s", None, provider="codex")
+    solo = db.create_node("solo", "solo-s")
+    db.add_node_to_project(p.id, solo.id)                                    # only in P: its session state may be shown
     old = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
     with db._get_connection() as conn:
-        conn.execute("UPDATE sessions SET last_seen_at = ? WHERE id = 'dev-s'", (old,))
-    lone = db.create_node("lone", "other-s")
+        conn.execute("UPDATE sessions SET last_seen_at = ? WHERE id = 'solo-s'", (old,))
+    await start(app, "claude", "gone-s", None)
+    lone = db.create_node("lone", "gone-s")
     db.add_node_to_project(p.id, lone.id)
     with db._get_connection() as conn:
-        conn.execute("UPDATE sessions SET node_id = NULL WHERE id = 'other-s'")                  # a node with no session
+        conn.execute("UPDATE sessions SET node_id = NULL WHERE id = 'gone-s'")                    # a node with no session
     nodes = {n["id"]: n for n in (await view(app, p, PM_CRED)).json()["nodes"]}
-    assert nodes[dev.id]["stale"] is True and nodes[dev.id]["observed_at"] == old
+    assert nodes[solo.id]["stale"] is True and nodes[solo.id]["observed_at"] == old
+    assert nodes[solo.id]["activity"] == {"state": "unknown", "reason": "stale"}
     assert nodes[pm.id]["stale"] is False
     assert nodes[lone.id]["reachability"] == "unknown" and nodes[lone.id]["observed_at"] is None
     assert nodes[lone.id]["activity"]["state"] == "unknown"
