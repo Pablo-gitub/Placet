@@ -66,5 +66,8 @@
   "notify.wake_unconfirmed_title": "{label}: la sessione non è partita",
   "notify.wake_unconfirmed_body": "Apertura richiesta, ma la sessione non ha iniziato ad ascoltare. Il messaggio è ancora in Placet.",
   "notify.wake_failed_title": "{label}: apertura non riuscita",
-  "notify.wake_failed_body": "Placet non è riuscito a chiedere a Claude Desktop di aprire la sessione. Il messaggio è ancora in Placet."
+  "notify.wake_failed_body": "Placet non è riuscito a chiedere a Claude Desktop di aprire la sessione. Il messaggio è ancora in Placet.",
+  "notify.turn_failed_title": "{label} si è fermata",
+  "notify.turn_failed_rate_limit": "Limite di utilizzo raggiunto: la sessione non riprende da sola. Scrivile dopo il reset.",
+  "notify.turn_failed_other": "Il turno è terminato per un errore dell'API ({error}): la sessione non riprende da sola."
 }

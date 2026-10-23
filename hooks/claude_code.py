@@ -13,6 +13,8 @@ the screen.
 - Stop: the turn ended (idle). If the turn was started by a Placet request
   and the model did not call placet_reply, its last message becomes an
   implicit reply.
+- StopFailure: the turn ended on an API error (rate limit, overload...):
+  reported with its error code, never as a reply.
 - SessionEnd: the session is gone.
 
 Usage: python3 claude_code.py --agent claude (or PLACET_HOOK_AGENT=claude).
@@ -185,6 +187,14 @@ def continued_from_transcript(path):
     return None
 
 
+# Claude Code's StopFailure matcher values (2.1.284); anything else is reported as "unknown".
+TURN_ERRORS = frozenset({
+    "rate_limit", "overloaded", "authentication_failed", "oauth_org_not_allowed", "account_on_hold",
+    "verification_required", "billing_error", "invalid_request", "model_not_found", "server_error",
+    "max_output_tokens", "cloud_credential_error", "unknown",
+})
+
+
 def build_event(event: dict, provider: str = "claude-code"):
     """The /api/sessions/{id}/events payload for a hook event, or None."""
     name = event.get("hook_event_name")
@@ -231,6 +241,10 @@ def build_event(event: dict, provider: str = "claude-code"):
         if message:
             payload["last_message"] = message[:MAX_MESSAGE_CHARS]
         return payload
+    if name == "StopFailure":
+        # The turn ended on an API error (rate limit, overload, auth...): not a reply.
+        error = event.get("error")
+        return {"event": "failed", "error": error if error in TURN_ERRORS else "unknown", **common}
     if name == "SessionEnd":
         return {"event": "end", **common}
     return None

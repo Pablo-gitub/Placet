@@ -798,6 +798,10 @@
     "line": "Claude Desktop: {{engines}}/{{cap}} sessions loaded",
     "hint": "Wake-ups from Placet may not start: archive an inactive conversation in the app"
   },
+  "turnError": {
+    "rateLimit": "The turn stopped at the usage limit. The session will not resume by itself: messages stay in Placet until you write to it in the app after the reset.",
+    "other": "The turn stopped on an API error ({{error}}). The session will not resume by itself: write to it in the app to restart it."
+  },
   "undelivered": {
     "title": "Undelivered messages",
     "hint": "Messages for agents that have not arrived yet: read them, cancel them or send them to another session.",
