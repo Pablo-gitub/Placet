@@ -127,7 +127,7 @@ refused.
 
 | Provider | Channel | Status |
 | --- | --- | --- |
-| Claude Code CLI and desktop | `SessionStart`/`UserPromptSubmit` `additionalContext` (recorded twice in the transcript: `hook_additional_context` and `hook_success` attachments) | verify SessionStart delivery, visibility to the model, renewal after `/compact`, desktop behaviour |
+| Claude Code CLI and desktop | `SessionStart`/`UserPromptSubmit` `additionalContext` (recorded in the transcript: `hook_additional_context` and `hook_success` attachments, `api-request-blob`) | CLI **verified** October 23, 2026 ([lab](../experiments/2026-10-23-session-credential-lab.md)): delivery, visibility, renewal on `resume` and `compact`, newest value preferred; desktop behaviour still to verify |
 | Codex 0.145 | `additionalContext` exists in the binary, events `SessionStart`, `PostCompact` | verify where the rollout records it and whether the PWA would show it |
 | Antigravity | hook stdout is `{}`; no known context field | `declared` only |
 
