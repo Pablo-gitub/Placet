@@ -31,6 +31,7 @@ import { providerClass, providerOf, sessionName, sessionPlace, sessionStatus } f
 import { useTranscript } from "./useTranscript";
 import McpWarning from "./McpWarning";
 import WakeNotice from "./WakeNotice";
+import TurnErrorNotice from "./TurnErrorNotice";
 import { holdsQueueUnseen, isUncertain } from "./aspects";
 import NodeControl from "./NodeControl";
 import SessionControls from "./SessionControls";
@@ -435,6 +436,7 @@ export default function SessionView({
       </div>
       <McpWarning session={session} />
       <WakeNotice session={session} />
+      <TurnErrorNotice session={session} />
       {activeProjectId && (
         <div className="project-context-bar">
           <span

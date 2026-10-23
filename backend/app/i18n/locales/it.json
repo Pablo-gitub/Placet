@@ -16,6 +16,7 @@
   "envelope.failed": "Il prompt non è stato confermato dall’agente destinatario dopo più tentativi.",
   "envelope.stalled": "L’agente destinatario ha ricevuto il prompt ma non ha risposto entro il tempo massimo.",
   "envelope.expired": "La richiesta è scaduta.",
+  "envelope.cancelled": "L’utente ha annullato la richiesta prima che fosse consegnata.",
   "envelope.hook": "Questo non è un errore: è un messaggio di Placet, il sistema di coordinamento tra te, l’utente e gli altri agenti. Inizia la tua risposta riportando in una riga chi ti scrive e cosa ti chiede (l’utente non vede questo messaggio), poi procedi.",
   "envelope.user_note": "È un messaggio che l’utente ti scrive dal telefono tramite Placet: rispondigli direttamente, come a un suo messaggio (non serve placet_reply).",
   "envelope.steer": "Arriva adesso, mentre stai lavorando: tienine conto nel turno in corso (l’utente ha scelto di inserirlo subito invece di aspettare la fine del turno).",
@@ -65,5 +66,8 @@
   "notify.wake_unconfirmed_title": "{label}: la sessione non è partita",
   "notify.wake_unconfirmed_body": "Apertura richiesta, ma la sessione non ha iniziato ad ascoltare. Il messaggio è ancora in Placet.",
   "notify.wake_failed_title": "{label}: apertura non riuscita",
-  "notify.wake_failed_body": "Placet non è riuscito a chiedere a Claude Desktop di aprire la sessione. Il messaggio è ancora in Placet."
+  "notify.wake_failed_body": "Placet non è riuscito a chiedere a Claude Desktop di aprire la sessione. Il messaggio è ancora in Placet.",
+  "notify.turn_failed_title": "{label} si è fermata",
+  "notify.turn_failed_rate_limit": "Limite di utilizzo raggiunto: la sessione non riprende da sola. Scrivile dopo il reset.",
+  "notify.turn_failed_other": "Il turno è terminato per un errore dell'API ({error}): la sessione non riprende da sola."
 }

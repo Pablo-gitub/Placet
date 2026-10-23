@@ -13,6 +13,8 @@ the screen.
 - Stop: the turn ended (idle). If the turn was started by a Placet request
   and the model did not call placet_reply, its last message becomes an
   implicit reply.
+- StopFailure: the turn ended on an API error (rate limit, overload...):
+  reported with its error code, never as a reply.
 - SessionEnd: the session is gone.
 
 Usage: python3 claude_code.py --agent claude (or PLACET_HOOK_AGENT=claude).
@@ -29,9 +31,11 @@ model's context), except one notice at SessionStart when the Placet MCP server
 is missing from the configuration (RF-27). It always exits 0: a Placet problem
 must not block Claude.
 """
+import hashlib
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 from pathlib import Path
@@ -185,6 +189,14 @@ def continued_from_transcript(path):
     return None
 
 
+# Claude Code's StopFailure matcher values (2.1.284); anything else is reported as "unknown".
+TURN_ERRORS = frozenset({
+    "rate_limit", "overloaded", "authentication_failed", "oauth_org_not_allowed", "account_on_hold",
+    "verification_required", "billing_error", "invalid_request", "model_not_found", "server_error",
+    "max_output_tokens", "cloud_credential_error", "unknown",
+})
+
+
 def build_event(event: dict, provider: str = "claude-code"):
     """The /api/sessions/{id}/events payload for a hook event, or None."""
     name = event.get("hook_event_name")
@@ -231,6 +243,10 @@ def build_event(event: dict, provider: str = "claude-code"):
         if message:
             payload["last_message"] = message[:MAX_MESSAGE_CHARS]
         return payload
+    if name == "StopFailure":
+        # The turn ended on an API error (rate limit, overload, auth...): not a reply.
+        error = event.get("error")
+        return {"event": "failed", "error": error if error in TURN_ERRORS else "unknown", **common}
     if name == "SessionEnd":
         return {"event": "end", **common}
     return None
@@ -246,14 +262,43 @@ MCP_MISSING_CONTEXT = (
 )
 
 
-def startup_context(payload: dict):
+CREDENTIAL_CONTEXT = (
+    "Placet session credential for this conversation only: {credential}. The newest one replaces older "
+    "ones. Pass it as session_token to placet_reply, placet_ack and placet_progress; never write it "
+    "anywhere else, and never repeat it in a message."
+)
+
+
+def issue_credential(payload: dict):
     """
-    RF-27: hook output telling a Claude Code session its Placet MCP server is
-    missing. Only for a start event that read the configuration as "missing".
+    RS-09 (opt-in, PLACET_SESSION_CREDENTIALS=1): a new credential for every Claude Code start
+    (startup, resume, clear, compact). Only its SHA-256 goes into the event; the credential itself
+    goes only into the session's context. None when off or not a start.
     """
-    if payload.get("event") != "start" or payload.get("mcp") != "missing" or payload.get("provider") != "claude-code":
+    if os.environ.get("PLACET_SESSION_CREDENTIALS") != "1":
         return None
-    return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": MCP_MISSING_CONTEXT}}
+    if payload.get("event") != "start" or payload.get("provider") != "claude-code":
+        return None
+    credential = "plst_" + secrets.token_urlsafe(16)
+    payload["credential_sha256"] = hashlib.sha256(credential.encode()).hexdigest()
+    return credential
+
+
+def startup_context(payload: dict, credential=None):
+    """
+    SessionStart output added to the model's context: RF-27's notice when the Placet MCP server is
+    missing, and RS-09's session credential when one was issued. None when there is nothing to say.
+    """
+    if payload.get("event") != "start" or payload.get("provider") != "claude-code":
+        return None
+    parts = []
+    if payload.get("mcp") == "missing":
+        parts.append(MCP_MISSING_CONTEXT)
+    if credential:
+        parts.append(CREDENTIAL_CONTEXT.format(credential=credential))
+    if not parts:
+        return None
+    return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "\n\n".join(parts)}}
 
 
 def main() -> None:
@@ -268,11 +313,13 @@ def main() -> None:
     payload = build_event(event, provider=placet_common.option(sys.argv, "--provider") or "claude-code")
     if not session_id or payload is None or not placet_common.active(event.get("cwd")):
         return
+    credential = issue_credential(payload)
     try:
-        spool.write_event(agent, session_id, {k: v for k, v in payload.items() if v is not None})
+        if spool.write_event(agent, session_id, {k: v for k, v in payload.items() if v is not None}) is None:
+            credential = None                   # dropped (spool full): never hand out an unregistered credential
     except Exception:
-        pass
-    context = startup_context(payload)
+        credential = None
+    context = startup_context(payload, credential=credential)
     if context is not None:
         # SessionStart stdout is added to the model's context: said only when it matters.
         print(json.dumps(context))

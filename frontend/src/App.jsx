@@ -5,6 +5,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, CheckCircle, FolderKanban, Home as HomeIcon, MessagesSquare, PanelLeftClose, PanelLeftOpen, Radio, Settings as SettingsIcon } from "lucide-react";
 import Home from "./Home";
 import History from "./History";
+import MessageDetail from "./MessageDetail";
 import Settings from "./Settings";
 import Commands from "./Commands";
 import Statistics from "./Statistics";
@@ -359,6 +360,7 @@ export default function App() {
     }
   };
 
+  const openMessage = (id) => navigate(`#/messaggio/${id}`);
   const openSession = (id, projectId = null) => navigate(projectId ? `#/sessione/${id}?project=${projectId}` : `#/sessione/${id}`);
   const pendingCount = requests.filter((r) => r.status === "PENDING" || needsReturnApproval(r)).length;
 
@@ -396,18 +398,25 @@ export default function App() {
   );
   const historyView = route.view === "history" && (
     <History requests={requests} sessions={sessions} focusId={focusId} onOpenSession={openSession}
-      onBack={() => navigate("#/impostazioni")} />
+      onOpenMessage={openMessage} onBack={() => navigate("#/impostazioni")} />
   );
   const settingsView = route.view === "settings" && (
     <Settings
+      requests={requests}
+      sessions={sessions}
       onOpenHistory={() => navigate("#/storico")}
       onOpenCommands={() => navigate("#/comandi")}
       onOpenStats={() => navigate("#/statistiche")}
+      onOpenMessage={openMessage}
     />
+  );
+  const messageView = route.view === "message" && (
+    <MessageDetail key={route.requestId} requestId={route.requestId} requests={requests} sessions={sessions}
+      onOpenSession={openSession} onBack={() => window.history.back()} />
   );
   const commandsView = route.view === "commands" && <Commands onBack={() => navigate("#/impostazioni")} />;
   const statsView = route.view === "statistics" && <Statistics onBack={() => navigate("#/impostazioni")} />;
-  const inSettings = ["settings", "history", "commands", "statistics"].includes(route.view);
+  const inSettings = ["settings", "history", "commands", "statistics", "message"].includes(route.view);
   const projectsView = route.view === "projects" && (
     <ProjectsView onOpenProject={(id) => navigate(`#/progetti/${id}`)} />
   );
@@ -504,7 +513,7 @@ export default function App() {
             {homeView}
           </aside>
           <main className="pane" data-testid="pane">
-            {sessionView || historyView || settingsView || commandsView || statsView || projectsView || projectDetailView || (
+            {sessionView || historyView || settingsView || messageView || commandsView || statsView || projectsView || projectDetailView || (
               <div className="pane-empty" data-testid="pane-empty">
                 <MessagesSquare size={28} />
                 <p>{t("app.openSession")}</p>
@@ -518,6 +527,7 @@ export default function App() {
             {route.view === "home" && homeView}
             {historyView}
             {settingsView}
+            {messageView}
             {commandsView}
             {statsView}
             {sessionView}
