@@ -437,6 +437,10 @@ class NodeModel(BaseModel):
     session_id: Optional[str] = None
     # RFC-15: node instructions within a project (when viewed in project context)
     instructions: Optional[str] = None
+    # RFC-17 (project context only): what the human wrote about this node's role for others to read, and
+    # whether the node may see the project as a coordinator.
+    public_role: Optional[str] = None
+    coordinator_view: Optional[bool] = None
 
 
 class RelationTypeModel(BaseModel):

@@ -278,6 +278,10 @@ class ProjectNodeUpdate(BaseModel):
     instructions: Optional[str] = Field(None, max_length=4000)
 
 
+class PublicRoleBody(BaseModel):
+    text: Optional[str] = Field(None, max_length=500)
+
+
 class PushKeys(BaseModel):
     p256dh: str = Field(..., min_length=1, max_length=200)
     auth: str = Field(..., min_length=1, max_length=100)
@@ -2538,6 +2542,51 @@ def create_app(
             raise ProductError(404, "project.not_found", "Project not found")
         ok, removed = db.remove_node_from_project(project_id, node_id)
         return {"ok": True, "removed_relations": removed}
+
+    def view_target(project_id: int, node_id: int) -> None:
+        if not db.get_project(project_id):
+            raise ProductError(404, "project.not_found", "Project not found")
+        if not db.get_node(node_id):
+            raise ProductError(404, "node.not_found", "Node not found")
+        if not db.is_node_in_project(project_id, node_id):
+            raise ProductError(404, "project.node_not_in_project", "Node not in project.")
+
+    @app.put("/api/projects/{project_id}/nodes/{node_id}/view-grant")
+    async def grant_project_view(project_id: int, node_id: int, who: Principal = Depends(principal)):
+        """RFC-17: the user lets a node of the project see it as a coordinator (off by default, per project and node)."""
+        require_human(who)
+        view_target(project_id, node_id)
+        grant = db.grant_view(project_id, node_id, who.actor)
+        return {"node_id": node_id, "active": True, **grant}
+
+    @app.delete("/api/projects/{project_id}/nodes/{node_id}/view-grant")
+    async def revoke_project_view(project_id: int, node_id: int, who: Principal = Depends(principal)):
+        require_human(who)
+        view_target(project_id, node_id)
+        if not db.revoke_view(project_id, node_id, who.actor):
+            raise ProductError(404, "project.view_grant_not_found", "This node holds no coordinator-view grant.")
+        return {"node_id": node_id, "active": False}
+
+    @app.get("/api/projects/{project_id}/view-grants")
+    async def list_project_view_grants(project_id: int, who: Principal = Depends(principal)):
+        require_human(who)
+        if not db.get_project(project_id):
+            raise ProductError(404, "project.not_found", "Project not found")
+        return db.list_view_grants(project_id)
+
+    @app.get("/api/projects/{project_id}/view-events")
+    async def list_project_view_events(project_id: int, who: Principal = Depends(principal)):
+        require_human(who)
+        if not db.get_project(project_id):
+            raise ProductError(404, "project.not_found", "Project not found")
+        return db.list_view_events(project_id)
+
+    @app.put("/api/projects/{project_id}/nodes/{node_id}/public-role")
+    async def set_project_public_role(project_id: int, node_id: int, body: PublicRoleBody, who: Principal = Depends(principal)):
+        """RFC-17: the node's role as the coordinator may read it. Separate from the private node instructions."""
+        require_human(who)
+        view_target(project_id, node_id)
+        return {"text": db.set_public_role(project_id, node_id, body.text, who.actor)}
 
     @app.put("/api/projects/{project_id}/relations/{relation_id}")
     async def add_project_relation(project_id: int, relation_id: int, who: Principal = Depends(principal)):

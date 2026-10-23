@@ -615,6 +615,32 @@ class Database:
                 PRIMARY KEY (project_id, relation_id)
             );
             """)
+            # RFC-17: what the human wrote about a node's role for others to read (never the private instructions),
+            # and the grants that let a node see the project as a coordinator.
+            if "public_role" not in [r["name"] for r in cursor.execute("PRAGMA table_info(project_nodes);").fetchall()]:
+                cursor.execute("ALTER TABLE project_nodes ADD COLUMN public_role TEXT;")
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS project_view_grants (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL REFERENCES projects(id),
+                node_id INTEGER NOT NULL REFERENCES nodes(id),
+                granted_at TEXT NOT NULL,
+                granted_by TEXT NOT NULL,
+                revoked_at TEXT
+            );
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_view_grants ON project_view_grants (project_id, node_id, revoked_at);")
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS project_view_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                node_id INTEGER,
+                at TEXT NOT NULL,
+                actor TEXT NOT NULL,
+                event TEXT NOT NULL,
+                details TEXT
+            );
+            """)
             if "suspended_at" not in session_cols:
                 # Codex sessions "ended" before were only unloaded by the app.
                 cursor.execute(
@@ -2461,10 +2487,13 @@ class Database:
     @staticmethod
     def _row_to_node(row: sqlite3.Row) -> NodeModel:
         instructions = row["instructions"] if "instructions" in row.keys() else None
+        keys = row.keys()
         return NodeModel(id=row["id"], name=row["name"], provider=row["provider"], cwd=row["cwd"],
                          created_at=datetime.fromisoformat(row["created_at"]),
                          session_id=row["session_id"],
-                         instructions=instructions)
+                         instructions=instructions,
+                         public_role=row["public_role"] if "public_role" in keys else None,
+                         coordinator_view=bool(row["coordinator_view"]) if "coordinator_view" in keys else None)
 
     # The node's current session: the attached one seen most recently.
     _NODES_SQL = (
@@ -3847,7 +3876,9 @@ class Database:
 
             node_rows = conn.execute(
                 """
-                SELECT nodes.*, pn.instructions,
+                SELECT nodes.*, pn.instructions, pn.public_role,
+                  EXISTS (SELECT 1 FROM project_view_grants g WHERE g.project_id = pn.project_id
+                          AND g.node_id = nodes.id AND g.revoked_at IS NULL) AS coordinator_view,
                   (SELECT s.id FROM sessions s WHERE s.node_id = nodes.id
                    ORDER BY s.ended_at IS NOT NULL, s.last_seen_at DESC LIMIT 1) AS session_id
                 FROM nodes
@@ -3988,6 +4019,7 @@ class Database:
         with self._get_connection() as conn:
             conn.execute("DELETE FROM project_nodes WHERE project_id = ?", (project_id,))
             conn.execute("DELETE FROM project_relations WHERE project_id = ?", (project_id,))
+            conn.execute("DELETE FROM project_view_grants WHERE project_id = ?", (project_id,))
             cur = conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
             return cur.rowcount > 0
 
@@ -4025,6 +4057,7 @@ class Database:
                 )
             conn.execute("DELETE FROM project_nodes WHERE project_id = ? AND node_id = ?",
                          (project_id, node_id))
+            self._revoke_view(conn, project_id, node_id, "system", "left_project")
             return True, removed_rel_ids
 
     def add_relation_to_project(self, project_id: int, relation_id: int) -> Tuple[bool, List[str]]:
@@ -4142,6 +4175,92 @@ class Database:
                 (project_id, node_id),
             ).fetchone()
             return row["instructions"] if row else None
+
+    # --- RFC-17: the coordinator view (grants, public role, audit) ---------------------------------
+
+    PUBLIC_ROLE_MAX = 500
+
+    @staticmethod
+    def _log_view(conn, project_id: int, node_id: Optional[int], actor: str, event: str,
+                  details: Optional[Dict[str, Any]] = None) -> None:
+        conn.execute("INSERT INTO project_view_events (project_id, node_id, at, actor, event, details)"
+                     " VALUES (?, ?, ?, ?, ?, ?)",
+                     (project_id, node_id, datetime.now(timezone.utc).isoformat(), actor, event,
+                      json.dumps(details) if details else None))
+
+    def has_view_grant(self, project_id: int, node_id: int) -> bool:
+        """Whether this node holds an active coordinator-view grant on this project (checked on every read)."""
+        with self._get_connection() as conn:
+            return conn.execute(
+                "SELECT 1 FROM project_view_grants g JOIN project_nodes pn ON pn.project_id = g.project_id"
+                " AND pn.node_id = g.node_id WHERE g.project_id = ? AND g.node_id = ? AND g.revoked_at IS NULL",
+                (project_id, node_id)).fetchone() is not None
+
+    def grant_view(self, project_id: int, node_id: int, actor: str) -> Optional[Dict[str, Any]]:
+        """The human lets a node of the project see it as a coordinator. None if the node is not in the project."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            if conn.execute("SELECT 1 FROM project_nodes WHERE project_id = ? AND node_id = ?",
+                            (project_id, node_id)).fetchone() is None:
+                return None
+            row = conn.execute("SELECT id, granted_at, granted_by FROM project_view_grants WHERE project_id = ?"
+                               " AND node_id = ? AND revoked_at IS NULL", (project_id, node_id)).fetchone()
+            if row is None:
+                cur = conn.execute("INSERT INTO project_view_grants (project_id, node_id, granted_at, granted_by)"
+                                   " VALUES (?, ?, ?, ?)", (project_id, node_id, now, actor))
+                self._log_view(conn, project_id, node_id, actor, "granted")
+                return {"id": cur.lastrowid, "granted_at": now, "granted_by": actor}
+            return {"id": row["id"], "granted_at": row["granted_at"], "granted_by": row["granted_by"]}
+
+    @staticmethod
+    def _revoke_view(conn, project_id: int, node_id: int, actor: str, reason: Optional[str] = None) -> bool:
+        cur = conn.execute("UPDATE project_view_grants SET revoked_at = ? WHERE project_id = ? AND node_id = ?"
+                           " AND revoked_at IS NULL", (datetime.now(timezone.utc).isoformat(), project_id, node_id))
+        if cur.rowcount:
+            Database._log_view(conn, project_id, node_id, actor, "revoked", {"reason": reason} if reason else None)
+        return cur.rowcount > 0
+
+    def revoke_view(self, project_id: int, node_id: int, actor: str) -> bool:
+        with self._get_connection() as conn:
+            return self._revoke_view(conn, project_id, node_id, actor)
+
+    def list_view_grants(self, project_id: int) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT g.node_id, n.name AS node_name, g.granted_at, g.granted_by, g.revoked_at FROM project_view_grants g"
+                " JOIN nodes n ON n.id = g.node_id WHERE g.project_id = ? ORDER BY g.id DESC", (project_id,)).fetchall()
+        return [{"node_id": r["node_id"], "node_name": r["node_name"], "granted_at": r["granted_at"],
+                 "granted_by": r["granted_by"], "revoked_at": r["revoked_at"], "active": r["revoked_at"] is None}
+                for r in rows]
+
+    def list_view_events(self, project_id: int, limit: int = 200) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            rows = conn.execute("SELECT * FROM project_view_events WHERE project_id = ? ORDER BY id DESC LIMIT ?",
+                                (project_id, limit)).fetchall()
+        return [{"id": r["id"], "node_id": r["node_id"], "at": r["at"], "actor": r["actor"], "event": r["event"],
+                 "details": json.loads(r["details"]) if r["details"] else {}} for r in rows]
+
+    def log_view_event(self, project_id: int, node_id: Optional[int], actor: str, event: str,
+                       details: Optional[Dict[str, Any]] = None) -> None:
+        with self._get_connection() as conn:
+            self._log_view(conn, project_id, node_id, actor, event, details)
+
+    def set_public_role(self, project_id: int, node_id: int, text: Optional[str], actor: str) -> Optional[str]:
+        """The human's public description of a node's role, per project. False-y text clears it; None if not in the project."""
+        value = text.strip() if text and text.strip() else None
+        with self._get_connection() as conn:
+            cur = conn.execute("UPDATE project_nodes SET public_role = ? WHERE project_id = ? AND node_id = ?",
+                               (value, project_id, node_id))
+            if cur.rowcount == 0:
+                raise LookupError("node not in project")
+            self._log_view(conn, project_id, node_id, actor, "public_role_set", {"length": len(value or "")})
+        return value
+
+    def get_public_role(self, project_id: int, node_id: int) -> Optional[str]:
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT public_role FROM project_nodes WHERE project_id = ? AND node_id = ?",
+                               (project_id, node_id)).fetchone()
+        return row["public_role"] if row else None
 
     def is_node_in_project(self, project_id: int, node_id: int) -> bool:
         with self._get_connection() as conn:
