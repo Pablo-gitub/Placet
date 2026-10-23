@@ -4,9 +4,8 @@ import { SlidersHorizontal } from "lucide-react";
 import { apiErrorDescriptor } from "./i18n/errors";
 
 /**
- * RF-62: "Compact" and "Effort" for the session, in the header. Enabled only
- * for a supported idle session (a Claude Code CLI in tmux); otherwise the
- * reason is shown. The backend decides and types a fixed command.
+ * RF-62: "Compact" and "Effort" for the session, in the header. Shown only
+ * for a supported session (a Claude Code CLI in tmux), enabled when idle. The backend decides and types a fixed command.
  */
 export default function SessionControls({ session }) {
   const { t } = useTranslation();
@@ -19,15 +18,15 @@ export default function SessionControls({ session }) {
   const [error, setError] = useState(null);
   const controls = session?.controls;
   if (!controls || Object.keys(controls).length === 0) return null;
+  // Only where the controls can work (a Claude Code CLI in tmux): elsewhere nothing to show.
+  if (controls.compact !== "supported") return null;
 
   const levels = controls.effort_levels || [];
   const state = controls.compact;
   const idle = session.state === "idle";
   const enabled = state === "supported" && idle && !pending;
   let reason = null;
-  if (state === "pc_only") reason = t("controls.pcOnly");
-  else if (state !== "supported") reason = t("controls.unsupported");
-  else if (!idle) reason = t("controls.busy");
+  if (!idle) reason = t("controls.busy");
 
   const run = async (path, body = {}, confirmed = false) => {
     setPending(true); setDone(false); setNeedsConfirmation(false); setError(null);
