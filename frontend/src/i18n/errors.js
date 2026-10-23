@@ -13,6 +13,8 @@ export function apiErrorDescriptor(body, status) {
     "decision.self_target": "errors.selfTarget",
     "decision.now_target": "errors.nowTarget",
     "session.unavailable": "errors.sessionUnavailable",
+    "undelivered.not_available": "errors.undeliveredNotAvailable",
+    "undelivered.same_session": "errors.undeliveredSame",
     "session.excluded": "errors.sessionExcluded",
     "session.not_found": "errors.notFound",
     "session.closed": "errors.sessionClosed",
