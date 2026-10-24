@@ -76,6 +76,7 @@ from backend.app.models import (
     is_settled,
 )
 from backend.app import envelopes
+from backend.app import coordinator_view as coordinator_view_module
 from backend.app.upload_limits import MessageBodyLimit
 from backend.app import bridge_jobs as bridge_jobs_module
 from backend.app.bridge_jobs import BridgeJobs, BridgeNotTaken, BridgeOffline, BridgeTimeout
@@ -276,6 +277,10 @@ class ProjectUpdate(BaseModel):
 
 class ProjectNodeUpdate(BaseModel):
     instructions: Optional[str] = Field(None, max_length=4000)
+
+
+class PublicRoleBody(BaseModel):
+    text: Optional[str] = Field(None, max_length=500)
 
 
 class PushKeys(BaseModel):
@@ -2477,6 +2482,7 @@ def create_app(
     @app.get("/api/projects/{project_id}", response_model=ProjectDetailModel)
     async def get_project(project_id: int, who: Principal = Depends(principal)):
         require_human(who)
+        db.refresh_view_grants(project_id)
         p = db.get_project(project_id)
         if not p:
             raise ProductError(404, "project.not_found", "Project not found")
@@ -2505,7 +2511,7 @@ def create_app(
     @app.delete("/api/projects/{project_id}", status_code=204)
     async def delete_project(project_id: int, who: Principal = Depends(principal)):
         require_human(who)
-        if not db.delete_project(project_id):
+        if not db.delete_project(project_id, actor=who.actor):
             raise ProductError(404, "project.not_found", "Project not found")
         return Response(status_code=204)
 
@@ -2538,6 +2544,104 @@ def create_app(
             raise ProductError(404, "project.not_found", "Project not found")
         ok, removed = db.remove_node_from_project(project_id, node_id)
         return {"ok": True, "removed_relations": removed}
+
+    @app.get("/api/projects/{project_id}/coordinator-view")
+    async def coordinator_view(project_id: int, response: Response, who: Principal = Depends(principal),
+                               limit: int = Query(coordinator_view_module.DEFAULT_LIMIT, ge=1, le=coordinator_view_module.MAX_LIMIT),
+                               cursor: Optional[str] = Query(None, max_length=200),
+                               x_placet_session: Optional[str] = Header(None)):
+        """
+        RFC-17: a coordinator node's read-only view of its project. Needs a verified session credential (a
+        declared or guessed session is refused) of a provider whose channel passed the lab; the session must be
+        the current one of a node of the project that holds an active grant and that the user confirmed for it.
+        Everything is re-checked on every call. Metadata only; reading authorizes no send.
+        """
+        require_agent(who)
+        if x_placet_session is None:
+            raise ProductError(403, "coordinator.credential_required",
+                               "The coordinator view needs a verified session credential (session_token).")
+        session_id = bound_session(who, x_placet_session)
+        session = db.get_session(session_id) if session_id else None
+        node = db.get_node(session.node_id) if session is not None and session.node_id else None
+        project = db.get_project(project_id)
+        if project is not None:
+            db.refresh_view_grants(project_id)
+        allowed = (project is not None and node is not None and node.session_id == session_id
+                   and session.provider in coordinator_view_module.COORDINATOR_PROVIDERS
+                   and db.is_node_in_project(project_id, node.id) and db.session_may_view(project_id, node.id, session_id))
+        if not allowed:
+            if project is not None:
+                db.log_view_access(project_id, node.id if node else None, f"agent:{who.id}", "denied", session_id)
+            raise ProductError(403, "coordinator.not_granted", "This session holds no coordinator-view grant on this project.")
+        try:
+            result = coordinator_view_module.build(db, project_id, limit, cursor)
+        except coordinator_view_module.BadCursor:
+            raise ProductError(422, "coordinator.cursor_invalid", "The cursor is not valid.")
+        db.log_view_access(project_id, node.id, f"agent:{who.id}", "read", session_id, {"requests": len(result["requests"])})
+        response.headers["Cache-Control"] = "no-store"
+        return result
+
+    def view_target(project_id: int, node_id: int) -> None:
+        if not db.get_project(project_id):
+            raise ProductError(404, "project.not_found", "Project not found")
+        if not db.get_node(node_id):
+            raise ProductError(404, "node.not_found", "Node not found")
+        if not db.is_node_in_project(project_id, node_id):
+            raise ProductError(404, "project.node_not_in_project", "Node not in project.")
+
+    @app.put("/api/projects/{project_id}/nodes/{node_id}/view-grant")
+    async def grant_project_view(project_id: int, node_id: int, who: Principal = Depends(principal)):
+        """RFC-17: the user lets a node of the project see it as a coordinator (off by default, per project and node)."""
+        require_human(who)
+        view_target(project_id, node_id)
+        grant = db.grant_view(project_id, node_id, who.actor)
+        return {"node_id": node_id, "active": True, **grant}
+
+    @app.delete("/api/projects/{project_id}/nodes/{node_id}/view-grant")
+    async def revoke_project_view(project_id: int, node_id: int, who: Principal = Depends(principal)):
+        require_human(who)
+        view_target(project_id, node_id)
+        if not db.revoke_view(project_id, node_id, who.actor):
+            raise ProductError(404, "project.view_grant_not_found", "This node holds no coordinator-view grant.")
+        return {"node_id": node_id, "active": False}
+
+    @app.get("/api/projects/{project_id}/view-grants")
+    async def list_project_view_grants(project_id: int, who: Principal = Depends(principal)):
+        require_human(who)
+        if not db.get_project(project_id):
+            raise ProductError(404, "project.not_found", "Project not found")
+        db.refresh_view_grants(project_id)
+        return db.list_view_grants(project_id)
+
+    class ConfirmSession(BaseModel):
+        session_id: str
+
+    @app.post("/api/projects/{project_id}/nodes/{node_id}/view-grant/confirm")
+    async def confirm_project_view_session(project_id: int, node_id: int, body: ConfirmSession,
+                                           who: Principal = Depends(principal)):
+        """RFC-17 / RS-09: the user confirms the session now serving the node, the one they were shown."""
+        require_human(who)
+        view_target(project_id, node_id)
+        outcome = db.confirm_view_session(project_id, node_id, body.session_id, who.actor)
+        if outcome == "none":
+            raise ProductError(404, "project.view_grant_not_found", "This node holds no coordinator-view grant.")
+        if outcome == "changed":
+            raise ProductError(409, "coordinator.session_changed", "The node is served by another session now: look again.")
+        return {"node_id": node_id, "session_id": body.session_id, "state": "confirmed"}
+
+    @app.get("/api/projects/{project_id}/view-events")
+    async def list_project_view_events(project_id: int, who: Principal = Depends(principal)):
+        require_human(who)
+        if not db.get_project(project_id):
+            raise ProductError(404, "project.not_found", "Project not found")
+        return db.list_view_events(project_id)
+
+    @app.put("/api/projects/{project_id}/nodes/{node_id}/public-role")
+    async def set_project_public_role(project_id: int, node_id: int, body: PublicRoleBody, who: Principal = Depends(principal)):
+        """RFC-17: the node's role as the coordinator may read it. Separate from the private node instructions."""
+        require_human(who)
+        view_target(project_id, node_id)
+        return {"text": db.set_public_role(project_id, node_id, body.text, who.actor)}
 
     @app.put("/api/projects/{project_id}/relations/{relation_id}")
     async def add_project_relation(project_id: int, relation_id: int, who: Principal = Depends(principal)):

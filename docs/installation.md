@@ -307,6 +307,7 @@ Once the hooks are installed, Placet checks at each session start whether the cl
    - Acknowledges a request injected into the session (with `ack_mode: mcp`).
 5. `placet_reply(request_id, response)`
    - Returns the reply once the task is done. A request is one task with one concluding reply. While a session runs a request, a new request from it back to that request's sender is refused (409 `request.reply_expected`, nothing sent): the answer goes through `placet_reply`, progress through `placet_progress`, decisions through `placet_ask_human`.
+   - `placet_project_view(project_id, session_token, cursor?)` is the read-only coordinator view of RFC-17: the project's nodes, relations and open requests as metadata (never message text). The user must have switched "Vista coordinatore" on for the caller's node in the project page, and the call needs the newest Placet session credential of the caller's context (`PLACET_SESSION_CREDENTIALS=1`, see [session binding](plans/session-binding.md)); without it, or with a revoked grant, the call is refused. It authorizes no send.
    - `placet_progress(request_id, message)` reports progress ("part 1 of 4 done") without concluding: the latest update is shown in the history and returned by `placet_check_status`.
 6. `placet_share_file(path, title)`
    - Shows an allowed PDF or image on the phone. Files must satisfy the home, hidden-folder, ownership, type, size and exclusion checks in the architecture.

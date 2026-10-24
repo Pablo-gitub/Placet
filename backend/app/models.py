@@ -437,6 +437,14 @@ class NodeModel(BaseModel):
     session_id: Optional[str] = None
     # RFC-15: node instructions within a project (when viewed in project context)
     instructions: Optional[str] = None
+    # RFC-17 (project context only): what the human wrote about this node's role for others to read, and
+    # whether the node may see the project as a coordinator.
+    public_role: Optional[str] = None
+    coordinator_view: Optional[bool] = None
+    # RFC-17: whether this provider has a verified credential channel, and the state of the confirmed session
+    # (confirmed | pending_confirmation with the session to confirm | no_session) when a grant is active.
+    coordinator_supported: Optional[bool] = None
+    coordinator_session: Optional[Dict[str, Any]] = None
 
 
 class RelationTypeModel(BaseModel):

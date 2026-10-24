@@ -16,6 +16,7 @@ import { apiErrorDescriptor } from "./i18n/errors";
 import { formatDateTime } from "./i18n/formatters";
 import { sessionStatus } from "./sessionInfo";
 import RelationGraph from "./RelationGraph";
+import CoordinatorViewControl from "./CoordinatorViewControl";
 
 async function api(method, url, body) {
   const res = await fetch(url, {
@@ -1047,6 +1048,7 @@ export function ProjectDetailView({ projectId, sessions: propSessions, requests 
                       </button>
                     </div>
                   </div>
+                  <CoordinatorViewControl projectId={projectId} node={n} onChanged={load} />
                 </li>
               );
             })}
