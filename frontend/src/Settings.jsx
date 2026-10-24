@@ -6,6 +6,7 @@ import BackgroundLanguage from "./i18n/BackgroundLanguage";
 import PushControl from "./PushControl";
 import NotificationPreferences from "./NotificationPreferences";
 import UsageGuard from "./UsageGuard";
+import SessionCredential from "./SessionCredential";
 import Undelivered from "./Undelivered";
 
 function Row({ title, hint, children }) {
@@ -42,6 +43,11 @@ export default function Settings({ onOpenHistory, onOpenCommands, onOpenStats, o
       <section className="card settings-group">
         <h3 className="section-label">{t("settings.automation")}</h3>
         <UsageGuard />
+      </section>
+
+      <section className="card settings-group">
+        <h3 className="section-label">{t("settings.sessions")}</h3>
+        <SessionCredential />
       </section>
 
       <Undelivered requests={requests} sessions={sessions} onOpenMessage={onOpenMessage} />
