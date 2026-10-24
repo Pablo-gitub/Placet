@@ -7,6 +7,7 @@ import { limitReset, resetClock } from "./usage";
 import { formatDateTime, formatNumber } from "./i18n/formatters";
 import { splitPrompt } from "./draft";
 import {
+  ArrowDown,
   ArrowLeft,
   Bot,
   ChevronDown,
@@ -50,7 +51,7 @@ const ACTION_ICONS = {
 // How close to the top (px) scrolling loads older messages, and how close to
 // the bottom counts as "following" the conversation.
 const LOAD_OLDER_PX = 150;
-const FOLLOW_PX = 120;
+const FOLLOW_PX = 80;
 const LONG_PLACET_CHARS = 400;
 
 function ActionLine({ entry }) {
@@ -338,6 +339,10 @@ export default function SessionView({
   const scrollRef = useRef(null);
   const following = useRef(true);
   const anchor = useRef(null);
+  // What the last layout pass saw at each end, to tell an append from a prepend; and whether the reader, who is
+  // reading higher up, has been left with something new below.
+  const seen = useRef({ first: undefined, last: undefined, questions: 0, outgoing: 0 });
+  const [unseen, setUnseen] = useState(false);
   const questions = requests.filter((r) => (r.status === "PENDING" || needsReturnApproval(r)) && r.sender_session_id === sessionId);
   const outgoing = requests
     .filter((r) => r.question_type === "message" && r.recipient_session_id === sessionId
@@ -381,16 +386,28 @@ export default function SessionView({
     };
   }, [activeProjectId]);
 
-  // Keep the view where the reader is: at the bottom while following, on the
-  // same message after older ones are added above.
+  // Keep the view where the reader is: at the bottom only while the reader is (nearly) there, where they were
+  // when older messages are prepended, and untouched otherwise; new content below a reader who is higher up is
+  // announced by a button instead of pulling them down.
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    if (anchor.current) {
+    const last = entries[entries.length - 1]?.cursor;
+    const firstCursor = entries[0]?.cursor;
+    const appended = last !== seen.current.last || questions.length > seen.current.questions
+      || outgoing.length > seen.current.outgoing;
+    const prepended = anchor.current !== null && firstCursor !== seen.current.first;
+    seen.current = { first: firstCursor, last, questions: questions.length, outgoing: outgoing.length };
+    if (prepended) {
       el.scrollTop = el.scrollHeight - anchor.current.height + anchor.current.top;
       anchor.current = null;
     } else if (following.current) {
       el.scrollTop = el.scrollHeight;
+    } else if (appended) {
+      // Something arrived below while an older page is still loading: what is above the reader is unchanged.
+      if (anchor.current) anchor.current.height = el.scrollHeight;
+      // oxlint-disable-next-line react/set-state-in-effect
+      setUnseen(true);
     }
   }, [entries, questions.length, outgoing.length]);
 
@@ -398,12 +415,21 @@ export default function SessionView({
     const el = scrollRef.current;
     if (!el) return;
     following.current = el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_PX;
-    if (el.scrollTop < LOAD_OLDER_PX && hasOlder && !loadingOlder) {
+    if (following.current) setUnseen((was) => (was ? false : was));
+    if (el.scrollTop < LOAD_OLDER_PX && hasOlder && !loadingOlder && anchor.current === null) {
       anchor.current = { height: el.scrollHeight, top: el.scrollTop };
       loadOlder().then((loaded) => {
         if (!loaded) anchor.current = null;
       });
     }
+  };
+
+  const scrollToEnd = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    following.current = true;
+    el.scrollTop = el.scrollHeight;
+    setUnseen(false);
   };
 
   const provider = session ? providerOf(session) : null;
@@ -460,6 +486,7 @@ export default function SessionView({
         </div>
       )}
 
+      <div className="chat-scroll-wrap">
       <div className="chat-scroll" ref={scrollRef} onScroll={onScroll} data-testid="chat-scroll">
         {status === "loading" && <p className="chat-status">{t("chat.loading")}</p>}
         {status === "error" && (
@@ -525,6 +552,12 @@ export default function SessionView({
             sessions={sessions}
           />
         ))}
+      </div>
+      {unseen && (
+        <button type="button" className="new-messages" data-testid="new-messages" onClick={scrollToEnd}>
+          {t("chat.newMessages")} <ArrowDown size={14} aria-hidden="true" />
+        </button>
+      )}
       </div>
       {session?.desktop_archived && session.entrypoint === "claude-desktop" && (
         <p className="composer-note" role="status" data-testid="archived-note">{t("archived.note")}</p>
