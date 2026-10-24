@@ -2248,3 +2248,12 @@ body.chat-open { overflow: hidden; }
 .coordinator-switch input { width: 1.2rem; height: 1.2rem; accent-color: var(--primary); }
 .coordinator-pending { margin-top: 0.5rem; padding: 0.6rem; border: 1px solid var(--warning); border-radius: 8px; }
 .coordinator-pending p { margin: 0 0 0.5rem; overflow-wrap: anywhere; }
+
+/* The scroll box and the "new messages" button over its bottom edge. */
+.chat-scroll-wrap { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
+.new-messages {
+  position: absolute; left: 50%; bottom: 0.75rem; transform: translateX(-50%);
+  display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.5rem 0.9rem; min-height: 2.5rem;
+  border: 0; border-radius: 999px; background: var(--primary); color: white; font: inherit; font-size: 0.85rem;
+  font-weight: 600; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4); cursor: pointer;
+}
