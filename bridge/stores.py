@@ -63,6 +63,8 @@ class Work:
     # RFC-16: busy Claude Code sessions ({"id", "since"}), read for a user interrupt.
     claude_busy: List[dict] = field(default_factory=list)
     claude_auto_renew: bool = False
+    # RS-09: the user switched the session credential on in the PWA (the bridge mirrors it for the hooks).
+    session_credentials: bool = False
 
 
 @dataclass
@@ -159,6 +161,7 @@ class LocalStore:
             steer_waiting=[{"request_id": r.id, "session_id": s.id, "provider": s.provider}
                            for r, s in self.db.steers_waiting()],
             claude_auto_renew=self.db.get_setting("claude_auto_renew") == "true",
+            session_credentials=self.db.get_setting("session_credentials") == "true",
         )
 
     def take_session_mail(self, session_id: str) -> Optional[SessionMail]:
@@ -287,6 +290,7 @@ class HttpStore:
             steer=list(data.get("steer", [])),
             steer_waiting=list(data.get("steer_waiting", [])),
             claude_auto_renew=bool(data.get("claude_auto_renew", False)),
+            session_credentials=bool(data.get("session_credentials", False)),
         )
 
     def take_session_mail(self, session_id: str) -> Optional[SessionMail]:

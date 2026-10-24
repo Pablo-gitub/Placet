@@ -161,16 +161,27 @@ but holds no per-node grants.
    credential dies with its session's end or continuation. Known and out of
    scope as stated above: any process with the agent's token can register a
    credential for a session it names by posting a start event.
-   The hook and MCP parts exist behind an opt-in: with
-   `PLACET_SESSION_CREDENTIALS=1` in the environment Claude Code passes to
-   its hooks, every Claude Code start issues a credential (only its hash is
+   The hook and MCP parts exist behind an opt-in, now a **PWA setting**
+   (Settings → Sessioni, "Chiave di sessione verificata (sperimentale)",
+   `session_credentials`, human-only, off by default). Hooks never wait for
+   the backend and the backend cannot write the user's files, so the bridge
+   (which runs as the user) mirrors the setting on every work tick to a flag
+   file, `~/.cache/placet/flags/session-credentials` (directory 0700, file
+   0600, written atomically, removed when off; nothing else is written
+   there), and the hook stats it (a regular file owned by the user, not a
+   link, in a private directory). The environment variable stays as an
+   override: `PLACET_SESSION_CREDENTIALS=1` forces it on, `0` forces it off.
+   When on, every Claude Code start issues a credential (only its hash is
    spooled; a dropped spool event hands out none) and `placet_reply`,
    `placet_ack` and `placet_progress` accept `session_token`, sent as
    `X-Placet-Session` (retried up to three times, 2 s apart, on
    `session.credential_invalid`, since the hash reaches the backend through
    the spool; never resent without it). Off by default: deploying changes
-   nothing. To try it, the variable must reach the hooks: Claude Desktop
-   passes its own environment, so it must be verified there first.
+   nothing. New sessions, and those that restart after `/compact` or a
+   resume, get a credential; sessions already open do not change. Claude
+   Desktop is still to be verified (the flag file does not depend on the
+   environment it passes, but the credential channel itself is not verified
+   there).
 3. PWA shows the level per session and request; enrollment and revocation.
 4. RFC-17 / RF-69 grants require `credential` on a gated provider (or
    `transport`), for reads, lists, history and export as well as writes.
