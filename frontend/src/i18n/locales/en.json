@@ -387,7 +387,8 @@
     "projectContext": "Project: {{name}}",
     "removeProjectContext": "Remove project context",
     "projectInstructionsTitle": "Placet Instructions · Project {{name}}",
-    "projectInstructions": "Placet Instructions"
+    "projectInstructions": "Placet Instructions",
+    "newMessages": "New messages"
   },
   "actions": {
     "read": "Reads {{name}}",

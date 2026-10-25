@@ -387,7 +387,8 @@
     "projectContext": "Progetto: {{name}}",
     "removeProjectContext": "Rimuovi contesto progetto",
     "projectInstructionsTitle": "Istruzioni Placet · Progetto {{name}}",
-    "projectInstructions": "Istruzioni Placet"
+    "projectInstructions": "Istruzioni Placet",
+    "newMessages": "Nuovi messaggi"
   },
   "actions": {
     "read": "Legge {{name}}",
