@@ -68,7 +68,11 @@ export function useTranscript(sessionId, refreshKey) {
         if (cancelled) return;
         cursors.current.end = page.end;
         if (page.meta) setMeta(page.meta);
-        if (page.messages.length) setEntries((prev) => mergeEntries(prev, page.messages));
+        // Nothing new: keep the very same list, so nothing downstream re-renders or scrolls.
+        if (page.messages.length) setEntries((prev) => {
+          const next = mergeEntries(prev, page.messages);
+          return next.length === prev.length ? prev : next;
+        });
       })
       .catch(() => {}); // the next turn retries; the page itself stays usable
     return () => {
