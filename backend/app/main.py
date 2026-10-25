@@ -784,6 +784,20 @@ def create_app(
         response.headers["Cache-Control"] = "no-store"
         return {"language": db.get_background_language()}
 
+    @app.get("/api/settings/session-credentials", response_model=ClaudeRenewSetting)
+    async def get_session_credentials_setting(response: Response, who: Principal = Depends(principal)):
+        """RS-09: whether new Claude Code sessions get a verified session credential (off by default)."""
+        require_human(who)
+        response.headers["Cache-Control"] = "no-store"
+        return {"enabled": db.get_setting("session_credentials") == "true"}
+
+    @app.put("/api/settings/session-credentials", response_model=ClaudeRenewSetting)
+    async def set_session_credentials_setting(payload: ClaudeRenewSetting, response: Response, who: Principal = Depends(principal)):
+        require_human(who)
+        db.set_setting("session_credentials", "true" if payload.enabled else "false")
+        response.headers["Cache-Control"] = "no-store"
+        return {"enabled": payload.enabled}
+
     @app.get("/api/settings/claude-renew", response_model=ClaudeRenewSetting)
     async def get_claude_renew_setting(response: Response, who: Principal = Depends(principal)):
         require_human(who)
@@ -2835,6 +2849,7 @@ def create_app(
             # Codex and Antigravity sessions: the bridge reads their titles.
             "titles": [{"id": s.id, "provider": s.provider} for s in db.untitled_bridge_sessions()],
             "claude_auto_renew": db.get_setting("claude_auto_renew") == "true",
+            "session_credentials": db.get_setting("session_credentials") == "true",
             # RFC-16: busy Claude Code sessions, whose conversation the bridge reads for a user interrupt.
             "claude_busy": [{"id": s.id, "since": s.activity_at.isoformat() if s.activity_at else None}
                             for s in db.list_sessions()

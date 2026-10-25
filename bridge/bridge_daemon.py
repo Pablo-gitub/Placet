@@ -34,6 +34,7 @@ from bridge.usage import (
 )
 from bridge.claude_desktop import ClaudeDesktopWake
 from hooks.placet_common import active
+from bridge.flags import mirror_flag
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,7 @@ class BridgeDaemon:
         spool=None,
         claude_waker=None,
         engine_counter=None,
+        flags_dir=None,
     ):
         # Direct database access (db/config) is the single-process dev mode;
         # in production pass an HttpStore.
@@ -93,6 +95,7 @@ class BridgeDaemon:
         self._interrupts_reported: Dict[str, datetime] = {}
         # Counts the Claude Desktop engines (Linux); the services pass one, tests do not.
         self.engine_counter = engine_counter
+        self.flags_dir = flags_dir
         self._reconciled_at: dict = {}
         self._folders_at = -FOLDERS_EVERY_SECONDS
         self._excluded: Optional[Set[str]] = None
@@ -559,6 +562,7 @@ class BridgeDaemon:
         # unblock work that is already waiting.
         work: Work = self.store.work()
         self.language = work.language
+        mirror_flag(work.session_credentials, self.flags_dir)
         self.check_folders(work.folders)
         self.refresh_titles(work.titles)
         self.refresh_usage(auto_renew=work.claude_auto_renew)

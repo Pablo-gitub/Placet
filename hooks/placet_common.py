@@ -1,6 +1,7 @@
 """Shared helpers for the Placet hooks (stdlib only: hooks run with python3)."""
 import json
 import os
+import stat
 import subprocess
 import urllib.error
 import urllib.request
@@ -8,6 +9,26 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 CONFIG_DIR = Path.home() / ".config" / "placet"
+# Settings the user made in the PWA that a hook may not ask the backend about (hooks never wait for it): the
+# bridge, which runs as the user, mirrors each one to a file here. Only the existence of a file means anything.
+FLAGS_DIR = Path.home() / ".cache" / "placet" / "flags"
+
+
+def flag_on(name: str) -> bool:
+    """
+    Whether the bridge mirrored the flag `name`: a regular file (no link) owned by this user and not writable
+    by others, in a directory that is not a link, owned by this user and closed to group and others.
+    Never raises; two lstat calls.
+    """
+    try:
+        me = os.getuid()
+        directory = os.lstat(FLAGS_DIR)
+        if not stat.S_ISDIR(directory.st_mode) or directory.st_uid != me or directory.st_mode & 0o077:
+            return False
+        flag = os.lstat(FLAGS_DIR / name)
+        return stat.S_ISREG(flag.st_mode) and flag.st_uid == me and not flag.st_mode & 0o022
+    except (OSError, ValueError):
+        return False
 
 
 def option(argv, name: str) -> Optional[str]:

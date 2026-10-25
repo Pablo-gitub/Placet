@@ -678,7 +678,10 @@
     "turnEndAll": "All completed turns",
     "turnEndPlacet": "Only Placet work",
     "turnEndPlacetHint": "Only turns started by a Placet request or by a message sent from here.",
-    "turnEndOff": "None"
+    "turnEndOff": "None",
+    "sessions": "Sessions",
+    "sessionCredentialTitle": "Verified session key (experimental)",
+    "sessionCredentialHint": "Needed for the coordinator view: it proves which session is speaking. Today it is verified only for Claude Code (CLI). New sessions, and those that restart after /compact or a resume, get it; sessions already open do not change."
   },
   "commands": {
     "title": "Commands",

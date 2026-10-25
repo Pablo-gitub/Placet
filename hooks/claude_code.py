@@ -271,11 +271,13 @@ CREDENTIAL_CONTEXT = (
 
 def issue_credential(payload: dict):
     """
-    RS-09 (opt-in, PLACET_SESSION_CREDENTIALS=1): a new credential for every Claude Code start
-    (startup, resume, clear, compact). Only its SHA-256 goes into the event; the credential itself
-    goes only into the session's context. None when off or not a start.
+    RS-09 (opt-in): a new credential for every Claude Code start (startup, resume, clear, compact). On
+    when the user switched it on in the PWA (the bridge mirrors that to a flag file) or the environment
+    says PLACET_SESSION_CREDENTIALS=1; "0" forces it off. Only its SHA-256 goes into the event; the
+    credential itself goes only into the session's context. None when off or not a start.
     """
-    if os.environ.get("PLACET_SESSION_CREDENTIALS") != "1":
+    setting = os.environ.get("PLACET_SESSION_CREDENTIALS")
+    if setting == "0" or (setting != "1" and not placet_common.flag_on("session-credentials")):
         return None
     if payload.get("event") != "start" or payload.get("provider") != "claude-code":
         return None

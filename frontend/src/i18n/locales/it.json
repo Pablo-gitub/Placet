@@ -678,7 +678,10 @@
     "turnEndAll": "Tutti i turni completati",
     "turnEndPlacet": "Solo lavoro di Placet",
     "turnEndPlacetHint": "Solo i turni avviati da una richiesta Placet o da un messaggio inviato da qui.",
-    "turnEndOff": "Nessuno"
+    "turnEndOff": "Nessuno",
+    "sessions": "Sessioni",
+    "sessionCredentialTitle": "Chiave di sessione verificata (sperimentale)",
+    "sessionCredentialHint": "Serve alla vista coordinatore: prova quale sessione sta parlando. Oggi è verificata solo per Claude Code (CLI). La ricevono le nuove sessioni e quelle che ripartono dopo /compact o una ripresa; le sessioni già aperte non cambiano."
   },
   "commands": {
     "title": "Comandi",
