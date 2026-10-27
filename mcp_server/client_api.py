@@ -24,20 +24,24 @@ class PlacetClient:
         self.agent_id = agent_id or os.environ.get("PLACET_AGENT_ID") or None
         self.api_token = api_token or os.environ.get("PLACET_API_TOKEN", "")
 
-    # RS-09: a credential issued at SessionStart reaches the backend through the hook spool a few
-    # seconds later; a call made right away is retried, never sent without the credential.
-    CREDENTIAL_RETRIES = 3
-    CREDENTIAL_RETRY_SECONDS = 2.0
+    # RS-09: a credential issued at SessionStart reaches the backend through the hook spool a moment later; a call
+    # made right away that the backend does not know yet is retried with a short backoff, always with the same
+    # credential (never without it, never as a declared session). A wrong credential is still refused at the end.
+    CREDENTIAL_RETRY_DELAYS = (0.5, 1.0, 2.0)
+    # Scale of those delays (tests set it to 0).
+    CREDENTIAL_RETRY_SECONDS = 1.0
+
+    def _send(self, send, session_token: Optional[str]):
+        resp = send(self._headers(session_token))
+        for delay in self.CREDENTIAL_RETRY_DELAYS:
+            if not (session_token and resp.status_code == 401 and "session.credential_invalid" in resp.text):
+                break
+            time.sleep(delay * self.CREDENTIAL_RETRY_SECONDS)
+            resp = send(self._headers(session_token))
+        return resp
 
     def _post(self, client, url: str, session_token: Optional[str] = None, **kwargs):
-        resp = client.post(url, headers=self._headers(session_token), **kwargs)
-        attempts = 0
-        while (session_token and resp.status_code == 401 and attempts < self.CREDENTIAL_RETRIES
-               and "session.credential_invalid" in resp.text):
-            attempts += 1
-            time.sleep(self.CREDENTIAL_RETRY_SECONDS)
-            resp = client.post(url, headers=self._headers(session_token), **kwargs)
-        return resp
+        return self._send(lambda headers: client.post(url, headers=headers, **kwargs), session_token)
 
     def _headers(self, session_token: Optional[str] = None) -> Dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -166,8 +170,8 @@ class PlacetClient:
         if limit:
             params["limit"] = limit
         with httpx.Client(timeout=15.0) as client:
-            resp = client.get(f"{self.base_url}/api/projects/{project_id}/coordinator-view",
-                              headers=self._headers(session_token), params=params)
+            resp = self._send(lambda headers: client.get(f"{self.base_url}/api/projects/{project_id}/coordinator-view",
+                                                         headers=headers, params=params), session_token)
             resp.raise_for_status()
             return resp.json()
 

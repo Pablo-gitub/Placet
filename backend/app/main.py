@@ -124,6 +124,8 @@ class SessionEventPayload(BaseModel):
     # start (RS-09): the SHA-256 of the credential the hook just put in the session's context;
     # never the credential itself.
     credential_sha256: Optional[str] = Field(None, pattern=r"^[0-9a-f]{64}$")
+    # start (RS-09): when the hook issued it (epoch seconds): two starts that arrive inverted are ordered by this.
+    credential_issued_at: Optional[float] = Field(None, ge=0)
     # start: why the session started (Claude Code: startup, resume, clear, compact).
     start_source: Optional[str] = Field(None, max_length=32)
     # RF-29d: UUID of the session being continued
@@ -1767,7 +1769,7 @@ def create_app(
             db.set_session_state(session_id, "idle",
                                  kept if kept_req is not None and kept_req.status == RequestStatus.EXECUTING else None)
             if payload.credential_sha256:
-                db.register_binding(session_id, who.id, payload.credential_sha256)
+                db.register_binding(session_id, who.id, payload.credential_sha256, issued_at=payload.credential_issued_at)
             db.wake_evidence(session_id)  # a desktop wake-up got its evidence: the session started
             if payload.mcp is not None:
                 db.set_mcp_config_state(session_id, payload.mcp)
