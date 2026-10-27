@@ -94,6 +94,7 @@ class PlacetClient:
         rule_acknowledged: bool = False,
         context: Optional[str] = None,
         sender_session_id: Optional[str] = None,
+        session_token: Optional[str] = None,
     ) -> Dict[str, Any]:
         timeout = max(5, min(int(timeout_seconds), 600))
         url = f"{self.base_url}/api/requests"
@@ -114,10 +115,11 @@ class PlacetClient:
         if priority:
             payload["priority"] = priority
         with httpx.Client(timeout=float(timeout + 5)) as client:
-            resp = client.post(
+            resp = self._post(
+                client,
                 url,
+                session_token,
                 json=payload,
-                headers=self._headers(),
                 params={"wait_seconds": timeout},
             )
             if resp.status_code == 428:

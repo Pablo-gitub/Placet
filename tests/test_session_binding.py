@@ -225,3 +225,74 @@ def test_code_identifiers_starting_with_the_prefix_are_not_redacted():
     from backend.app.database import redact_credentials
     assert redact_credentials("plst_credential_hash_value_x") == "plst_credential_hash_value_x"
     assert redact_credentials(f"({A})") == "([redacted])"
+
+
+@pytest.mark.asyncio
+async def test_create_request_with_credential_binds_sender_session_when_ambiguous(setup):
+    app, db = setup
+    db.upsert_session("c1", "claude", provider="claude-code")
+    db.upsert_session("c2", "claude", provider="claude-code")
+    db.upsert_session("x1", "codex", provider="codex")
+    db.set_session_state("c1", "busy")
+    db.set_session_state("c2", "busy")
+
+    node_c1 = db.create_node("worker-1", "c1")
+    node_x1 = db.create_node("target-node", "x1")
+    rtype = db.create_relation_type("review", "code review")
+    db.create_relation(node_c1.id, node_x1.id, rtype.id, "manual")
+
+    async with agent_client(app, "tok-claude") as claude:
+        await start(claude, "c1", A)
+        await start(claude, "c2", B)
+
+        resp = await claude.post("/api/requests", json={
+            "target_node": "target-node",
+            "prompt": "hello",
+        })
+        assert resp.status_code == 409
+        assert resp.json()["code"] == "relation.sender_unknown"
+
+        resp = await claude.post("/api/requests", json={
+            "target_node": "target-node",
+            "prompt": "hello",
+        }, headers=with_cred(A))
+        assert resp.status_code == 201, resp.text
+        req_id = resp.json()["id"]
+        assert db.get_request(req_id).sender_session_id == "c1"
+
+
+@pytest.mark.asyncio
+async def test_create_request_with_invalid_credential_returns_401(setup):
+    app, db = setup
+    async with agent_client(app, "tok-claude") as claude:
+        await start(claude, "c1", A)
+        resp = await claude.post("/api/requests", json={
+            "recipient_id": "codex",
+            "prompt": "hello",
+        }, headers=with_cred("plst_" + "z" * 22))
+        assert resp.status_code == 401
+        assert resp.json()["code"] == "session.credential_invalid"
+
+
+@pytest.mark.asyncio
+async def test_create_request_conflicting_sender_session_and_credential_returns_409(setup):
+    app, db = setup
+    db.upsert_session("c1", "claude", provider="claude-code")
+    db.upsert_session("c2", "claude", provider="claude-code")
+    async with agent_client(app, "tok-claude") as claude:
+        await start(claude, "c1", A)
+        await start(claude, "c2", B)
+        resp = await claude.post("/api/requests", json={
+            "recipient_id": "codex",
+            "prompt": "hello",
+            "sender_session_id": "c2",
+        }, headers=with_cred(A))
+        assert resp.status_code == 409
+        assert resp.json()["code"] == "session.conflict"
+
+        resp = await claude.post("/api/requests", json={
+            "recipient_id": "codex",
+            "prompt": "hello",
+            "sender_session_id": "c1",
+        }, headers=with_cred(A))
+        assert resp.status_code == 201
