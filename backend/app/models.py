@@ -513,6 +513,9 @@ class UndeliveredItem(BaseModel):
     recipient_node: Optional[str] = None
     can_cancel: bool = True
     can_forward: bool = True
+    # cause "delivery_blocked": why the channel can not deliver to the recipient session (a closed code, the number
+    # of failed channel attempts, the last check and the next try), never a configuration.
+    block: Optional[Dict[str, Any]] = None
 
 
 class RequestEvent(BaseModel):

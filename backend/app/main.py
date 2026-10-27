@@ -16,7 +16,7 @@ from fastapi import Path as FastAPIPath
 from fastapi.middleware.cors import CORSMiddleware
 
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from backend.app.errors import ProductError, product_error_response
 from backend.app.i18n import text
 from backend.app.pwa import mount_pwa
@@ -1185,6 +1185,8 @@ def create_app(
             by_system = bool(scheduled) and (scheduled[-1].actor.startswith("system:")
                                              or (scheduled[-1].details or {}).get("reason") == "usage")
             return ("awaiting_refresh" if by_system else "scheduled"), req.scheduled_at
+        if req.recipient_session_id and db.get_delivery_block(req.recipient_session_id) is not None:
+            return "delivery_blocked", None                  # the channel can not deliver to this session (see `block`)
         target = db.get_session(req.recipient_session_id) if req.recipient_session_id else None
         waited = now - (req.updated_at or req.created_at).astimezone(timezone.utc)
         if (target is not None and not target.reachable) or waited > BLOCKED_AFTER:
@@ -1204,8 +1206,11 @@ def create_app(
                 continue
             sender = db.get_session(req.sender_session_id) if req.sender_session_id else None
             target = db.get_session(req.recipient_session_id) if req.recipient_session_id else None
+            block = db.get_delivery_block(req.recipient_session_id) if cause == "delivery_blocked" else None
             items.append(UndeliveredItem(
                 request=req, cause=cause, due_at=due_at,
+                block=({"session_id": req.recipient_session_id, "code": block["code"], "failed_attempts": block["failed_attempts"],
+                        "last_checked_at": block["last_checked_at"], "next_retry_at": block["next_retry_at"]} if block else None),
                 sender_node=sender.node_name if sender else None,
                 recipient_node=target.node_name if target else None))
         return items
@@ -2809,6 +2814,7 @@ def create_app(
         require_bridge(who)
         expire_and_notify()
         now = datetime.now(timezone.utc)
+        probing = db.delivery_block_states()[1]
         results = db.list_undelivered_results(
             settled_before=now - timedelta(seconds=RESULT_GRACE_SECONDS),
             settled_after=now - timedelta(seconds=RESULT_MAX_AGE_SECONDS),
@@ -2829,11 +2835,11 @@ def create_app(
             ],
             # Sessions the bridge wakes itself (Codex, Antigravity) with mail.
             "sessions": [
-                {"id": s.id, "agent_id": s.agent_id, "provider": s.provider}
+                {"id": s.id, "agent_id": s.agent_id, "provider": s.provider, **({"probing": True} if s.id in probing else {})}
                 for s in db.bridge_sessions_with_mail()
             ],
             "wake_sessions": [
-                {"id": s.id, "provider": s.provider, "suspended": True}
+                {"id": s.id, "provider": s.provider, "suspended": True, **({"probing": True} if s.id in probing else {})}
                 for s in db.bridge_sessions_with_mail(include_suspended=True)
                 if s.suspended_at is not None
             ],
@@ -3106,6 +3112,8 @@ def create_app(
         session = db.get_session(session_id)
         if session is None or session.provider not in BRIDGE_PROVIDERS:
             raise HTTPException(status_code=404, detail="Session not found")
+        if session_id in db.delivery_block_states()[0]:
+            return Response(status_code=status.HTTP_204_NO_CONTENT)       # waiting out a block: nothing is handed out
         taken = db.take_inbox_message(session, actor=who.actor, via="bridge")
         if taken is None:
             return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -3115,6 +3123,55 @@ def create_app(
             req, ack_mode="none", channel="app", language=db.get_background_language()
         )
         return {"kind": kind, "request_id": req.id, "text": text}
+
+    class DeliveryBlockReport(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        # A closed code and phase, never a configuration or a message from the app.
+        code: str = Field(pattern=r"^[a-z_]{1,40}$")
+        phase: Literal["pre_dispatch"]
+        deterministic: bool = False
+        attempts: int = Field(1, ge=1, le=10)
+
+    def notify_delivery_blocked(session: SessionModel, code: str) -> None:
+        if session.excluded or not db.get_notification_preferences().get("needs_you", True):
+            return
+        lang = db.get_background_language()
+        key = "notify.delivery_blocked_missing_user_config" if code == "missing_user_config" else "notify.delivery_blocked_other"
+        web_push_later(text("notify.delivery_blocked_title", lang,
+                            label=session_label(session.provider, session.title, session.project_root or session.cwd)),
+                       text(key, lang), f"/#/sessione/{session.id}", f"delivery-blocked-{session.id}", "high")
+
+    @app.post("/api/bridge/sessions/{session_id}/delivery-block")
+    async def bridge_report_delivery_block(session_id: str, body: DeliveryBlockReport, who: Principal = Depends(principal)):
+        """The bridge could not deliver to this session and stops trying until the returned time (once per episode the user is told)."""
+        require_bridge(who)
+        session = db.get_session(session_id)
+        if session is None or session.provider not in BRIDGE_PROVIDERS:
+            raise HTTPException(status_code=404, detail="Session not found")
+        block, _new = db.report_delivery_block(session_id, body.code, body.phase, body.deterministic, body.attempts)
+        if db.claim_block_notification(session_id):
+            notify_delivery_blocked(session, body.code)
+        notify_session(session_id)
+        retry_in = max(0, int((datetime.fromisoformat(block["next_retry_at"]) - datetime.now(timezone.utc)).total_seconds()))
+        return {"failed_attempts": block["failed_attempts"], "retry_after_seconds": retry_in}
+
+    @app.delete("/api/bridge/sessions/{session_id}/delivery-block")
+    async def bridge_clear_delivery_block(session_id: str, who: Principal = Depends(principal)):
+        """A delivery to this session went through: the block is over."""
+        require_bridge(who)
+        cleared = db.clear_delivery_block(session_id)
+        if cleared:
+            notify_session(session_id)
+        return {"cleared": cleared}
+
+    @app.post("/api/sessions/{session_id}/delivery-block/retry")
+    async def retry_session_delivery_block(session_id: str, who: Principal = Depends(principal)):
+        """The user asks the bridge to try again now (the block, and its notification, stay one episode)."""
+        require_human(who)
+        if not db.retry_delivery_block(session_id):
+            raise ProductError(404, "session.delivery_block_not_found", "This session has no blocked delivery.")
+        notify_session(session_id)
+        return {"session": session_id, "retry": "requested"}
 
     @app.post("/api/bridge/requests/{request_id}/claim", response_model=RequestModel)
     async def bridge_claim_injection(request_id: int, who: Principal = Depends(principal)):

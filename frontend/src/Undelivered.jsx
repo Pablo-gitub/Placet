@@ -6,7 +6,7 @@ import { useWide } from "./useWide";
 import { MessageActions, MessageText } from "./MessageActions";
 
 // Most urgent first: what is stuck, then what waits for a refresh, a time, an approval.
-const CAUSES = ["blocked", "awaiting_refresh", "scheduled", "awaiting_approval"];
+const CAUSES = ["delivery_blocked", "blocked", "awaiting_refresh", "scheduled", "awaiting_approval"];
 
 const who = (agent, node) => (node ? `${agent} (${node})` : agent);
 
@@ -44,6 +44,34 @@ function Row({ item, sessions, wide, onOpenMessage, onChanged }) {
   );
 }
 
+/** Why the channel can not deliver to a session, how often it failed and when it looks again, with the way to try again now. */
+function DeliveryBlock({ block, onRetried }) {
+  const { t } = useTranslation();
+  const [busy, setBusy] = useState(false);
+  const known = block.code === "missing_user_config";
+  const retry = async () => {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(block.session_id)}/delivery-block/retry`, { method: "POST" });
+      if (res.ok) onRetried?.();
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="delivery-block" data-testid={`delivery-block-${block.session_id}`} role="note">
+      <p>{t(known ? "undelivered.blockMissingConfig" : "undelivered.blockOther")}</p>
+      <small className="composer-note">
+        {t("undelivered.blockAttempts", { count: block.failed_attempts })} · {t("undelivered.blockChecked", { time: formatWhen(block.last_checked_at) })}
+        {block.next_retry_at ? ` · ${t("undelivered.blockNext", { time: formatWhen(block.next_retry_at) })}` : ""}
+      </small>
+      <div className="actions-row">
+        <button type="button" className="btn btn-primary" disabled={busy} onClick={retry}>{t("undelivered.retryBlock")}</button>
+      </div>
+    </div>
+  );
+}
+
 /** Settings → prompts to agents that have not been delivered yet, by cause, with cancel and forward. */
 export default function Undelivered({ requests = [], sessions = [], onOpenMessage }) {
   const { t } = useTranslation();
@@ -73,6 +101,8 @@ export default function Undelivered({ requests = [], sessions = [], onOpenMessag
       {groups.map(([cause, list]) => (
         <div key={cause} className="message-group" data-testid={`undelivered-group-${cause}`}>
           <h4>{t(`undelivered.cause.${cause}`)} <span className="provider-count">{list.length}</span></h4>
+          {cause === "delivery_blocked" && [...new Map(list.filter((i) => i.block).map((i) => [i.block.session_id, i.block])).values()]
+            .map((block) => <DeliveryBlock key={block.session_id} block={block} onRetried={reload} />)}
           {list.map((item) => (
             <Row key={item.request.id} item={item} sessions={sessions} wide={wide}
               onOpenMessage={onOpenMessage} onChanged={reload} />

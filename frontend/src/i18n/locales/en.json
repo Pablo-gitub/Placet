@@ -825,7 +825,8 @@
       "blocked": "Blocked",
       "awaiting_refresh": "Waiting for the refresh",
       "scheduled": "Scheduled",
-      "awaiting_approval": "Waiting for approval"
+      "awaiting_approval": "Waiting for approval",
+      "delivery_blocked": "Delivery blocked"
     },
     "due": "leaves {{time}}",
     "cancel": "Cancel message",
@@ -837,6 +838,13 @@
     "forwardGo": "Forward to this session",
     "pick": "Choose a session",
     "noSession": "No other open session",
-    "title_detail": "Message #{{id}}"
+    "title_detail": "Message #{{id}}",
+    "blockMissingConfig": "Delivery blocked: Antigravity does not expose the configuration of this conversation. Open the conversation, check the model and settings, send a message, then Retry.",
+    "blockOther": "Delivery blocked: delivery to this session keeps failing. Placet will try again calmly; you can retry now.",
+    "blockAttempts_one": "{{count}} failed attempt",
+    "blockAttempts_other": "{{count}} failed attempts",
+    "blockChecked": "last check {{time}}",
+    "blockNext": "next try {{time}}",
+    "retryBlock": "Retry delivery"
   }
 }

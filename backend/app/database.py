@@ -1,3 +1,4 @@
+import random
 import re
 import sqlite3
 import json
@@ -452,6 +453,22 @@ class Database:
                 state TEXT NOT NULL DEFAULT 'active',
                 created_at TEXT NOT NULL,
                 superseded_at TEXT
+            );
+            """)
+            # A delivery the channel can not complete, per session: why, how many channel attempts failed, and when
+            # the bridge may try again. Kept here so it survives a restart of the bridge.
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS delivery_blocks (
+                session_id TEXT PRIMARY KEY,
+                code TEXT NOT NULL,
+                phase TEXT NOT NULL,
+                deterministic INTEGER NOT NULL,
+                failed_attempts INTEGER NOT NULL DEFAULT 0,
+                level INTEGER NOT NULL DEFAULT 0,
+                since TEXT NOT NULL,
+                last_checked_at TEXT NOT NULL,
+                next_retry_at TEXT NOT NULL,
+                notified_at TEXT
             );
             """)
             cursor.execute("""
@@ -3679,8 +3696,71 @@ class Database:
                          " wake_cause = NULL, wake_cause_at = NULL WHERE id = ?", (state, now, attempts, session_id))
         return True
 
+    # A deterministic failure is checked again after 5, then 15, then 60 minutes; a transient one backs off from
+    # 6 s, doubling up to 5 minutes, with a ±20 % jitter.
+    BLOCK_DETERMINISTIC_SECONDS = (300, 900, 3600)
+    BLOCK_TRANSIENT_FIRST_SECONDS = 6
+    BLOCK_TRANSIENT_CAP_SECONDS = 300
+
+    def report_delivery_block(self, session_id: str, code: str, phase: str, deterministic: bool,
+                              attempts: int = 1) -> Tuple[Dict[str, Any], bool]:
+        """
+        The bridge could not deliver to this session and will not keep trying every tick. Returns the block and
+        whether this opens a new episode (the user is told once per episode). Only a closed code and a phase are
+        stored: never a configuration.
+        """
+        now = datetime.now(timezone.utc)
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT * FROM delivery_blocks WHERE session_id = ?", (session_id,)).fetchone()
+            level = (row["level"] if row else 0) + 1
+            if deterministic:
+                seconds = self.BLOCK_DETERMINISTIC_SECONDS[min(level, len(self.BLOCK_DETERMINISTIC_SECONDS)) - 1]
+            else:
+                seconds = min(self.BLOCK_TRANSIENT_CAP_SECONDS, self.BLOCK_TRANSIENT_FIRST_SECONDS * 2 ** (level - 1))
+                seconds *= random.uniform(0.8, 1.2)
+            nxt = (now + timedelta(seconds=seconds)).isoformat()
+            if row is None:
+                conn.execute("INSERT INTO delivery_blocks (session_id, code, phase, deterministic, failed_attempts, level,"
+                             " since, last_checked_at, next_retry_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                             (session_id, code, phase, int(deterministic), attempts, level, now.isoformat(), now.isoformat(), nxt))
+            else:
+                conn.execute("UPDATE delivery_blocks SET code = ?, phase = ?, deterministic = ?, failed_attempts = failed_attempts + ?,"
+                             " level = ?, last_checked_at = ?, next_retry_at = ? WHERE session_id = ?",
+                             (code, phase, int(deterministic), attempts, level, now.isoformat(), nxt, session_id))
+        return self.get_delivery_block(session_id), row is None
+
+    def get_delivery_block(self, session_id: str) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT * FROM delivery_blocks WHERE session_id = ?", (session_id,)).fetchone()
+        return dict(row) if row else None
+
+    def clear_delivery_block(self, session_id: str) -> bool:
+        """A delivery went through (or the block is gone): the episode is over."""
+        with self._get_connection() as conn:
+            return conn.execute("DELETE FROM delivery_blocks WHERE session_id = ?", (session_id,)).rowcount > 0
+
+    def retry_delivery_block(self, session_id: str) -> bool:
+        """The user asks for another try: due at once, and the backoff starts over. The episode goes on."""
+        with self._get_connection() as conn:
+            return conn.execute("UPDATE delivery_blocks SET next_retry_at = ?, level = 0 WHERE session_id = ?",
+                                (datetime.now(timezone.utc).isoformat(), session_id)).rowcount > 0
+
+    def claim_block_notification(self, session_id: str) -> bool:
+        """True once per episode: the caller tells the user."""
+        with self._get_connection() as conn:
+            return conn.execute("UPDATE delivery_blocks SET notified_at = ? WHERE session_id = ? AND notified_at IS NULL",
+                                (datetime.now(timezone.utc).isoformat(), session_id)).rowcount > 0
+
+    def delivery_block_states(self) -> Tuple[Set[str], Set[str]]:
+        """(sessions waiting out a block, sessions whose block is due for one probe)."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            rows = conn.execute("SELECT session_id, next_retry_at FROM delivery_blocks").fetchall()
+        waiting = {r["session_id"] for r in rows if r["next_retry_at"] > now}
+        return waiting, {r["session_id"] for r in rows} - waiting
+
     def bridge_sessions_with_mail(self, include_suspended: bool = False) -> List[SessionModel]:
-        """Open sessions the bridge wakes (Codex, Antigravity) with a message waiting."""
+        """Open sessions the bridge wakes (Codex, Antigravity) with a message waiting, but not those waiting out a block."""
         placeholders = ", ".join("?" for _ in BRIDGE_PROVIDERS)
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -3694,7 +3774,8 @@ class Database:
             sessions = [self._row_to_session(r, WAITER_TTL_SECONDS) for r in cursor.fetchall()]
         # Not for a provider at its usage limit: the message would be lost.
         limited = self.limited_providers()
-        return [s for s in sessions if s.provider not in limited and self.inbox_has_message(s)]
+        blocked, _ = self.delivery_block_states()
+        return [s for s in sessions if s.provider not in limited and s.id not in blocked and self.inbox_has_message(s)]
 
     def take_inbox_message(
         self, session: SessionModel, actor: Optional[str] = None, via: str = "hook"
