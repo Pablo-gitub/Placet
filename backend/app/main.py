@@ -66,6 +66,7 @@ from backend.app.models import (
     BRIDGE_PROVIDERS,
     SUSPENDING_PROVIDERS,
     STEER_PROVIDERS,
+    WAKEABLE_SUSPENDED_PROVIDERS,
     INBOX_WAIT_SECONDS,
     RESULT_GRACE_SECONDS,
     RESULT_MAX_AGE_SECONDS,
@@ -124,6 +125,8 @@ class SessionEventPayload(BaseModel):
     # start (RS-09): the SHA-256 of the credential the hook just put in the session's context;
     # never the credential itself.
     credential_sha256: Optional[str] = Field(None, pattern=r"^[0-9a-f]{64}$")
+    # start (RS-09): when the hook issued it (epoch seconds): two starts that arrive inverted are ordered by this.
+    credential_issued_at: Optional[float] = Field(None, ge=0)
     # start: why the session started (Claude Code: startup, resume, clear, compact).
     start_source: Optional[str] = Field(None, max_length=32)
     # RF-29d: UUID of the session being continued
@@ -898,6 +901,7 @@ def create_app(
         background_tasks: BackgroundTasks,
         wait_seconds: int = Query(0, ge=0, le=600),
         who: Principal = Depends(principal),
+        x_placet_session: Optional[str] = Header(None),
     ):
         require_agent(who)
         if req.sender_id is not None and req.sender_id != who.id:
@@ -930,8 +934,13 @@ def create_app(
             raise ProductError(422, "request.no_recipient", "Specify recipient_id or target_node.")
 
         # The relation is known before anything is created (RFC-04/06).
-        if req.sender_session_id:
-            own = db.get_session(req.sender_session_id)
+        bound = bound_session(who, x_placet_session)
+        if bound is not None and req.sender_session_id is not None and req.sender_session_id != bound:
+            raise ProductError(409, "session.conflict",
+                               f"sender_session_id {req.sender_session_id!r} conflicts with credential's session {bound!r}.")
+        sender_session_candidate = bound or req.sender_session_id
+        if sender_session_candidate:
+            own = db.get_session(sender_session_candidate)
             if own is None or own.agent_id != who.id:
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                                     detail="sender_session_id is not a session of this agent.")
@@ -1018,7 +1027,12 @@ def create_app(
         target_warning = None
         if req.recipient_session_id is not None:
             target = db.get_session(req.recipient_session_id)
-            if target is not None and not target.reachable and not target.tmux_session:
+            is_wakeable_suspended = (
+                target is not None
+                and target.provider in WAKEABLE_SUSPENDED_PROVIDERS
+                and target.suspended_at is not None
+            )
+            if target is not None and not target.reachable and not target.tmux_session and not is_wakeable_suspended:
                 target_warning = (
                     f"Session {req.recipient_session_id} is not reachable now: the request "
                     "will be delivered only if it comes back before expiring."
@@ -1784,7 +1798,7 @@ def create_app(
             db.set_session_state(session_id, "idle",
                                  kept if kept_req is not None and kept_req.status == RequestStatus.EXECUTING else None)
             if payload.credential_sha256:
-                db.register_binding(session_id, who.id, payload.credential_sha256)
+                db.register_binding(session_id, who.id, payload.credential_sha256, issued_at=payload.credential_issued_at)
             db.wake_evidence(session_id)  # a desktop wake-up got its evidence: the session started
             if payload.mcp is not None:
                 db.set_mcp_config_state(session_id, payload.mcp)
