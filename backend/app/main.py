@@ -1722,16 +1722,45 @@ def create_app(
                     turn_request_id = payload.request_id
                 except HTTPException as e:
                     result["ack_error"] = e.detail
+            if turn_request_id is None:
+                # The turn after one that ended waiting for the user's answer continues that request.
+                kept = db.get_agent_states().get(who.id, {})
+                kept_req = db.get_request(kept["turn_request_id"]) if kept.get("state") == "idle" and kept.get("turn_request_id") else None
+                if kept_req is not None and kept_req.status == RequestStatus.EXECUTING and kept_req.recipient_id == who.id:
+                    turn_request_id = kept_req.id
+                    db.mark_turn_mixed(kept_req.id)
+                    db.log_event(kept_req.id, who.actor + ":hook", "turn_resumed", {})
             db.set_agent_state(who.id, "busy", turn_request_id)
             result["turn_request_id"] = turn_request_id
             return result
 
         previous = db.get_agent_states().get(who.id, {})
+        waiting = question_open_in_turn(who, previous.get("turn_request_id"))
+        if waiting is not None:
+            # Waiting for the user's answer: the task goes on after it, the turn is still linked to it.
+            db.set_agent_state(who.id, "idle", previous.get("turn_request_id"))
+            db.log_event(previous["turn_request_id"], who.actor + ":hook", "turn_waiting_user", {"question": waiting})
+            notify_change(previous["turn_request_id"])
+            result["waiting_for_user"] = waiting
+            return result
         db.set_agent_state(who.id, "idle", None)
         replied = implicit_reply(who, previous.get("turn_request_id"), payload.last_message)
         if replied is not None:
             result["implicit_reply_for"] = replied
         return result
+
+    def question_open_in_turn(who: Principal, req_id: Optional[int], session_id: Optional[str] = None) -> Optional[int]:
+        """
+        A placet_ask_human the agent opened since this request's turn began and that is still PENDING when the turn
+        ends: the agent is waiting for the user, so the end of the turn is not the end of the task.
+        """
+        if req_id is None:
+            return None
+        req = db.get_request(req_id)
+        if req is None or req.recipient_id != who.id or req.status != RequestStatus.EXECUTING:
+            return None
+        since = req.executing_since or req.delivering_since or req.created_at
+        return db.pending_question_since(who.id, session_id, since)
 
     def implicit_reply(who: Principal, turn_request_id: Optional[int], last_message: Optional[str]):
         """
@@ -1866,14 +1895,21 @@ def create_app(
         elif payload.event == "stop":
             was_busy = session.state == "busy"
             is_placet = (session.turn_request_id is not None) or bool(db.steered_in_turn(session_id))
-            db.set_session_state(session_id, "idle")
+            waiting = question_open_in_turn(who, session.turn_request_id, session_id)
+            # Waiting for the user's answer to a question asked in this turn: the task is not over. The turn stays
+            # linked to its request (the session is idle, the queue is held) and the answer resumes it.
+            db.set_session_state(session_id, "idle", session.turn_request_id if waiting is not None else None)
             if was_busy:
                 notify_turn_end(session, payload.last_message, is_placet=is_placet)
-            if session.turn_request_id is not None:
+            if waiting is not None:
+                db.log_event(session.turn_request_id, f"{who.actor}:hook", "turn_waiting_user", {"question": waiting})
+                notify_change(session.turn_request_id)
+                result["waiting_for_user"] = waiting
+            elif session.turn_request_id is not None:
                 db.set_execution(session.turn_request_id, "completed", actor=f"{who.actor}:hook",
                                  source=source)
                 notify_change(session.turn_request_id)
-            replied = implicit_reply(who, session.turn_request_id, payload.last_message)
+            replied = implicit_reply(who, session.turn_request_id, payload.last_message) if waiting is None else None
             if replied is not None:
                 result["implicit_reply_for"] = replied
             for steered_id in db.steered_in_turn(session_id):
