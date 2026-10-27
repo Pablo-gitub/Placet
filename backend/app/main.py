@@ -1191,6 +1191,8 @@ def create_app(
 
     def undelivered_cause(req: RequestModel, now: datetime):
         """(cause, due_at) of a prompt that has not reached its recipient yet."""
+        if req.status == RequestStatus.DELIVERY_FAILED:
+            return "blocked", None
         if req.status == RequestStatus.PENDING:
             return "awaiting_approval", req.scheduled_at
         if req.scheduled_at is not None and req.scheduled_at.astimezone(timezone.utc) > now:
@@ -1220,6 +1222,8 @@ def create_app(
             target = db.get_session(req.recipient_session_id) if req.recipient_session_id else None
             items.append(UndeliveredItem(
                 request=req, cause=cause, due_at=due_at,
+                can_cancel=req.status != RequestStatus.DELIVERY_FAILED, can_forward=req.status != RequestStatus.DELIVERY_FAILED,
+                can_retry=cause == "blocked",
                 sender_node=sender.node_name if sender else None,
                 recipient_node=target.node_name if target else None))
         return items
@@ -1242,6 +1246,19 @@ def create_app(
             raise ProductError(409, "undelivered.not_available",
                                "This message has already started to be delivered, or is not a prompt to an agent.")
         notify_change(request_id)
+        return get_or_404(request_id)
+
+    @app.post("/api/requests/{request_id}/undelivered/retry", response_model=RequestModel)
+    async def retry_undelivered(request_id: int, who: Principal = Depends(principal)):
+        """The user puts a stuck prompt back in the queue of the same session; refused once it is delivering or running."""
+        require_human(who)
+        req = get_or_404(request_id)
+        if req.recipient_id == "human" or not db.retry_undelivered(request_id, actor=who.actor):
+            raise ProductError(409, "undelivered.not_available",
+                               "This message has already started to be delivered, or is not a prompt to an agent.")
+        notify_change(request_id)
+        if req.recipient_session_id:
+            notify_session(req.recipient_session_id)
         return get_or_404(request_id)
 
     class ForwardUndelivered(BaseModel):

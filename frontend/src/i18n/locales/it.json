@@ -837,6 +837,7 @@
     "forwardGo": "Inoltra a questa sessione",
     "pick": "Scegli una sessione",
     "noSession": "Nessun’altra sessione aperta",
-    "title_detail": "Messaggio #{{id}}"
+    "title_detail": "Messaggio #{{id}}",
+    "retry": "Riprova consegna"
   }
 }

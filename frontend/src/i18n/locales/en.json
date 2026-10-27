@@ -837,6 +837,7 @@
     "forwardGo": "Forward to this session",
     "pick": "Choose a session",
     "noSession": "No other open session",
-    "title_detail": "Message #{{id}}"
+    "title_detail": "Message #{{id}}",
+    "retry": "Retry delivery"
   }
 }
