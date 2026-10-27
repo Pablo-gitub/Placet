@@ -225,9 +225,11 @@ class AntigravityChannel:
     def _config(trajectory: dict) -> dict:
         """The configuration of the last user turn: model, tools, rules.
         Without it the language server accepts the message but cannot run it."""
-        inputs = [s.get("userInput") or {} for s in reversed(trajectory.get("steps", []))]
-        for key in ("userConfig", "lastUserConfig"):
-            for user_input in inputs:
+        # The most recent step that has one wins, whichever field it uses: an old userConfig never beats a
+        # newer lastUserConfig. Within a step, userConfig comes first.
+        for step in reversed(trajectory.get("steps", [])):
+            user_input = step.get("userInput") or {}
+            for key in ("userConfig", "lastUserConfig"):
                 if user_input.get(key):
                     return user_input[key]
         raise ChannelError("No previous user turn to copy the model configuration from.")

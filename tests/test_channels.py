@@ -102,8 +102,9 @@ def test_antigravity_sends_with_the_conversation_configuration():
     assert body["cascadeId"] == "conv-1"
     assert body["items"] == [{"text": "[Placet Request #3 dall'utente]: ciao"}]
     assert body["deliveryStrategy"] == "MESSAGE_DELIVERY_STRATEGY_WHEN_IDLE"
-    # The last full user configuration (without it the turn cannot start).
-    assert body["cascadeConfig"] == CONFIG
+    # The configuration of the most recent user turn (without it the turn cannot start): here the last step's
+    # lastUserConfig, not the older step's userConfig.
+    assert body["cascadeConfig"] == {"x": 1}
     assert send.headers["Connect-Protocol-Version"] == "1"
     assert send.url.port == 2222
 
