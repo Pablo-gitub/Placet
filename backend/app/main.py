@@ -66,6 +66,7 @@ from backend.app.models import (
     BRIDGE_PROVIDERS,
     SUSPENDING_PROVIDERS,
     STEER_PROVIDERS,
+    WAKEABLE_SUSPENDED_PROVIDERS,
     INBOX_WAIT_SECONDS,
     RESULT_GRACE_SECONDS,
     RESULT_MAX_AGE_SECONDS,
@@ -1018,7 +1019,12 @@ def create_app(
         target_warning = None
         if req.recipient_session_id is not None:
             target = db.get_session(req.recipient_session_id)
-            if target is not None and not target.reachable and not target.tmux_session:
+            is_wakeable_suspended = (
+                target is not None
+                and target.provider in WAKEABLE_SUSPENDED_PROVIDERS
+                and target.suspended_at is not None
+            )
+            if target is not None and not target.reachable and not target.tmux_session and not is_wakeable_suspended:
                 target_warning = (
                     f"Session {req.recipient_session_id} is not reachable now: the request "
                     "will be delivered only if it comes back before expiring."
