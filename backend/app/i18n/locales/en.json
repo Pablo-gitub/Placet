@@ -69,5 +69,8 @@
   "notify.wake_failed_body": "Placet could not ask Claude Desktop to open the session. The message is still in Placet.",
   "notify.turn_failed_title": "{label} stopped",
   "notify.turn_failed_rate_limit": "Usage limit reached: the session will not resume by itself. Write to it after the reset.",
-  "notify.turn_failed_other": "The turn ended on an API error ({error}): the session will not resume by itself."
+  "notify.turn_failed_other": "The turn ended on an API error ({error}): the session will not resume by itself.",
+  "notify.delivery_blocked_title": "{label}: delivery blocked",
+  "notify.delivery_blocked_missing_user_config": "Antigravity does not expose the configuration of this conversation. Open the conversation, check the model and settings, send a message, then Retry.",
+  "notify.delivery_blocked_other": "Delivery to this session keeps failing: Placet will try again calmly. Check that the app is open and the conversation available."
 }

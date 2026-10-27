@@ -11,7 +11,7 @@ from backend.app.config import PlacetConfig
 from backend.app.database import Database
 from backend.app import envelopes
 from backend.app.models import RequestModel
-from bridge.channels import ChannelError, ChannelUncertain, default_channels
+from bridge.channels import DETERMINISTIC_CODES, TRANSIENT_CODES, ChannelError, ChannelUncertain, default_channels
 from bridge.stores import BridgeStore, LocalStore, Work
 from bridge.claude_desktop_engines import EngineCounter
 from bridge.claude_desktop_log import WakeDiagnosis
@@ -227,6 +227,28 @@ class BridgeDaemon:
                 processed += 1
         return processed
 
+    def _try_send(self, channel, target: dict, mail):
+        """
+        One send into the app: ("sent" | "uncertain" | "blocked" | "failed", error, attempts). A deterministic
+        pre-dispatch failure (nothing was sent, and the same answer is expected again) is read once more to be sure,
+        except for a probe the backend scheduled; a transient one is not, the backend backs it off.
+        """
+        attempts = 0
+        while True:
+            attempts += 1
+            try:
+                channel.send(target["id"], mail.text)
+                return "sent", None, attempts
+            except ChannelUncertain as e:
+                return "uncertain", e, attempts
+            except ChannelError as e:
+                blocking = e.phase == "pre_dispatch" and e.code in DETERMINISTIC_CODES | TRANSIENT_CODES
+                if blocking and e.code in DETERMINISTIC_CODES and attempts == 1 and not target.get("probing"):
+                    continue
+                return ("blocked" if blocking else "failed"), e, attempts
+            except (OSError, subprocess.SubprocessError) as e:
+                return "failed", e, attempts
+
     def process_session_mail(self, sessions: List[dict]) -> int:
         """
         Wakes Codex and Antigravity sessions in their app (RF-24): takes the
@@ -245,21 +267,35 @@ class BridgeDaemon:
             mail = self.store.take_session_mail(target["id"])
             if mail is None:
                 continue
-            try:
-                channel.send(target["id"], mail.text)
-            except ChannelUncertain as e:
+            outcome, error, attempts = self._try_send(channel, target, mail)
+            if outcome == "uncertain":
                 # It may be in the conversation already: never sent twice by itself.
-                logger.warning(f"Delivery of request #{mail.request_id} to {target['id']} is uncertain: {e}")
+                logger.warning(f"Delivery of request #{mail.request_id} to {target['id']} is uncertain: {error}")
                 if mail.kind == "injection":
                     self.store.mark_uncertain(mail.request_id)
                 continue
-            except (ChannelError, OSError, subprocess.SubprocessError) as e:
-                logger.error(f"Could not wake session {target['id']} ({target.get('provider')}): {e}")
+            if outcome in ("blocked", "failed"):
+                if outcome == "blocked":
+                    # Certainly nothing was sent, and trying again now would give the same answer: stop polling this
+                    # session. Only the code is logged and reported, never what the app said.
+                    logger.warning(f"Delivery to session {target['id']} blocked: {error.code} after {attempts} attempt(s).")
+                    try:
+                        self.store.report_delivery_block(target["id"], error.code, error.phase,
+                                                         error.code in DETERMINISTIC_CODES, attempts)
+                    except Exception as exc:
+                        logger.warning(f"Could not report the delivery block of {target['id']} ({type(exc).__name__}).")
+                else:
+                    logger.error(f"Could not wake session {target['id']} ({target.get('provider')}): {error}")
                 if mail.kind == "injection":
                     self.store.release_injection(mail.request_id)
                 else:
                     self.store.release_delivery(mail.request_id)
                 continue
+            if target.get("probing"):
+                try:
+                    self.store.clear_delivery_block(target["id"])
+                except Exception as exc:
+                    logger.warning(f"Could not clear the delivery block of {target['id']} ({type(exc).__name__}).")
             if mail.kind == "injection":
                 self.store.confirm_injection(mail.request_id)
             logger.info(f"Queued request #{mail.request_id} ({mail.kind}) into session {target['id']}.")

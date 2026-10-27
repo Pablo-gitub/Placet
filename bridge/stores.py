@@ -88,6 +88,9 @@ class BridgeStore(Protocol):
     # Sessions woken in their app: take the next message, then confirm the
     # injection or give the message back if it could not be queued.
     def take_session_mail(self, session_id: str) -> Optional[SessionMail]: ...
+    # The channel can not deliver to this session: stop trying until the backend says so; and the way back.
+    def report_delivery_block(self, session_id: str, code: str, phase: str, deterministic: bool, attempts: int = 1) -> None: ...
+    def clear_delivery_block(self, session_id: str) -> None: ...
     # The send ran but its outcome is unknown; later found in the conversation.
     def mark_uncertain(self, request_id: int) -> None: ...
     def mark_seen(self, request_id: int) -> None: ...
@@ -146,7 +149,8 @@ class LocalStore:
             results=results,
             busy_agents=sorted(set(self.db.busy_agents(AGENT_BUSY_TTL_SECONDS)) | set(busy)),
             sessions=[
-                {"id": s.id, "agent_id": s.agent_id, "provider": s.provider}
+                {"id": s.id, "agent_id": s.agent_id, "provider": s.provider,
+                 **({"probing": True} if s.id in self.db.delivery_block_states()[1] else {})}
                 for s in self.db.bridge_sessions_with_mail()
             ],
             uncertain=[
@@ -164,9 +168,15 @@ class LocalStore:
             session_credentials=self.db.get_setting("session_credentials") == "true",
         )
 
+    def report_delivery_block(self, session_id: str, code: str, phase: str, deterministic: bool, attempts: int = 1) -> None:
+        self.db.report_delivery_block(session_id, code, phase, deterministic, attempts)
+
+    def clear_delivery_block(self, session_id: str) -> None:
+        self.db.clear_delivery_block(session_id)
+
     def take_session_mail(self, session_id: str) -> Optional[SessionMail]:
         session = self.db.get_session(session_id)
-        if session is None:
+        if session is None or session_id in self.db.delivery_block_states()[0]:
             return None
         taken = self.db.take_inbox_message(session, actor=BRIDGE_ACTOR, via="bridge")
         if taken is None:
@@ -292,6 +302,15 @@ class HttpStore:
             claude_auto_renew=bool(data.get("claude_auto_renew", False)),
             session_credentials=bool(data.get("session_credentials", False)),
         )
+
+    def report_delivery_block(self, session_id: str, code: str, phase: str, deterministic: bool, attempts: int = 1) -> None:
+        resp = self.client.post(f"/api/bridge/sessions/{session_id}/delivery-block", json={
+            "code": code, "phase": phase, "deterministic": deterministic, "attempts": attempts})
+        resp.raise_for_status()
+
+    def clear_delivery_block(self, session_id: str) -> None:
+        resp = self.client.delete(f"/api/bridge/sessions/{session_id}/delivery-block")
+        resp.raise_for_status()
 
     def take_session_mail(self, session_id: str) -> Optional[SessionMail]:
         resp = self.client.post(f"/api/bridge/sessions/{session_id}/take")

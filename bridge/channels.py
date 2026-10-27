@@ -23,8 +23,21 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
+# Failures that happen before anything is sent, with a closed code: a deterministic one will not go away by itself
+# (the conversation exposes no configuration), a transient one may (the app is not running yet).
+DETERMINISTIC_CODES = frozenset({"missing_user_config"})
+TRANSIENT_CODES = frozenset({"conversation_unavailable"})
+
+
 class ChannelError(Exception):
-    """The message was not queued: it can wait for another attempt."""
+    """
+    The message was not queued: it can wait for another attempt. `code` and `phase` (a closed code and
+    "pre_dispatch") say that certainly nothing was sent and why; without them the failure is unclassified.
+    """
+
+    def __init__(self, message: str = "", code: Optional[str] = None, phase: Optional[str] = None):
+        super().__init__(message)
+        self.code, self.phase = code, phase
 
 
 class ChannelUncertain(ChannelError):
@@ -187,7 +200,8 @@ class AntigravityChannel:
         self._servers.pop(cascade_id, None)
         raise ChannelError(
             f"Antigravity is not running, or has no conversation {cascade_id} "
-            f"(Antigravity {self.version})."
+            f"(Antigravity {self.version}).",
+            code="conversation_unavailable", phase="pre_dispatch",
         )
 
     def quota_summary(self) -> dict:
@@ -225,12 +239,15 @@ class AntigravityChannel:
     def _config(trajectory: dict) -> dict:
         """The configuration of the last user turn: model, tools, rules.
         Without it the language server accepts the message but cannot run it."""
-        inputs = [s.get("userInput") or {} for s in reversed(trajectory.get("steps", []))]
-        for key in ("userConfig", "lastUserConfig"):
-            for user_input in inputs:
+        # The most recent step that has one wins, whichever field it uses: an old userConfig never beats a
+        # newer lastUserConfig. Within a step, userConfig comes first.
+        for step in reversed(trajectory.get("steps", [])):
+            user_input = step.get("userInput") or {}
+            for key in ("userConfig", "lastUserConfig"):
                 if user_input.get(key):
                     return user_input[key]
-        raise ChannelError("No previous user turn to copy the model configuration from.")
+        raise ChannelError("No previous user turn to copy the model configuration from.",
+                           code="missing_user_config", phase="pre_dispatch")
 
     def send(self, session_id: str, text: str, now: bool = False) -> None:
         """Queues the message for when the agent is idle, or with now=True for

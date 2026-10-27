@@ -2257,3 +2257,5 @@ body.chat-open { overflow: hidden; }
   border: 0; border-radius: 999px; background: var(--primary); color: white; font: inherit; font-size: 0.85rem;
   font-weight: 600; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4); cursor: pointer;
 }
+.delivery-block { margin: 0.4rem 0 0.6rem; padding: 0.6rem; border: 1px solid var(--warning); border-radius: 8px; overflow-wrap: anywhere; }
+.delivery-block p { margin: 0 0 0.35rem; }

@@ -825,7 +825,8 @@
       "blocked": "Bloccati",
       "awaiting_refresh": "In attesa del refresh",
       "scheduled": "Programmati",
-      "awaiting_approval": "In attesa di approvazione"
+      "awaiting_approval": "In attesa di approvazione",
+      "delivery_blocked": "Consegna bloccata"
     },
     "due": "parte {{time}}",
     "cancel": "Annulla messaggio",
@@ -838,6 +839,13 @@
     "pick": "Scegli una sessione",
     "noSession": "Nessun’altra sessione aperta",
     "title_detail": "Messaggio #{{id}}",
+    "blockMissingConfig": "Consegna bloccata: Antigravity non espone la configurazione di questa conversazione. Apri la conversazione, verifica modello e impostazioni, invia un messaggio, poi Riprova.",
+    "blockOther": "Consegna bloccata: la consegna a questa sessione non riesce. Placet riproverà con calma; puoi riprovare subito.",
+    "blockAttempts_one": "{{count}} tentativo fallito",
+    "blockAttempts_other": "{{count}} tentativi falliti",
+    "blockChecked": "ultima verifica {{time}}",
+    "blockNext": "prossimo tentativo {{time}}",
+    "retryBlock": "Riprova consegna",
     "retry": "Riprova consegna"
   }
 }
