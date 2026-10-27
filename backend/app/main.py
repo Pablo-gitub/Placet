@@ -66,6 +66,7 @@ from backend.app.models import (
     BRIDGE_PROVIDERS,
     SUSPENDING_PROVIDERS,
     STEER_PROVIDERS,
+    WAKEABLE_SUSPENDED_PROVIDERS,
     INBOX_WAIT_SECONDS,
     RESULT_GRACE_SECONDS,
     RESULT_MAX_AGE_SECONDS,
@@ -124,6 +125,8 @@ class SessionEventPayload(BaseModel):
     # start (RS-09): the SHA-256 of the credential the hook just put in the session's context;
     # never the credential itself.
     credential_sha256: Optional[str] = Field(None, pattern=r"^[0-9a-f]{64}$")
+    # start (RS-09): when the hook issued it (epoch seconds): two starts that arrive inverted are ordered by this.
+    credential_issued_at: Optional[float] = Field(None, ge=0)
     # start: why the session started (Claude Code: startup, resume, clear, compact).
     start_source: Optional[str] = Field(None, max_length=32)
     # RF-29d: UUID of the session being continued
@@ -898,6 +901,7 @@ def create_app(
         background_tasks: BackgroundTasks,
         wait_seconds: int = Query(0, ge=0, le=600),
         who: Principal = Depends(principal),
+        x_placet_session: Optional[str] = Header(None),
     ):
         require_agent(who)
         if req.sender_id is not None and req.sender_id != who.id:
@@ -930,8 +934,13 @@ def create_app(
             raise ProductError(422, "request.no_recipient", "Specify recipient_id or target_node.")
 
         # The relation is known before anything is created (RFC-04/06).
-        if req.sender_session_id:
-            own = db.get_session(req.sender_session_id)
+        bound = bound_session(who, x_placet_session)
+        if bound is not None and req.sender_session_id is not None and req.sender_session_id != bound:
+            raise ProductError(409, "session.conflict",
+                               f"sender_session_id {req.sender_session_id!r} conflicts with credential's session {bound!r}.")
+        sender_session_candidate = bound or req.sender_session_id
+        if sender_session_candidate:
+            own = db.get_session(sender_session_candidate)
             if own is None or own.agent_id != who.id:
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                                     detail="sender_session_id is not a session of this agent.")
@@ -1018,7 +1027,12 @@ def create_app(
         target_warning = None
         if req.recipient_session_id is not None:
             target = db.get_session(req.recipient_session_id)
-            if target is not None and not target.reachable and not target.tmux_session:
+            is_wakeable_suspended = (
+                target is not None
+                and target.provider in WAKEABLE_SUSPENDED_PROVIDERS
+                and target.suspended_at is not None
+            )
+            if target is not None and not target.reachable and not target.tmux_session and not is_wakeable_suspended:
                 target_warning = (
                     f"Session {req.recipient_session_id} is not reachable now: the request "
                     "will be delivered only if it comes back before expiring."
@@ -1177,6 +1191,8 @@ def create_app(
 
     def undelivered_cause(req: RequestModel, now: datetime):
         """(cause, due_at) of a prompt that has not reached its recipient yet."""
+        if req.status == RequestStatus.DELIVERY_FAILED:
+            return "blocked", None
         if req.status == RequestStatus.PENDING:
             return "awaiting_approval", req.scheduled_at
         if req.scheduled_at is not None and req.scheduled_at.astimezone(timezone.utc) > now:
@@ -1206,6 +1222,8 @@ def create_app(
             target = db.get_session(req.recipient_session_id) if req.recipient_session_id else None
             items.append(UndeliveredItem(
                 request=req, cause=cause, due_at=due_at,
+                can_cancel=req.status != RequestStatus.DELIVERY_FAILED, can_forward=req.status != RequestStatus.DELIVERY_FAILED,
+                can_retry=cause == "blocked",
                 sender_node=sender.node_name if sender else None,
                 recipient_node=target.node_name if target else None))
         return items
@@ -1228,6 +1246,19 @@ def create_app(
             raise ProductError(409, "undelivered.not_available",
                                "This message has already started to be delivered, or is not a prompt to an agent.")
         notify_change(request_id)
+        return get_or_404(request_id)
+
+    @app.post("/api/requests/{request_id}/undelivered/retry", response_model=RequestModel)
+    async def retry_undelivered(request_id: int, who: Principal = Depends(principal)):
+        """The user puts a stuck prompt back in the queue of the same session; refused once it is delivering or running."""
+        require_human(who)
+        req = get_or_404(request_id)
+        if req.recipient_id == "human" or not db.retry_undelivered(request_id, actor=who.actor):
+            raise ProductError(409, "undelivered.not_available",
+                               "This message has already started to be delivered, or is not a prompt to an agent.")
+        notify_change(request_id)
+        if req.recipient_session_id:
+            notify_session(req.recipient_session_id)
         return get_or_404(request_id)
 
     class ForwardUndelivered(BaseModel):
@@ -1796,7 +1827,7 @@ def create_app(
             db.set_session_state(session_id, "idle",
                                  kept if kept_req is not None and kept_req.status == RequestStatus.EXECUTING else None)
             if payload.credential_sha256:
-                db.register_binding(session_id, who.id, payload.credential_sha256)
+                db.register_binding(session_id, who.id, payload.credential_sha256, issued_at=payload.credential_issued_at)
             db.wake_evidence(session_id)  # a desktop wake-up got its evidence: the session started
             if payload.mcp is not None:
                 db.set_mcp_config_state(session_id, payload.mcp)

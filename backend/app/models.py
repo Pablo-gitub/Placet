@@ -301,6 +301,9 @@ class SessionUpload(BaseModel):
 # Codex: not verified yet, its "now" messages wait for the end of the turn.
 STEER_PROVIDERS = ("claude-code", "antigravity")
 
+# Providers whose suspended sessions can be awakened by the bridge when a message arrives.
+WAKEABLE_SUSPENDED_PROVIDERS = {"codex"}
+
 
 class ControlPayload(BaseModel):
     """RF-62: sent again after an uncertain outcome, the user confirms it explicitly."""
@@ -513,6 +516,8 @@ class UndeliveredItem(BaseModel):
     recipient_node: Optional[str] = None
     can_cancel: bool = True
     can_forward: bool = True
+    # Back in the queue of the same session: for prompts stuck behind a failure or an absent recipient.
+    can_retry: bool = False
 
 
 class RequestEvent(BaseModel):

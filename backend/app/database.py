@@ -454,6 +454,9 @@ class Database:
                 superseded_at TEXT
             );
             """)
+            if "issued_ts" not in [r["name"] for r in cursor.execute("PRAGMA table_info(session_bindings);").fetchall()]:
+                # When the hook issued the credential (epoch seconds): generations are ordered by it, not by arrival.
+                cursor.execute("ALTER TABLE session_bindings ADD COLUMN issued_ts REAL;")
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS session_control_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1010,24 +1013,57 @@ class Database:
     # resume during a running request).
     BINDING_GRACE_MINUTES = 10
 
-    def register_binding(self, session_id: str, agent_id: str, sha256: str) -> Optional[int]:
+    # A credential's issue time may run this far ahead of the backend's clock before it is taken as bogus.
+    BINDING_CLOCK_SKEW_SECONDS = 300
+
+    def register_binding(self, session_id: str, agent_id: str, sha256: str, issued_at: Optional[float] = None) -> Optional[int]:
         """
-        A new credential generation for a session, from its own hook: only the hash is stored. The
-        previous active one becomes superseded (valid for the grace period). A hash seen before is
-        refused (None): never reused across sessions or generations.
+        A new credential generation for a session, from its own hook: only the hash is stored. Generations are
+        ordered by the time the hook issued them (`issued_at`, epoch seconds; the arrival time without one), not by
+        arrival, so two starts that arrive inverted leave the newer credential active: an older one that arrives
+        late is stored as already superseded, its grace period counted from when the newer one was issued. The
+        previous active one becomes superseded (valid for the grace period). A hash seen before is refused (None):
+        never reused across sessions or generations.
         """
-        now = datetime.now(timezone.utc).isoformat()
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
+        issued = now_dt.timestamp()
+        if issued_at is not None and 0 < issued_at <= issued + self.BINDING_CLOCK_SKEW_SECONDS:
+            issued = float(issued_at)
         with self._get_connection() as conn:
             if conn.execute("SELECT 1 FROM session_bindings WHERE sha256 = ?", (sha256,)).fetchone():
                 return None
-            row = conn.execute("SELECT MAX(generation) AS g FROM session_bindings WHERE session_id = ?",
-                               (session_id,)).fetchone()
-            generation = (row["g"] or 0) + 1
+            rows = conn.execute("SELECT generation, state, created_at, issued_ts FROM session_bindings"
+                                " WHERE session_id = ? AND state != 'revoked'", (session_id,)).fetchall()
+            generation = (conn.execute("SELECT MAX(generation) AS g FROM session_bindings WHERE session_id = ?",
+                                       (session_id,)).fetchone()["g"] or 0) + 1
+
+            def issue_time(row) -> float:
+                if row["issued_ts"] is not None:
+                    return row["issued_ts"]
+                try:
+                    return datetime.fromisoformat(row["created_at"]).timestamp()
+                except (TypeError, ValueError):
+                    return 0.0
+
+            newer = sorted(issue_time(r) for r in rows if issue_time(r) > issued)
+            if newer:
+                superseded_at = datetime.fromtimestamp(newer[0], timezone.utc).isoformat()
+                conn.execute("INSERT INTO session_bindings (session_id, agent_id, generation, sha256, state, created_at,"
+                             " superseded_at, issued_ts) VALUES (?, ?, ?, ?, 'superseded', ?, ?, ?)",
+                             (session_id, agent_id, generation, sha256, now, superseded_at, issued))
+                return generation
             conn.execute("UPDATE session_bindings SET state = 'superseded', superseded_at = ?"
                          " WHERE session_id = ? AND state = 'active'", (now, session_id))
-            conn.execute("INSERT INTO session_bindings (session_id, agent_id, generation, sha256, state, created_at)"
-                         " VALUES (?, ?, ?, ?, 'active', ?)", (session_id, agent_id, generation, sha256, now))
+            conn.execute("INSERT INTO session_bindings (session_id, agent_id, generation, sha256, state, created_at,"
+                         " issued_ts) VALUES (?, ?, ?, ?, 'active', ?, ?)", (session_id, agent_id, generation, sha256, now, issued))
             return generation
+
+    @staticmethod
+    def _revoke_bindings(conn, session_id: str) -> None:
+        """A session that closed takes its credentials with it: reopening it never revives them."""
+        conn.execute("UPDATE session_bindings SET state = 'revoked' WHERE session_id = ? AND state != 'revoked'",
+                     (session_id,))
 
     def resolve_binding(self, sha256: str) -> Optional[Dict[str, Any]]:
         """The session a presented credential's hash is bound to, if that generation is still valid."""
@@ -1432,15 +1468,46 @@ class Database:
             self._log(cursor, request_id, actor, "cancelled", {"undelivered": True}, at=now)
             return True
 
+    FAILED_LISTED_DAYS = 3
+
     def undelivered_requests(self) -> List[RequestModel]:
-        """Prompts to agents that are still PENDING or APPROVED (not yet claimed for delivery), oldest first."""
+        """
+        Prompts to agents that are still PENDING or APPROVED (not yet claimed for delivery), and those whose
+        delivery failed in the last few days (they can be tried again), oldest first.
+        """
+        horizon = (datetime.now(timezone.utc) - timedelta(days=self.FAILED_LISTED_DAYS)).isoformat()
         with self._get_connection() as conn:
             ids = [r["id"] for r in conn.execute(
-                "SELECT r.id FROM requests r WHERE r.recipient_id != 'human' AND r.status IN (?, ?)"
-                " AND (r.status = ? OR r.delivery_state IS NULL OR r.delivery_state = 'waiting')"
-                f" AND {_NOT_EXCLUDED_SQL} ORDER BY r.id ASC",
-                (RequestStatus.PENDING.value, RequestStatus.APPROVED.value, RequestStatus.PENDING.value)).fetchall()]
+                "SELECT r.id FROM requests r WHERE r.recipient_id != 'human' AND ("
+                " r.status = 'PENDING' OR (r.status = 'APPROVED' AND (r.delivery_state IS NULL OR r.delivery_state = 'waiting'))"
+                " OR (r.status = 'DELIVERY_FAILED' AND r.updated_at >= ?))"
+                f" AND {_NOT_EXCLUDED_SQL} ORDER BY r.id ASC", (horizon,)).fetchall()]
         return [req for req in (self.get_request(i) for i in ids) if req is not None]
+
+    def retry_undelivered(self, request_id: int, actor: str) -> bool:
+        """
+        Back in the queue of the very same session: an approved prompt still waiting, or one whose delivery failed.
+        One conditional update, so it loses against the bridge's claim (DELIVERING) and never touches a running one.
+        """
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            row = cursor.execute("SELECT expires_in_seconds, expires_at FROM requests WHERE id = ?", (request_id,)).fetchone()
+            if row is None:
+                return False
+            window = row["expires_in_seconds"] or DEFAULT_EXPIRES_IN_SECONDS
+            expires = max(row["expires_at"] or now, (now_dt + timedelta(seconds=window)).isoformat())
+            cursor.execute(
+                "UPDATE requests SET status = 'APPROVED', updated_at = ?, delivering_since = NULL, delivery_state = 'waiting',"
+                " attempt_id = NULL, delivery_attempts = 0, hold_alerted_at = NULL, queue_released_at = NULL,"
+                " start_unconfirmed_at = NULL, expires_at = ? WHERE id = ? AND recipient_id != 'human'"
+                " AND ((status = 'APPROVED' AND (delivery_state IS NULL OR delivery_state = 'waiting'))"
+                " OR status = 'DELIVERY_FAILED')", (now, expires, request_id))
+            if cursor.rowcount == 0:
+                return False
+            self._log(cursor, request_id, actor, "undelivered_retried", at=now)
+            return True
 
     def cancel_delivery(self, request_id: int, actor: str) -> bool:
         """
@@ -2401,6 +2468,7 @@ class Database:
                 "UPDATE sessions SET ended_at = COALESCE(ended_at, ?), continued_to = ? WHERE id = ?",
                 (now, new_session_id, old_session_id),
             )
+            self._revoke_bindings(conn, old_session_id)
             # Migrate pin if old was pinned
             if old["pinned_at"] is not None:
                 cursor.execute(
@@ -3364,6 +3432,7 @@ class Database:
                 "UPDATE sessions SET ended_at = ?, state = 'idle', waiter_seen_at = NULL WHERE id = ?",
                 (now, session_id),
             )
+            self._revoke_bindings(conn, session_id)
 
     def link_sender_session(self, request_id: int, session_id: str, agent_id: str) -> bool:
         """Remembers which session made a request, so the outcome goes back there."""

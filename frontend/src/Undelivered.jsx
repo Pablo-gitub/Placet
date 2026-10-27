@@ -38,7 +38,10 @@ function Row({ item, sessions, wide, onOpenMessage, onChanged }) {
       <summary>{summary}</summary>
       <div className="message-row-body">
         <MessageText req={req} />
-        {item.can_cancel || item.can_forward ? <MessageActions req={req} sessions={sessions} onDone={onChanged} /> : null}
+        {item.can_cancel || item.can_forward || item.can_retry ? (
+          <MessageActions req={req} sessions={sessions} onDone={onChanged}
+            canCancel={item.can_cancel} canForward={item.can_forward} canRetry={item.can_retry} />
+        ) : null}
       </div>
     </details>
   );

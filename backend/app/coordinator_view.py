@@ -10,7 +10,7 @@ import binascii
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from backend.app.models import RequestModel, RequestStatus
+from backend.app.models import RequestModel, RequestStatus, WAKEABLE_SUSPENDED_PROVIDERS
 
 # Providers whose session credential channel passed the lab (docs/plans/session-binding.md): the only ones that
 # may read the view. Add a provider only after its lab.
@@ -69,7 +69,12 @@ class Projection:
         if session is None:
             reachability, activity = "unknown", {"state": "unknown"}
         else:
-            reachability = "reachable" if session.reachable else "unreachable"
+            if session.reachable:
+                reachability = "reachable"
+            elif session.provider in WAKEABLE_SUSPENDED_PROVIDERS and session.suspended_at is not None:
+                reachability = "wakeable"
+            else:
+                reachability = "unreachable"
             if session.ended_at is not None:
                 activity = {"state": "unknown"}
             else:

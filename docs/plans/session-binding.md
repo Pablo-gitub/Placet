@@ -176,7 +176,11 @@ but holds no per-node grants.
    `placet_ack` and `placet_progress` accept `session_token`, sent as
    `X-Placet-Session` (retried up to three times, 2 s apart, on
    `session.credential_invalid`, since the hash reaches the backend through
-   the spool; never resent without it). Off by default: deploying changes
+   the spool; never resent without it). Review of October 24: the backoff is 0.5, 1 and 2 s, on every call that
+   carries a credential (the coordinator view included); generations are ordered by the time the hook issued the
+   credential (`credential_issued_at` in the start event), not by arrival, so an older start that arrives late is
+   stored as already superseded; and a session that closes revokes its credentials for good (reopening it does not
+   revive them). Off by default: deploying changes
    nothing. New sessions, and those that restart after `/compact` or a
    resume, get a credential; sessions already open do not change. Claude
    Desktop is still to be verified (the flag file does not depend on the
