@@ -327,3 +327,20 @@ async def test_reads_and_refusals_are_audited_without_the_content(env):
     kinds = [e["event"] for e in events]
     assert "read" in kinds and "denied" in kinds
     assert "PROMPT-MARKER" not in str(events) and OTHER_CRED not in str(events)
+
+
+@pytest.mark.asyncio
+async def test_suspended_codex_node_reachability_is_wakeable(env):
+    app, db = env
+    await start(app, "codex", "cx-solo", DEV_CRED, provider="codex")
+    db.suspend_session("cx-solo")
+    session = db.get_session("cx-solo")
+    assert session.suspended_at is not None and not session.reachable
+
+    cx_node = db.create_node("cx", "cx-solo")
+    p = db.create_project("ProjectCodex")
+    db.add_node_to_project(p.id, cx_node.id)
+
+    from backend.app.coordinator_view import Projection
+    view_data = Projection(db, p.id).node(cx_node)
+    assert view_data["reachability"] == "wakeable"

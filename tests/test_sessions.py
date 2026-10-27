@@ -438,6 +438,30 @@ async def test_sending_to_an_unreachable_session_warns(setup):
     assert resp.status_code == 201 and "not reachable" in resp.json()["warning"]
 
 
+@pytest.mark.asyncio
+async def test_sending_to_suspended_codex_does_not_warn(tmp_path):
+    db = Database(str(tmp_path / "placet.db"))
+    db.init_db()
+    cfg = PlacetConfig(agents={
+        "claude": AgentSpec(tmux_session="agent-claude", token="tok-claude", allowed_targets=["codex"]),
+        "codex": AgentSpec(tmux_session="agent-codex", token="tok-codex", allowed_targets=["claude"]),
+    })
+    app = create_app(db=db, config=cfg)
+    db.upsert_session("cx-susp", "codex", provider="codex")
+    db.suspend_session("cx-susp")
+    s = db.get_session("cx-susp")
+    assert s.suspended_at is not None and not s.reachable
+
+    async with agent_client(app, "tok-claude") as claude:
+        resp = await claude.post("/api/requests", json={
+            "recipient_id": "codex",
+            "recipient_session_id": "cx-susp",
+            "prompt": "ping",
+        })
+    assert resp.status_code == 201
+    assert "warning" not in resp.json()
+
+
 def test_recipient_receives_only_the_prompt(setup):
     from backend.app import envelopes
     _, db = setup
