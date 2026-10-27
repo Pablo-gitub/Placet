@@ -513,6 +513,8 @@ class UndeliveredItem(BaseModel):
     recipient_node: Optional[str] = None
     can_cancel: bool = True
     can_forward: bool = True
+    # Back in the queue of the same session: for prompts stuck behind a failure or an absent recipient.
+    can_retry: bool = False
 
 
 class RequestEvent(BaseModel):

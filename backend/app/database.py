@@ -1432,15 +1432,46 @@ class Database:
             self._log(cursor, request_id, actor, "cancelled", {"undelivered": True}, at=now)
             return True
 
+    FAILED_LISTED_DAYS = 3
+
     def undelivered_requests(self) -> List[RequestModel]:
-        """Prompts to agents that are still PENDING or APPROVED (not yet claimed for delivery), oldest first."""
+        """
+        Prompts to agents that are still PENDING or APPROVED (not yet claimed for delivery), and those whose
+        delivery failed in the last few days (they can be tried again), oldest first.
+        """
+        horizon = (datetime.now(timezone.utc) - timedelta(days=self.FAILED_LISTED_DAYS)).isoformat()
         with self._get_connection() as conn:
             ids = [r["id"] for r in conn.execute(
-                "SELECT r.id FROM requests r WHERE r.recipient_id != 'human' AND r.status IN (?, ?)"
-                " AND (r.status = ? OR r.delivery_state IS NULL OR r.delivery_state = 'waiting')"
-                f" AND {_NOT_EXCLUDED_SQL} ORDER BY r.id ASC",
-                (RequestStatus.PENDING.value, RequestStatus.APPROVED.value, RequestStatus.PENDING.value)).fetchall()]
+                "SELECT r.id FROM requests r WHERE r.recipient_id != 'human' AND ("
+                " r.status = 'PENDING' OR (r.status = 'APPROVED' AND (r.delivery_state IS NULL OR r.delivery_state = 'waiting'))"
+                " OR (r.status = 'DELIVERY_FAILED' AND r.updated_at >= ?))"
+                f" AND {_NOT_EXCLUDED_SQL} ORDER BY r.id ASC", (horizon,)).fetchall()]
         return [req for req in (self.get_request(i) for i in ids) if req is not None]
+
+    def retry_undelivered(self, request_id: int, actor: str) -> bool:
+        """
+        Back in the queue of the very same session: an approved prompt still waiting, or one whose delivery failed.
+        One conditional update, so it loses against the bridge's claim (DELIVERING) and never touches a running one.
+        """
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            row = cursor.execute("SELECT expires_in_seconds, expires_at FROM requests WHERE id = ?", (request_id,)).fetchone()
+            if row is None:
+                return False
+            window = row["expires_in_seconds"] or DEFAULT_EXPIRES_IN_SECONDS
+            expires = max(row["expires_at"] or now, (now_dt + timedelta(seconds=window)).isoformat())
+            cursor.execute(
+                "UPDATE requests SET status = 'APPROVED', updated_at = ?, delivering_since = NULL, delivery_state = 'waiting',"
+                " attempt_id = NULL, delivery_attempts = 0, hold_alerted_at = NULL, queue_released_at = NULL,"
+                " start_unconfirmed_at = NULL, expires_at = ? WHERE id = ? AND recipient_id != 'human'"
+                " AND ((status = 'APPROVED' AND (delivery_state IS NULL OR delivery_state = 'waiting'))"
+                " OR status = 'DELIVERY_FAILED')", (now, expires, request_id))
+            if cursor.rowcount == 0:
+                return False
+            self._log(cursor, request_id, actor, "undelivered_retried", at=now)
+            return True
 
     def cancel_delivery(self, request_id: int, actor: str) -> bool:
         """
