@@ -13,7 +13,7 @@ export function MessageText({ req }) {
  * Cancel (asking first) and forward (to another open session) of a prompt that has not been delivered.
  * The backend refuses both once delivery has started; the reason is shown in place.
  */
-export function MessageActions({ req, sessions = [], onDone }) {
+export function MessageActions({ req, sessions = [], onDone, canCancel = true, canForward = true, canRetry = false }) {
   const { t } = useTranslation();
   const [mode, setMode] = useState(null); // null | "cancel" | "forward"
   const [target, setTarget] = useState("");
@@ -49,12 +49,21 @@ export function MessageActions({ req, sessions = [], onDone }) {
     <div className="message-actions" data-testid={`message-actions-${req.id}`}>
       {mode === null && (
         <div className="actions-row">
-          <button type="button" className="btn btn-secondary" onClick={() => setMode("forward")} disabled={busy}>
-            {t("undelivered.forward")}
-          </button>
-          <button type="button" className="btn btn-secondary btn-danger-outline" onClick={() => setMode("cancel")} disabled={busy}>
-            {t("undelivered.cancel")}
-          </button>
+          {canRetry && (
+            <button type="button" className="btn btn-primary" onClick={() => send("retry")} disabled={busy}>
+              {t("undelivered.retry")}
+            </button>
+          )}
+          {canForward && (
+            <button type="button" className="btn btn-secondary" onClick={() => setMode("forward")} disabled={busy}>
+              {t("undelivered.forward")}
+            </button>
+          )}
+          {canCancel && (
+            <button type="button" className="btn btn-secondary btn-danger-outline" onClick={() => setMode("cancel")} disabled={busy}>
+              {t("undelivered.cancel")}
+            </button>
+          )}
         </div>
       )}
       {mode === "cancel" && (

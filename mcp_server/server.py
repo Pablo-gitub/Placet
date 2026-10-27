@@ -113,6 +113,7 @@ def placet_send_to_agent(
     timeout_seconds: int = 180,
     priority: Optional[PriorityLevel] = None,
     session_id: Optional[str] = None,
+    session_token: Optional[str] = None,
 ) -> str:
     """
     Send a prompt to another session through Placet.
@@ -130,6 +131,8 @@ def placet_send_to_agent(
 `session_id` is your own session ID: pass it (as for placet_list_relations)
 when Placet cannot tell which session is sending; with `target_node`, a
 missing sender or relation is an error and nothing is sent.
+If your context holds a "Placet session credential", pass the newest one
+as `session_token`; Placet uses it to verify and identify your sending session.
     The result says `delivery_policy`: "manual" means the human may edit or
     reject the prompt; "automatic" means it was delivered without review.
     While you run a request from a session, do not send that session a new
@@ -165,6 +168,7 @@ missing sender or relation is an error and nothing is sent.
             relation_type=relation_type,
             rule_acknowledged=rule_acknowledged,
             sender_session_id=session_id,
+            session_token=session_token,
         )
         return json.dumps(res, indent=2, ensure_ascii=False)
     except Exception as e:

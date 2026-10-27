@@ -845,6 +845,7 @@
     "blockAttempts_other": "{{count}} tentativi falliti",
     "blockChecked": "ultima verifica {{time}}",
     "blockNext": "prossimo tentativo {{time}}",
-    "retryBlock": "Riprova consegna"
+    "retryBlock": "Riprova consegna",
+    "retry": "Riprova consegna"
   }
 }

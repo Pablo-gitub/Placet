@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { ArrowLeft } from "lucide-react";
 import MessageBody from "./MessageBody";
 import { MessageActions, MessageText } from "./MessageActions";
-import { isUndelivered } from "./messages";
+import { isRetryable, isUndelivered } from "./messages";
 import { formatWhen } from "./i18n/formatters";
 
 /** One message in full, in the right pane (or as a page on the phone): text, reply, timeline and, if it is still undelivered, its actions. */
@@ -42,7 +42,10 @@ export default function MessageDetail({ requestId, requests = [], sessions = [],
           <section className="request-section">
             <MessageText req={req} />
           </section>
-          {isUndelivered(req) && <MessageActions req={req} sessions={sessions} />}
+          {(isUndelivered(req) || isRetryable(req)) && (
+            <MessageActions req={req} sessions={sessions} canCancel={isUndelivered(req)} canForward={isUndelivered(req)}
+              canRetry={isRetryable(req)} />
+          )}
           <MessageBody req={req} sessions={sessions} onOpenSession={onOpenSession} />
         </>
       )}

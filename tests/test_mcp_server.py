@@ -73,6 +73,9 @@ def test_send_to_agent_tool_logic(mock_client):
                                   sender_session_id="sess-1")
         assert mock_post.call_args.kwargs["json"]["sender_session_id"] == "sess-1"
 
+        mock_client.send_to_agent(target_agent="gemini", prompt="p", session_token="plst_testtoken")
+        assert mock_post.call_args.kwargs["headers"]["X-Placet-Session"] == "plst_testtoken"
+
 
 def test_reply_tool_logic(mock_client):
     with patch("httpx.Client.post") as mock_post:
@@ -142,3 +145,11 @@ def test_send_to_agent_rejects_unsafe_prompt_files(tmp_path):
         out = _json.loads(placet_send_to_agent("gemini", prompt_file=path))
         assert out["status"] == "ERROR"
     assert _json.loads(placet_send_to_agent("gemini"))["status"] == "ERROR"
+
+
+def test_send_to_agent_forwards_session_token():
+    from unittest.mock import patch
+    from mcp_server.server import placet_send_to_agent, client
+    with patch.object(client, "send_to_agent", return_value={"id": 1}) as send:
+        placet_send_to_agent("gemini", prompt="test", session_token="plst_token123")
+    assert send.call_args.kwargs.get("session_token") == "plst_token123"

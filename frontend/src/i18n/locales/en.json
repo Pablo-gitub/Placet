@@ -845,6 +845,7 @@
     "blockAttempts_other": "{{count}} failed attempts",
     "blockChecked": "last check {{time}}",
     "blockNext": "next try {{time}}",
-    "retryBlock": "Retry delivery"
+    "retryBlock": "Retry delivery",
+    "retry": "Retry delivery"
   }
 }

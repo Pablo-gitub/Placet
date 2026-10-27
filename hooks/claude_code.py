@@ -38,6 +38,7 @@ import re
 import secrets
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -283,6 +284,7 @@ def issue_credential(payload: dict):
         return None
     credential = "plst_" + secrets.token_urlsafe(16)
     payload["credential_sha256"] = hashlib.sha256(credential.encode()).hexdigest()
+    payload["credential_issued_at"] = time.time()      # the backend orders generations by this, not by arrival
     return credential
 
 

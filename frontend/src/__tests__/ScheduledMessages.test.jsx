@@ -79,7 +79,7 @@ describe("SessionView scheduled messages display and actions (RF-65)", () => {
       question_type: "message",
       prompt: "Controlla il server stanotte",
       status: "APPROVED",
-      scheduled_at: "2026-10-25T20:00:00Z",
+      scheduled_at: "2029-10-25T20:00:00Z",
       created_at: "2026-10-22T00:00:00Z",
     };
 
@@ -127,7 +127,7 @@ describe("SessionView scheduled messages display and actions (RF-65)", () => {
       question_type: "message",
       prompt: "Aggiorna il database",
       status: "APPROVED",
-      scheduled_at: "2026-10-25T20:00:00Z",
+      scheduled_at: "2029-10-25T20:00:00Z",
       created_at: "2026-10-22T00:00:00Z",
     };
 

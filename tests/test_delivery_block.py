@@ -225,3 +225,15 @@ async def test_the_held_requests_are_listed_with_the_reason_and_what_the_user_ca
         assert item["block"]["last_checked_at"] and "config" not in json.dumps(item["block"]).replace("missing_user_config", "")
         assert item["can_cancel"] is True and item["can_forward"] is True
         assert item["block"]["session_id"] == SID
+
+
+@pytest.mark.asyncio
+async def test_retrying_one_held_prompt_also_retries_its_session_block(env):
+    """The per-request Retry (#72) and the per-session block agree: retrying a prompt tries its session now."""
+    app, db, _ = env
+    [req_id] = await waiting_session(app)
+    await block(app)
+    before = db.get_delivery_block(SID)["next_retry_at"]
+    async with human_client(app) as human:
+        assert (await human.post(f"/api/requests/{req_id}/undelivered/retry")).status_code == 200
+    assert db.get_delivery_block(SID)["next_retry_at"] < before
