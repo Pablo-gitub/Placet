@@ -1947,6 +1947,23 @@ class Database:
             return [r["agent_id"] for r in cursor.fetchall()]
 
 
+    def pending_question_since(self, agent_id: str, session_id: Optional[str], since: datetime) -> Optional[int]:
+        """
+        A question this agent put to the user (a placet_ask_human) after `since` that is still PENDING: from this
+        session, or from one not known. None if there is none.
+        """
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT id, created_at, sender_session_id FROM requests WHERE sender_id = ? AND recipient_id = 'human'"
+                " AND status = 'PENDING' ORDER BY id DESC", (agent_id,)).fetchall()
+        for row in rows:
+            if session_id is not None and row["sender_session_id"] not in (None, session_id):
+                continue
+            created = _ts(row["created_at"])
+            if created is not None and created >= since:
+                return row["id"]
+        return None
+
     def set_agent_state(
         self, agent_id: str, state: str, turn_request_id: Optional[int] = None
     ) -> None:
