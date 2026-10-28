@@ -9,6 +9,7 @@ up in the app like a message typed there.
   API is not documented (RS-07): it is isolated here, every failure is
   reported with the app version, and nothing else depends on it.
 """
+import json
 import logging
 import os
 import re
@@ -249,6 +250,52 @@ class AntigravityChannel:
         raise ChannelError("No previous user turn to copy the model configuration from.",
                            code="missing_user_config", phase="pre_dispatch")
 
+    def _delivery_config(self, base: str, token: str, session_id: str, trajectory: dict) -> dict:
+        """Recover only the latest user input when the ordinary snapshot omits payloads.
+
+        GetCascadeTrajectory can lag behind the live summary. GetCascadeTrajectorySteps
+        accepts stepOffset (not startIndex/endIndex); start at the summary's latest user
+        input instead of downloading the entire history or reusing a cached model.
+        """
+        try:
+            return self._config(trajectory)
+        except ChannelError:
+            pass
+        try:
+            response = self._call(base, token, "GetAllCascadeTrajectories", {})
+            if response.status_code == 200:
+                summary = response.json().get("trajectorySummaries", {}).get(session_id, {})
+                offset, count = summary.get("lastUserInputStepIndex"), summary.get("stepCount")
+                if (type(offset) is int and type(count) is int
+                        and 0 <= offset < count <= 2**32 - 1):
+                    # A long tool tail or inline media can still be large. Bound decoded
+                    # bytes, discard them after extracting the configuration, never log them.
+                    with self.client.stream(
+                        "POST", f"{base}/{LS_SERVICE}/GetCascadeTrajectorySteps",
+                        json={"cascadeId": session_id, "stepOffset": offset, "verbosity": 1},
+                        headers={"Connect-Protocol-Version": "1", "x-codeium-csrf-token": token},
+                    ) as response:
+                        if response.status_code == 200:
+                            content = bytearray()
+                            for chunk in response.iter_bytes():
+                                if len(content) + len(chunk) > 8 * 1024 * 1024:
+                                    break
+                                content.extend(chunk)
+                            else:
+                                steps = json.loads(content).get("steps", [])
+                                # A server ignoring the offset must not supply an older
+                                # user's configuration. Only the requested first step counts.
+                                if (isinstance(steps, list) and steps and isinstance(steps[0], dict)
+                                        and steps[0].get("type") == "CORTEX_STEP_TYPE_USER_INPUT"):
+                                    stamp = summary.get("lastUserInputTime")
+                                    actual = (steps[0].get("metadata") or {}).get("createdAt")
+                                    if isinstance(stamp, str) and stamp and actual == stamp:
+                                        return self._config({"steps": steps[:1]})
+        except (httpx.HTTPError, ValueError, TypeError, AttributeError, ChannelError):
+            pass
+        raise ChannelError("No previous user turn to copy the model configuration from.",
+                           code="missing_user_config", phase="pre_dispatch")
+
     def send(self, session_id: str, text: str, now: bool = False) -> None:
         """Queues the message for when the agent is idle, or with now=True for
         its next model call inside the running turn (RF-35)."""
@@ -256,7 +303,7 @@ class AntigravityChannel:
         body = {
             "cascadeId": session_id,
             "items": [{"text": text}],
-            "cascadeConfig": self._config(trajectory),
+            "cascadeConfig": self._delivery_config(base, token, session_id, trajectory),
             "deliveryStrategy": ("MESSAGE_DELIVERY_STRATEGY_NEXT_INVOCATION" if now
                                  else "MESSAGE_DELIVERY_STRATEGY_WHEN_IDLE"),
         }
