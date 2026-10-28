@@ -303,6 +303,20 @@ export default function App() {
    * (RF-29); "finished" / "queue_next" move a session's queue past a delivered
    * request whose end Placet cannot see (RF-29b).
    */
+  const hideMessage = async (requestId) => {
+    try {
+      const res = await fetch(`/api/requests/${requestId}/hide`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showFeedback(apiErrorDescriptor(data, res.status), true);
+        return;
+      }
+      setRequests((prev) => upsert(prev, data));
+    } catch {
+      showFeedback({ key: "errors.connection" }, true);
+    }
+  };
+
   const deliveryAction = async (requestId, action) => {
     if (action === "retry" && !window.confirm(t("deliveryUi.retryConfirm"))) {
       return false;
@@ -392,6 +406,7 @@ export default function App() {
       onSend={sendMessage}
       onDelivery={deliveryAction}
       onSchedule={scheduleRequest}
+      onHide={hideMessage}
       submittingId={submittingId}
       focusId={focusId}
     />

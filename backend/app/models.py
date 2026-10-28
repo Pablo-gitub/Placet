@@ -264,6 +264,8 @@ class RequestModel(BaseModel):
     hold_alerted_at: Optional[datetime] = None
     # The user let the session's queue move on past this request.
     queue_released_at: Optional[datetime] = None
+    # The user hid this message, which never went out, from the chat (it stays in the history).
+    hidden_at: Optional[datetime] = None
     # "queue": at the end of the recipient's turn; "now": inside the running
     # turn, after its next action (RF-35, "Subito").
     delivery_mode: str = "queue"

@@ -1268,6 +1268,17 @@ def create_app(
             notify_session(req.recipient_session_id)
         return get_or_404(request_id)
 
+    @app.post("/api/requests/{request_id}/hide", response_model=RequestModel)
+    async def hide_message(request_id: int, who: Principal = Depends(principal)):
+        """The user hides, from the chat, a message of theirs that never went out; idempotent, never a live one."""
+        require_human(who)
+        get_or_404(request_id)
+        if db.hide_message(request_id, actor=who.actor) is None:
+            raise ProductError(409, "request.hide_not_allowed",
+                               "Only a message of yours that never went out (expired, cancelled or rejected) can be hidden.")
+        notify_change(request_id)
+        return get_or_404(request_id)
+
     class ForwardUndelivered(BaseModel):
         session_id: str
 

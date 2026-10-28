@@ -27,7 +27,7 @@ import {
 import Markdown from "./Markdown";
 import useHoldClock from "./useHoldClock";
 import RequestCard from "./RequestCard";
-import { actionLabel, groupEntries, timeOf } from "./chatEntries";
+import { actionLabel, groupEntries, placeByTime, timeOf } from "./chatEntries";
 import { providerClass, providerOf, sessionName, sessionPlace, sessionStatus } from "./sessionInfo";
 import { useTranscript } from "./useTranscript";
 import McpWarning from "./McpWarning";
@@ -177,8 +177,10 @@ const OUTGOING_STATES = {
   DELIVERING: "deliveryUi.delivering",
   DELIVERY_FAILED: "deliveryUi.failed",
   EXECUTING: "deliveryUi.accepted",
-  EXPIRED: "deliveryUi.expired",
 };
+
+// Messages that never went out: they stay in the conversation where they were written, with what the user can do.
+const TERMINAL_STATES = { EXPIRED: "deliveryUi.expired", CANCELLED: "deliveryUi.cancelledState", REJECTED: "deliveryUi.rejectedState" };
 
 /** RF-61: the model, reasoning effort and context the session is using. */
 function ModelLine({ meta }) {
@@ -278,6 +280,29 @@ function Outgoing({ req, session, limitAt, onDelivery, onEdit, onSchedule }) {
   );
 }
 
+function TerminalMessage({ req, onResend, onHide }) {
+  const { t } = useTranslation();
+  const [busy, setBusy] = useState(false);
+  const resend = async () => {
+    setBusy(true);
+    try { await onResend?.(req); } finally { setBusy(false); }
+  };
+  return (
+    <div className="msg msg-user outgoing failed" data-testid={`terminal-${req.id}`}>
+      <div className="bubble">{req.prompt}</div>
+      <time>{t(TERMINAL_STATES[req.status])}</time>
+      <div className="outgoing-actions">
+        {onResend && (
+          <button type="button" disabled={busy} data-testid={`resend-${req.id}`} onClick={resend}>{t("deliveryUi.resend")}</button>
+        )}
+        {onHide && (
+          <button type="button" data-testid={`hide-${req.id}`} onClick={() => onHide(req.id)}>{t("deliveryUi.hide")}</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function QueueHold({ req, waiting, onDelivery }) {
   const { t } = useTranslation();
   const cancel = () => {
@@ -325,6 +350,7 @@ export default function SessionView({
   onSend,
   onDelivery,
   onSchedule,
+  onHide,
   submittingId,
   focusId,
 }) {
@@ -348,6 +374,9 @@ export default function SessionView({
     .filter((r) => r.question_type === "message" && r.recipient_session_id === sessionId
       && r.status in OUTGOING_STATES && notStarted(r))
     .sort((a, b) => a.id - b.id);
+  // Never went out, and the user has not hidden it: shown where it was written, not at the bottom.
+  const terminal = requests.filter((r) => r.question_type === "message" && r.recipient_session_id === sessionId
+    && r.status in TERMINAL_STATES && !r.hidden_at);
   const holdNow = useHoldClock(requests, sessionId);
   const held = requests.filter((r) => r.recipient_session_id === sessionId && holdsQueueUnseen(r, holdNow));
   // Editing withdraws a waiting message and puts it back in the composer.
@@ -521,8 +550,11 @@ export default function SessionView({
               </div>
             )}
             {entries.length === 0 && <p className="chat-status">{t("chat.empty")}</p>}
-            {groupEntries(entries).map((item) =>
-              item.type === "actions" ? (
+            {placeByTime(groupEntries(entries), terminal.map((r) => ({ key: r.id, at: r.created_at, req: r }))).map((item) =>
+              item.type === "terminal" ? (
+                <TerminalMessage key={item.key} req={item.req} onHide={onHide}
+                  onResend={onSend && ((r) => onSend(sessionId, r.prompt))} />
+              ) : item.type === "actions" ? (
                 <ActionGroup key={item.key} entries={item.entries} />
               ) : (
                 <ChatEntry key={item.key} entry={item.entry} sessionId={sessionId} />
