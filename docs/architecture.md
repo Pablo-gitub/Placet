@@ -112,6 +112,21 @@ Sources observed in experiments do not imply all corresponding product controls 
 - `POST /exa.language_server_pb.LanguageServerService/SendUserCascadeMessage`, Connect JSON, `x-codeium-csrf-token` header; body has `cascadeId`, `items: [{text}]`, `deliveryStrategy: MESSAGE_DELIVERY_STRATEGY_WHEN_IDLE` and **`cascadeConfig` copied from the latest `USER_INPUT`** returned by `GetCascadeTrajectory`. Without it the tested turn fails. The configuration is taken from the **most recent** step that has one (`userConfig`, else `lastUserConfig`), never from an older step because of the field name. **A conversation with none (`missing_user_config`) blocks delivery, visibly:** the channel raises `ChannelError` with a closed `code` and `phase="pre_dispatch"` (nothing was sent: also `conversation_unavailable` when the app is not running); the bridge re-reads once (deterministic codes only), then reports `POST /api/bridge/sessions/{id}/delivery-block` (code and phase only, never a configuration or the app's words) and stops polling that session. The block lives in the backend (`delivery_blocks`, so it survives a bridge restart): `failed_attempts` counts channel attempts apart from `delivery_attempts`; the bridge is told again after 5, 15, then 60 minutes (deterministic) or 6 s doubling to 5 minutes with ±20 % jitter (transient), as one probe (`probing`) whose success ends the episode (`DELETE`); new messages to the session do not reset it; the user's "Riprova consegna" (`POST /api/sessions/{id}/delivery-block/retry`) makes it due at once and restarts the backoff. One push per episode (not per request). The held requests are listed under "Consegna bloccata" (`cause: delivery_blocked`, with the `block` code, attempts and times) with forward and cancel. A failure after a possible dispatch stays `uncertain` (no automatic retry); an unclassified `ChannelError` behaves as before.
 - Undocumented, version-sensitive API isolated in an adapter. Configured `agy`/tmux is an alternative channel, not a guarantee of safe automatic desktop-thread failover (RS-07).
 
+**Configuration recovery.** When `GetCascadeTrajectory` omits user-input payloads, delivery reads the same
+conversation's live summary and calls `GetCascadeTrajectorySteps` with
+`stepOffset=lastUserInputStepIndex` and `verbosity=1`. The requested first step
+must be a user input; its timestamp must match a non-empty `lastUserInputTime` from the summary.
+Only that step may supply the model/tool configuration. Responses are bounded to
+8 MiB. Missing, misaligned or oversized results remain pre-dispatch delivery
+blocks: no message is sent, no configuration is invented or copied from another
+conversation, and no historical configuration is cached.
+
+This fallback addresses a live discrepancy observed on 2026-10-28: the ordinary
+trajectory returned 26,668 steps without user-input payloads, while the summary
+reported 27,395 steps. Reading from offset 27,382 returned 13 recent steps,
+including the latest user input with its configuration. The validation was
+read-only; it neither sent a message nor cleared the pending delivery block.
+
 ### 3.4 CLI in tmux
 
 - `send-keys` only after idle verification.
@@ -446,20 +461,3 @@ The human supervisor can inspect aggregated usage, automation efficiency, and co
   - Decision outcomes (approved, edited, rejected, expired, cancelled) and human user messages (requests sent vs. direct replies).
   - Daily peak quota percentages per provider window from `usage_samples`, annotated with threshold crossing alerts.
 - **Frontend Presentation:** Implemented with lightweight SVG charts and responsive CSS grids in `frontend/src/Statistics.jsx`. Supports period presets (`today`, `7d` default, `30d`, and `custom` date inputs), responsive down to 375 px mobile viewports, keyboard accessibility, and full localization.
-
-### Antigravity configuration recovery
-
-When `GetCascadeTrajectory` omits user-input payloads, delivery reads the same
-conversation's live summary and calls `GetCascadeTrajectorySteps` with
-`stepOffset=lastUserInputStepIndex` and `verbosity=1`. The requested first step
-must be a user input; its timestamp must match a non-empty `lastUserInputTime` from the summary.
-Only that step may supply the model/tool configuration. Responses are bounded to
-8 MiB. Missing, misaligned or oversized results remain pre-dispatch delivery
-blocks: no message is sent, no configuration is invented or copied from another
-conversation, and no historical configuration is cached.
-
-This fallback addresses a live discrepancy observed on 2026-10-28: the ordinary
-trajectory returned 26,668 steps without user-input payloads, while the summary
-reported 27,395 steps. Reading from offset 27,382 returned 13 recent steps,
-including the latest user input with its configuration. The validation was
-read-only; it neither sent a message nor cleared the pending delivery block.
