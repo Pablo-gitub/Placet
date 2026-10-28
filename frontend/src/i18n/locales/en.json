@@ -207,7 +207,8 @@
     "wakeUnsupported": "Only a Claude Desktop session can be opened this way.",
     "desktopArchived": "The conversation is archived in Claude: restore it in the app.",
     "undeliveredNotAvailable": "The message has already started to be delivered: it can no longer be cancelled or forwarded.",
-    "undeliveredSame": "The message is already addressed to this session."
+    "undeliveredSame": "The message is already addressed to this session.",
+    "hideNotAllowed": "Only a message of yours that never went out (expired, cancelled or rejected) can be hidden."
   },
   "sessions": {
     "closed": "Closed",
@@ -448,7 +449,11 @@
     "sendNow": "Send now",
     "modify": "Edit",
     "sendNowFeedback": "Message sent now.",
-    "scheduledFeedback": "Message scheduled."
+    "scheduledFeedback": "Message scheduled.",
+    "cancelledState": "Not delivered: cancelled",
+    "rejectedState": "Not delivered: rejected",
+    "resend": "Send again",
+    "hide": "Hide"
   },
   "backgroundLanguage": {
     "title": "Notification and message language",

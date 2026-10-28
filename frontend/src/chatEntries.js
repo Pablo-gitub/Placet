@@ -65,3 +65,36 @@ export function timeOf(iso) {
   if (Number.isNaN(date.getTime())) return "";
   return formatDateTime(date, { hour: "2-digit", minute: "2-digit" });
 }
+
+const timeMs = (iso) => {
+  const ms = iso ? new Date(iso).getTime() : NaN;
+  return Number.isNaN(ms) ? null : ms;
+};
+
+/** When a grouped item happened: its own time, else the one before it (an action has none). */
+function itemTimes(items) {
+  let last = -Infinity;
+  return items.map((item) => {
+    const own = timeMs(item.type === "actions" ? item.entries.find((e) => e.at)?.at : item.entry.at);
+    if (own !== null) last = own;
+    return last;
+  });
+}
+
+/**
+ * Puts messages that never went out in the conversation where they were written: each `extra`
+ * ({ key, at, ... }) goes before the first item that happened after it, or last if none did.
+ */
+export function placeByTime(items, extras) {
+  if (!extras.length) return items;
+  const times = itemTimes(items);
+  const placed = items.map((item, i) => ({ item, at: times[i] }));
+  for (const extra of [...extras].sort((a, b) => (timeMs(a.at) ?? 0) - (timeMs(b.at) ?? 0))) {
+    const at = timeMs(extra.at) ?? Infinity;
+    const index = placed.findIndex((p) => p.at > at);
+    const entry = { item: { type: "terminal", key: `terminal-${extra.key}`, req: extra.req }, at };
+    if (index === -1) placed.push(entry);
+    else placed.splice(index, 0, entry);
+  }
+  return placed.map((p) => p.item);
+}

@@ -207,7 +207,8 @@
     "wakeUnsupported": "Solo una sessione di Claude Desktop si può aprire così.",
     "desktopArchived": "La conversazione è archiviata in Claude: ripristinala nell'app.",
     "undeliveredNotAvailable": "Il messaggio è già iniziato a essere consegnato: non si può più annullare o inoltrare.",
-    "undeliveredSame": "Il messaggio è già destinato a questa sessione."
+    "undeliveredSame": "Il messaggio è già destinato a questa sessione.",
+    "hideNotAllowed": "Si può nascondere solo un tuo messaggio che non è mai partito (scaduto, annullato o rifiutato)."
   },
   "sessions": {
     "closed": "Chiusa",
@@ -448,7 +449,11 @@
     "sendNow": "Invia subito",
     "modify": "Modifica",
     "sendNowFeedback": "Messaggio inviato subito.",
-    "scheduledFeedback": "Messaggio programmato."
+    "scheduledFeedback": "Messaggio programmato.",
+    "cancelledState": "Non consegnato: annullato",
+    "rejectedState": "Non consegnato: rifiutato",
+    "resend": "Invia di nuovo",
+    "hide": "Nascondi"
   },
   "backgroundLanguage": {
     "title": "Lingua di notifiche e messaggi",

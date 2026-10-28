@@ -766,6 +766,9 @@ class Database:
             for col in ("progress_text", "progress_at"):
                 if col not in cols:
                     cursor.execute(f"ALTER TABLE requests ADD COLUMN {col} TEXT;")
+            if "hidden_at" not in cols:
+                # The user hid this message that never went out from the chat (it stays in the history).
+                cursor.execute("ALTER TABLE requests ADD COLUMN hidden_at TEXT;")
             if "relation_type_name" not in cols:
                 # RF-64: historical relation type name on requests
                 cursor.execute("ALTER TABLE requests ADD COLUMN relation_type_name TEXT;")
@@ -1001,6 +1004,7 @@ class Database:
             project_context=row["project_context"] if "project_context" in keys else None,
             relation_type_name=row["relation_type_name"] if "relation_type_name" in keys else None,
             progress_text=row["progress_text"] if "progress_text" in keys else None,
+            hidden_at=_ts(row["hidden_at"]) if "hidden_at" in keys else None,
             progress_at=_ts(row["progress_at"]) if "progress_at" in keys else None,
             scheduled_at=_ts(row["scheduled_at"]) if "scheduled_at" in keys else None,
             expires_in_seconds=row["expires_in_seconds"] if "expires_in_seconds" in keys and row["expires_in_seconds"] else DEFAULT_EXPIRES_IN_SECONDS,
@@ -1462,6 +1466,26 @@ class Database:
             if cursor.rowcount == 0:
                 return False
             self._log(cursor, request_id, actor, "delivery_retried", at=now)
+            return True
+
+    # A failed delivery is not here: it can still be tried again.
+    HIDEABLE_STATUSES = ("EXPIRED", "CANCELLED", "REJECTED")
+
+    def hide_message(self, request_id: int, actor: str) -> Optional[bool]:
+        """
+        The user hides a message of theirs that never went out (expired, cancelled, rejected) from the chat.
+        None if it is not one; True when this call hid it, False if it already was (nothing changes).
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            row = conn.execute("SELECT status, sender_id, question_type, hidden_at FROM requests WHERE id = ?", (request_id,)).fetchone()
+            if (row is None or row["status"] not in self.HIDEABLE_STATUSES or row["sender_id"] != "human"
+                    or row["question_type"] != "message"):
+                return None
+            if row["hidden_at"] is not None:
+                return False
+            conn.execute("UPDATE requests SET hidden_at = ? WHERE id = ? AND hidden_at IS NULL", (now, request_id))
+            self._log(conn.cursor(), request_id, actor, "hidden", at=now)
             return True
 
     def cancel_undelivered(self, request_id: int, actor: str) -> bool:
