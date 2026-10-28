@@ -446,3 +446,20 @@ The human supervisor can inspect aggregated usage, automation efficiency, and co
   - Decision outcomes (approved, edited, rejected, expired, cancelled) and human user messages (requests sent vs. direct replies).
   - Daily peak quota percentages per provider window from `usage_samples`, annotated with threshold crossing alerts.
 - **Frontend Presentation:** Implemented with lightweight SVG charts and responsive CSS grids in `frontend/src/Statistics.jsx`. Supports period presets (`today`, `7d` default, `30d`, and `custom` date inputs), responsive down to 375 px mobile viewports, keyboard accessibility, and full localization.
+
+### Antigravity configuration recovery
+
+When `GetCascadeTrajectory` omits user-input payloads, delivery reads the same
+conversation's live summary and calls `GetCascadeTrajectorySteps` with
+`stepOffset=lastUserInputStepIndex` and `verbosity=1`. The requested first step
+must be a user input; its timestamp must match a non-empty `lastUserInputTime` from the summary.
+Only that step may supply the model/tool configuration. Responses are bounded to
+8 MiB. Missing, misaligned or oversized results remain pre-dispatch delivery
+blocks: no message is sent, no configuration is invented or copied from another
+conversation, and no historical configuration is cached.
+
+This fallback addresses a live discrepancy observed on 2026-10-28: the ordinary
+trajectory returned 26,668 steps without user-input payloads, while the summary
+reported 27,395 steps. Reading from offset 27,382 returned 13 recent steps,
+including the latest user input with its configuration. The validation was
+read-only; it neither sent a message nor cleared the pending delivery block.
