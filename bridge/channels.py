@@ -30,6 +30,8 @@ logger = logging.getLogger(__name__)
 # (the conversation exposes no configuration), a transient one may (the app is not running yet).
 # The first step of the latest user turn (model, tools, rules): the largest we accept to read.
 FIRST_STEP_MAX_BYTES = 2 * 1024 * 1024
+# Read the answer in chunks of this size, so that stopping early overshoots by at most one of them.
+STREAM_CHUNK_BYTES = 16 * 1024
 DETERMINISTIC_CODES = frozenset({"missing_user_config", "user_config_unreadable"})
 TRANSIENT_CODES = frozenset({"conversation_unavailable"})
 
@@ -283,7 +285,7 @@ class AntigravityChannel:
                             # The answer holds every step from the offset to the end (12 MB in a real case) and
                             # the one we want is the first: read it as a stream and stop as soon as it is whole.
                             try:
-                                step = first_element(response.iter_bytes(), "steps", FIRST_STEP_MAX_BYTES)
+                                step = first_element(response.iter_bytes(chunk_size=STREAM_CHUNK_BYTES), "steps", FIRST_STEP_MAX_BYTES)
                             except StreamJsonError as e:
                                 # Nothing was sent. A step too big, an answer cut short or not JSON is named, so the
                                 # block says what is wrong instead of "no configuration".
