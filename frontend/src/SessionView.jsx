@@ -360,9 +360,11 @@ export default function SessionView({
     refreshKey
   );
   const questions = requests.filter((r) => (r.status === "PENDING" || needsReturnApproval(r)) && r.sender_session_id === sessionId);
+  // A message the conversation already shows (it carries the request's id) was delivered: no second bubble for it.
+  const inConversation = new Set(entries.filter((e) => e.request_id != null).map((e) => e.request_id));
   const outgoing = requests
     .filter((r) => r.question_type === "message" && r.recipient_session_id === sessionId
-      && r.status in OUTGOING_STATES && notStarted(r))
+      && r.status in OUTGOING_STATES && notStarted(r) && !inConversation.has(r.id))
     .sort((a, b) => a.id - b.id);
   // Never went out, and the user has not hidden it: shown where it was written, not at the bottom.
   const terminal = requests.filter((r) => r.question_type === "message" && r.recipient_session_id === sessionId

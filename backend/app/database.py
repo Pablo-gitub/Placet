@@ -1591,6 +1591,19 @@ class Database:
             ids = [r["id"] for r in cursor.fetchall()]
         return [r for r in (self.get_request(i) for i in ids) if r is not None]
 
+    def unobserved_deliveries(self, min_age_seconds: float = 15.0, limit: int = 20) -> List[RequestModel]:
+        """
+        Delivered messages whose turn no hook has reported yet (execution unobserved), for the bridge to look for in the
+        recipient's conversation. Not the very fresh ones: the hook may still be on its way.
+        """
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=min_age_seconds)).isoformat()
+        with self._get_connection() as conn:
+            ids = [r["id"] for r in conn.execute(
+                "SELECT id FROM requests WHERE status = ? AND delivery_state = 'accepted' AND recipient_session_id IS NOT NULL"
+                " AND COALESCE(execution_state, 'unobserved') = 'unobserved' AND delivery_at <= ? ORDER BY id LIMIT ?",
+                (RequestStatus.EXECUTING.value, cutoff, limit)).fetchall()]
+        return [r for r in (self.get_request(i) for i in ids) if r is not None]
+
     def set_execution(self, request_id: int, state: str, actor: str, source: Optional[str] = None) -> bool:
         """Records what the recipient's turn did with a request (RF-29), and who saw it."""
         allowed_from = {

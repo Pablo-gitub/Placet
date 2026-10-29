@@ -97,6 +97,7 @@ class BridgeDaemon:
         self.engine_counter = engine_counter
         self.flags_dir = flags_dir
         self._reconciled_at: dict = {}
+        self._observed_at: dict = {}
         self._folders_at = -FOLDERS_EVERY_SECONDS
         self._excluded: Optional[Set[str]] = None
         self._titles_at = -TITLES_EVERY_SECONDS
@@ -308,6 +309,35 @@ class BridgeDaemon:
                     logger.warning('Request #%s already queued; opening failed (%s). No resend; reopen the conversation manually.',
                                    mail.request_id, type(exc).__name__)
         return delivered
+
+    def reconcile_unobserved(self, unobserved: List[dict]) -> int:
+        """
+        A message the recipient may have read while busy (Codex takes a queued message into the running turn) with no
+        turn reported by a hook: if it is in the conversation, the agent read it, so its execution started. Only
+        proves the start, never the end. Returns how many it marked.
+        """
+        marked = 0
+        now = time.monotonic()
+        for item in unobserved:
+            request_id = item["request_id"]
+            if now - self._observed_at.get(request_id, -RECONCILE_EVERY_SECONDS) < RECONCILE_EVERY_SECONDS:
+                continue
+            self._observed_at[request_id] = now
+            try:
+                page = read_transcript(item.get("provider"), item["session_id"],
+                                       agent_id=item.get("agent_id"), limit=80)
+            except TranscriptError as e:
+                logger.debug(f"Cannot read {item['session_id']} to look for #{request_id}: {e}")
+                continue
+            if any(m.get("request_id") == request_id for m in page.get("messages", [])):
+                try:
+                    self.store.mark_observed(request_id)
+                except Exception as exc:
+                    logger.warning(f"Could not record the start of #{request_id} ({type(exc).__name__}).")
+                    continue
+                logger.info(f"Request #{request_id} found in session {item['session_id']}: its execution started.")
+                marked += 1
+        return marked
 
     def reconcile_uncertain(self, uncertain: List[dict]) -> int:
         """
@@ -617,6 +647,7 @@ class BridgeDaemon:
         delivered += self.process_session_mail(work.sessions + work.wake_sessions)
         delivered += self.process_steer(work.steer, work.steer_waiting)
         self.reconcile_uncertain(work.uncertain)
+        self.reconcile_unobserved(work.unobserved)
         return delivered
 
     # --- Jobs someone is waiting for (conversation pages) ---------------------
