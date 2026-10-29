@@ -21,12 +21,18 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 import httpx
 
+from bridge.stream_json import StreamJsonError, first_element
+
 logger = logging.getLogger(__name__)
 
 
 # Failures that happen before anything is sent, with a closed code: a deterministic one will not go away by itself
 # (the conversation exposes no configuration), a transient one may (the app is not running yet).
-DETERMINISTIC_CODES = frozenset({"missing_user_config"})
+# The first step of the latest user turn (model, tools, rules): the largest we accept to read.
+FIRST_STEP_MAX_BYTES = 2 * 1024 * 1024
+# Read the answer in chunks of this size, so that stopping early overshoots by at most one of them.
+STREAM_CHUNK_BYTES = 16 * 1024
+DETERMINISTIC_CODES = frozenset({"missing_user_config", "user_config_unreadable"})
 TRANSIENT_CODES = frozenset({"conversation_unavailable"})
 
 
@@ -276,22 +282,27 @@ class AntigravityChannel:
                         headers={"Connect-Protocol-Version": "1", "x-codeium-csrf-token": token},
                     ) as response:
                         if response.status_code == 200:
-                            content = bytearray()
-                            for chunk in response.iter_bytes():
-                                if len(content) + len(chunk) > 8 * 1024 * 1024:
-                                    break
-                                content.extend(chunk)
-                            else:
-                                steps = json.loads(content).get("steps", [])
-                                # A server ignoring the offset must not supply an older
-                                # user's configuration. Only the requested first step counts.
-                                if (isinstance(steps, list) and steps and isinstance(steps[0], dict)
-                                        and steps[0].get("type") == "CORTEX_STEP_TYPE_USER_INPUT"):
-                                    stamp = summary.get("lastUserInputTime")
-                                    actual = (steps[0].get("metadata") or {}).get("createdAt")
-                                    if isinstance(stamp, str) and stamp and actual == stamp:
-                                        return self._config({"steps": steps[:1]})
-        except (httpx.HTTPError, ValueError, TypeError, AttributeError, ChannelError):
+                            # The answer holds every step from the offset to the end (12 MB in a real case) and
+                            # the one we want is the first: read it as a stream and stop as soon as it is whole.
+                            try:
+                                step = first_element(response.iter_bytes(chunk_size=STREAM_CHUNK_BYTES), "steps", FIRST_STEP_MAX_BYTES)
+                            except StreamJsonError as e:
+                                # Nothing was sent. A step too big, an answer cut short or not JSON is named, so the
+                                # block says what is wrong instead of "no configuration".
+                                raise ChannelError(
+                                    f"The latest user step could not be read ({e.kind}).",
+                                    code="user_config_unreadable", phase="pre_dispatch") from None
+                            # A server ignoring the offset must not supply an older user's configuration.
+                            # Only the requested first step counts.
+                            if isinstance(step, dict) and step.get("type") == "CORTEX_STEP_TYPE_USER_INPUT":
+                                stamp = summary.get("lastUserInputTime")
+                                actual = (step.get("metadata") or {}).get("createdAt")
+                                if isinstance(stamp, str) and stamp and actual == stamp:
+                                    return self._config({"steps": [step]})
+        except ChannelError as e:
+            if e.code == "user_config_unreadable":
+                raise
+        except (httpx.HTTPError, ValueError, TypeError, AttributeError):
             pass
         raise ChannelError("No previous user turn to copy the model configuration from.",
                            code="missing_user_config", phase="pre_dispatch")
