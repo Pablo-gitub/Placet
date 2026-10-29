@@ -1838,11 +1838,12 @@ def create_app(
             if session.turn_error:
                 db.set_turn_error(session_id, None)
         if payload.event == "start":
-            # A restart, resume or compaction keeps a request stopped mid-turn (Esc, API error) linked,
-            # so the next turn can still continue it.
-            kept = session.turn_request_id if session.state != "busy" else None
+            # Compaction is internal to the existing turn: preserve its ownership
+            # and busy state so Stop can complete it and release the queue.
+            compacting_turn = payload.start_source == "compact" and session.state == "busy"
+            kept = session.turn_request_id if compacting_turn or session.state != "busy" else None
             kept_req = db.get_request(kept) if kept is not None else None
-            db.set_session_state(session_id, "idle",
+            db.set_session_state(session_id, "busy" if compacting_turn else "idle",
                                  kept if kept_req is not None and kept_req.status == RequestStatus.EXECUTING else None)
             if payload.credential_sha256:
                 db.register_binding(session_id, who.id, payload.credential_sha256, issued_at=payload.credential_issued_at)
