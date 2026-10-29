@@ -1,6 +1,6 @@
 # Separate administrative environment; never installed by the application deploy.
 webauthn==3.0.1
-fastapi==0.143.0
+fastapi==0.162.0
 uvicorn==0.54.0
 # Versions exercised by the administrative tests. Keep changes separate from
 # application dependency updates; wheels are installed only as DynamicUser.
