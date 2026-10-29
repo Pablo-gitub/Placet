@@ -844,6 +844,8 @@ body.chat-open { overflow: hidden; }
   padding: 0.75rem 0 1rem;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain; padding: .75rem;
+  /* The app anchors the reader's place itself (useChatScroll): the browser must not compensate a second time. */
+  overflow-anchor: none;
 }
 .chat-status { text-align: center; font-size: 0.75rem; color: var(--text-muted); margin: 0.5rem 0 1rem; }
 .chat-error { text-align: center; color: #f87171; font-size: 0.85rem; padding: 2rem 1rem; }
