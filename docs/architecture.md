@@ -58,6 +58,8 @@ Convert client events into Placet observations (`POST /api/sessions/{id}/events`
 | Codex | `~/.codex/hooks.json` | SessionStart, UserPromptSubmit, PostToolUse, Stop, SessionEnd | Shared `claude_code.py --provider codex` adapter for compatible fields. Synchronous only in tested versions (“async hooks are not supported yet”); review with `/hooks`. Desktop SessionEnd unloads/suspends (RF-29c); bridge queues once and requests a native-link reopen without asserting execution started. |
 | Antigravity 2.0 | `~/.gemini/config/hooks.json` | SessionStart, PreInvocation (first invocation begins the turn), Stop | `antigravity.py`; camelCase `conversationId`, `transcriptPath`, `modelName`. Synchronous hooks must print `{}`. Stop lacks final response; adapter reads it from the conversation file. |
 
+A Claude Code `SessionStart` with source `compact` during a busy turn preserves the turn state and its Placet request binding. Compaction is not a new user turn: the following `Stop` completes the original request and releases its queue normally.
+
 Hook approval and invocation must be verified against the installed app version. A configuration file alone is not evidence that execution events are being observed.
 
 ### 2.4 Bridge (`bridge/`)

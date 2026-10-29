@@ -296,3 +296,28 @@ async def test_create_request_conflicting_sender_session_and_credential_returns_
             "sender_session_id": "c1",
         }, headers=with_cred(A))
         assert resp.status_code == 201
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("compactions", [1, 2])
+async def test_compaction_keeps_running_request_until_stop(setup, compactions):
+    app, db = setup
+    async with agent_client(app, "tok-claude") as claude:
+        await start(claude, "c1", A)
+        req = await running(app, db)
+        for _ in range(compactions):
+            response = await claude.post("/api/sessions/c1/events", json={
+                "event": "start", "provider": "claude-code", "start_source": "compact",
+                "credential_sha256": sha(B),
+            })
+            assert response.status_code == 200
+        session = db.get_session("c1")
+        assert session.state == "busy"
+        assert session.turn_request_id == req.id
+        assert db.request_in_flight("c1") == req.id
+        response = await claude.post("/api/sessions/c1/events", json={
+            "event": "stop", "provider": "claude-code", "last_message": "done",
+        })
+        assert response.status_code == 200
+        assert db.get_request(req.id).execution == "completed"
+        assert db.request_in_flight("c1") is None
