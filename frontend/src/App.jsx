@@ -31,6 +31,9 @@ function targetOf(req) {
   return "#/storico";
 }
 
+// How long a jump to a request's card stays pending after it was asked for.
+const JUMP_VALID_MS = 3000;
+
 export default function App() {
   const { t } = useTranslation();
   const [requests, setRequests] = useState([]);
@@ -79,7 +82,12 @@ export default function App() {
   }, [inSession]);
   // A notification link (#request-N) waits here until its request is loaded;
   // then the view moves there and scrolls to it.
-  const jump = useRef(requestIdFromHash(window.location.hash));
+  // The card the user asked for (a notification link), and when: `{ id, at }`.
+  const jump = useRef((() => {
+    const id = requestIdFromHash(window.location.hash);
+    // oxlint-disable-next-line react/purity
+    return id === null ? null : { id, at: Date.now() };
+  })());
   const scrollTo = useRef(null);
   // The latest requests, for the hashchange listener registered once.
   const requestsRef = useRef(requests);
@@ -93,10 +101,11 @@ export default function App() {
   };
 
   const resolveJump = useCallback((list) => {
-    const req = jump.current !== null && list.find((r) => r.id === jump.current);
+    const req = jump.current !== null && list.find((r) => r.id === jump.current.id);
     if (!req) return;
+    const asked = jump.current.at;
     jump.current = null;
-    scrollTo.current = req.id;
+    scrollTo.current = { id: req.id, at: asked };
     const target = targetOf(req);
     if (window.location.hash === target) setRoute(routeFromHash(target));
     else window.location.hash = target;
@@ -200,7 +209,7 @@ export default function App() {
     const onHashChange = () => {
       const id = requestIdFromHash(window.location.hash);
       if (id !== null) {
-        jump.current = id;
+        jump.current = { id, at: Date.now() };
         setFocusId(id);
         resolveJump(requestsRef.current);
         return;
@@ -215,7 +224,13 @@ export default function App() {
 
   useEffect(() => {
     if (scrollTo.current === null) return;
-    const el = document.getElementById(`request-${scrollTo.current}`);
+    // A jump to a notification's card is for the moment the user taps it: if the card shows up later, while they
+    // are reading elsewhere, it must not pull the page.
+    if (Date.now() - scrollTo.current.at > JUMP_VALID_MS) {
+      scrollTo.current = null;
+      return;
+    }
+    const el = document.getElementById(`request-${scrollTo.current.id}`);
     if (el) {
       el.scrollIntoView?.({ block: "center" });
       scrollTo.current = null;
