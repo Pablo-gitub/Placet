@@ -282,5 +282,11 @@ adapters are implemented in the bridge.
 See the [October 29 compaction laboratory](2026-10-29-codex-compact-lab.md)
 for an owned app-server trial, literal queue slash behaviour, completion signals
 and the post-compaction token-reading caveat. Native CLI compaction works;
-desktop queue slash text does not compact, and no genuine remote desktop
-compaction channel was established.
+desktop queue slash text does not compact. The follow-up verified genuine
+desktop compaction through the experimental coordination bus.
+
+The [desktop alternatives follow-up](2026-10-29-desktop-compact-alternatives.md)
+records the newly verified Codex coordination-bus route and the native Claude
+threshold experiment, including the successful desktop-only-Placet #637
+countercheck and its prerequisites. The original lack of desktop access is
+superseded by the Codex IPC trial; queue slash text still does not compact.
