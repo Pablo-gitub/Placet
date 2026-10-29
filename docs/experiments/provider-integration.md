@@ -276,3 +276,11 @@ A), B is woken (provider B's channel), B's reply returns to Placet.
 Tested end to end: Claude → Claude, Claude → Codex. The other combinations
 (Codex → Claude, Antigravity ↔ Claude/Codex) become acceptance tests once the
 adapters are implemented in the bridge.
+
+### Codex same-instance compaction
+
+See the [October 29 compaction laboratory](2026-10-29-codex-compact-lab.md)
+for an owned app-server trial, literal queue slash behaviour, completion signals
+and the post-compaction token-reading caveat. Native CLI compaction works;
+desktop queue slash text does not compact, and no genuine remote desktop
+compaction channel was established.
