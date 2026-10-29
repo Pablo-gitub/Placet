@@ -1,11 +1,12 @@
 import { useTranslation } from "react-i18next";
 import { needsReturnApproval } from "./decisions";
-import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import Attachments from "./Attachments";
 import Composer from "./Composer";
 import { limitReset, resetClock } from "./usage";
 import { formatDateTime, formatNumber } from "./i18n/formatters";
 import { splitPrompt } from "./draft";
+import { useChatScroll } from "./useChatScroll";
 import {
   ArrowDown,
   ArrowLeft,
@@ -48,10 +49,6 @@ const ACTION_ICONS = {
   skill: Sparkles,
   agent: Bot,
 };
-// How close to the top (px) scrolling loads older messages, and how close to
-// the bottom counts as "following" the conversation.
-const LOAD_OLDER_PX = 150;
-const FOLLOW_PX = 80;
 const LONG_PLACET_CHARS = 400;
 
 function ActionLine({ entry }) {
@@ -362,17 +359,12 @@ export default function SessionView({
     sessionId,
     refreshKey
   );
-  const scrollRef = useRef(null);
-  const following = useRef(true);
-  const anchor = useRef(null);
-  // What the last layout pass saw at each end, to tell an append from a prepend; and whether the reader, who is
-  // reading higher up, has been left with something new below.
-  const seen = useRef({ first: undefined, last: undefined, questions: 0, outgoing: 0 });
-  const [unseen, setUnseen] = useState(false);
   const questions = requests.filter((r) => (r.status === "PENDING" || needsReturnApproval(r)) && r.sender_session_id === sessionId);
+  // A message the conversation already shows (it carries the request's id) was delivered: no second bubble for it.
+  const inConversation = new Set(entries.filter((e) => e.request_id != null).map((e) => e.request_id));
   const outgoing = requests
     .filter((r) => r.question_type === "message" && r.recipient_session_id === sessionId
-      && r.status in OUTGOING_STATES && notStarted(r))
+      && r.status in OUTGOING_STATES && notStarted(r) && !inConversation.has(r.id))
     .sort((a, b) => a.id - b.id);
   // Never went out, and the user has not hidden it: shown where it was written, not at the bottom.
   const terminal = requests.filter((r) => r.question_type === "message" && r.recipient_session_id === sessionId
@@ -415,51 +407,11 @@ export default function SessionView({
     };
   }, [activeProjectId]);
 
-  // Keep the view where the reader is: at the bottom only while the reader is (nearly) there, where they were
-  // when older messages are prepended, and untouched otherwise; new content below a reader who is higher up is
-  // announced by a button instead of pulling them down.
-  useLayoutEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const last = entries[entries.length - 1]?.cursor;
-    const firstCursor = entries[0]?.cursor;
-    const appended = last !== seen.current.last || questions.length > seen.current.questions
-      || outgoing.length > seen.current.outgoing;
-    const prepended = anchor.current !== null && firstCursor !== seen.current.first;
-    seen.current = { first: firstCursor, last, questions: questions.length, outgoing: outgoing.length };
-    if (prepended) {
-      el.scrollTop = el.scrollHeight - anchor.current.height + anchor.current.top;
-      anchor.current = null;
-    } else if (following.current) {
-      el.scrollTop = el.scrollHeight;
-    } else if (appended) {
-      // Something arrived below while an older page is still loading: what is above the reader is unchanged.
-      if (anchor.current) anchor.current.height = el.scrollHeight;
-      // oxlint-disable-next-line react/set-state-in-effect
-      setUnseen(true);
-    }
-  }, [entries, questions.length, outgoing.length]);
-
-  const onScroll = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    following.current = el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_PX;
-    if (following.current) setUnseen((was) => (was ? false : was));
-    if (el.scrollTop < LOAD_OLDER_PX && hasOlder && !loadingOlder && anchor.current === null) {
-      anchor.current = { height: el.scrollHeight, top: el.scrollTop };
-      loadOlder().then((loaded) => {
-        if (!loaded) anchor.current = null;
-      });
-    }
-  };
-
-  const scrollToEnd = () => {
-    const el = scrollRef.current;
-    if (!el) return;
-    following.current = true;
-    el.scrollTop = el.scrollHeight;
-    setUnseen(false);
-  };
+  const { scrollRef, contentRef, unseen, onScroll, scrollToEnd, follow } = useChatScroll({
+    signature: { first: entries[0]?.cursor, last: entries[entries.length - 1]?.cursor,
+      tail: questions.length + outgoing.length + terminal.length },
+    hasOlder, loadingOlder, loadOlder,
+  });
 
   const provider = session ? providerOf(session) : null;
   const state = session ? sessionStatus(session) : null;
@@ -517,6 +469,7 @@ export default function SessionView({
 
       <div className="chat-scroll-wrap">
       <div className="chat-scroll" ref={scrollRef} onScroll={onScroll} data-testid="chat-scroll">
+      <div ref={contentRef}>
         {status === "loading" && <p className="chat-status">{t("chat.loading")}</p>}
         {status === "error" && (
           <div className="chat-error" data-testid="chat-error">
@@ -585,6 +538,7 @@ export default function SessionView({
           />
         ))}
       </div>
+      </div>
       {unseen && (
         <button type="button" className="new-messages" data-testid="new-messages" onClick={scrollToEnd}>
           {t("chat.newMessages")} <ArrowDown size={14} aria-hidden="true" />
@@ -604,7 +558,7 @@ export default function SessionView({
           sessions={sessions}
           onSelectProject={(pid) => setActiveProjectId(pid)}
           onSend={async (text, mentions, attachments, mode, scheduledAt) => {
-            following.current = true;
+            follow();
             if (activeProjectId) {
               const args = [sessionId, text, mentions || [], attachments || [], mode || "queue", activeProjectId];
               if (scheduledAt) args.push(scheduledAt);

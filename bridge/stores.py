@@ -49,6 +49,8 @@ class Work:
     # Uncertain deliveries to look for in the recipient's conversation:
     # {"request_id", "session_id", "agent_id", "provider"}.
     uncertain: List[dict] = field(default_factory=list)
+    # Delivered messages with no turn reported: {"request_id", "session_id", "agent_id", "provider"}, to look for in the conversation.
+    unobserved: List[dict] = field(default_factory=list)
     # Folders of known sessions, to look for `.placet-off` (RF-45).
     folders: List[str] = field(default_factory=list)
     # Codex and Antigravity sessions whose titles the bridge reads: {"id", "provider"}.
@@ -94,6 +96,8 @@ class BridgeStore(Protocol):
     # The send ran but its outcome is unknown; later found in the conversation.
     def mark_uncertain(self, request_id: int) -> None: ...
     def mark_seen(self, request_id: int) -> None: ...
+    # The message was found in the recipient's conversation: the agent read it, its execution started.
+    def mark_observed(self, request_id: int) -> None: ...
     # Which of the folders have a `.placet-off`.
     def report_folders(self, checked: List[str], excluded: List[str]) -> None: ...
     def report_titles(self, titles: Dict[str, str]) -> None: ...
@@ -158,6 +162,11 @@ class LocalStore:
                 for r in self.db.uncertain_deliveries()
                 if (s := self.db.get_session(r.recipient_session_id)) is not None
             ],
+            unobserved=[
+                {"request_id": r.id, "session_id": s.id, "agent_id": s.agent_id, "provider": s.provider}
+                for r in self.db.unobserved_deliveries()
+                if (s := self.db.get_session(r.recipient_session_id)) is not None
+            ],
             folders=self.db.known_folders(),
             titles=[{"id": s.id, "provider": s.provider} for s in self.db.untitled_bridge_sessions()],
             steer=[{"request_id": r.id, "session_id": s.id, "provider": s.provider}
@@ -200,6 +209,9 @@ class LocalStore:
 
     def mark_seen(self, request_id: int) -> None:
         self.db.confirm_injection(request_id, actor=BRIDGE_ACTOR, via="transcript")
+
+    def mark_observed(self, request_id: int) -> None:
+        self.db.set_execution(request_id, "started", actor=BRIDGE_ACTOR, source="transcript")
 
     def report_folders(self, checked: List[str], excluded: List[str]) -> None:
         self.db.set_excluded_folders(checked, excluded, actor=BRIDGE_ACTOR)
@@ -295,6 +307,7 @@ class HttpStore:
             busy_agents=list(data.get("busy_agents", [])),
             sessions=list(data.get("sessions", [])),
             uncertain=list(data.get("uncertain", [])),
+            unobserved=list(data.get("unobserved", [])),
             folders=list(data.get("folders", [])),
             titles=list(data.get("titles", [])),
             steer=list(data.get("steer", [])),
@@ -335,6 +348,9 @@ class HttpStore:
 
     def mark_seen(self, request_id: int) -> None:
         self._call_ok("POST", f"/api/bridge/requests/{request_id}/seen")
+
+    def mark_observed(self, request_id: int) -> None:
+        self._call_ok("POST", f"/api/bridge/requests/{request_id}/observed")
 
     def report_titles(self, titles: Dict[str, str]) -> None:
         resp = self.client.post("/api/bridge/titles", json={"titles": titles})

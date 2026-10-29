@@ -2925,6 +2925,8 @@ def create_app(
             ],
             # Uncertain deliveries: the bridge looks for them in the conversation.
             "uncertain": uncertain_to_reconcile(),
+            # Delivered messages with no turn reported: it looks for them there too, as proof of the start.
+            "unobserved": unobserved_to_look_for(),
             # Folders of known sessions: the bridge looks for `.placet-off`.
             "folders": db.known_folders(),
             # "Now" messages for running turns, and those whose turn ended first.
@@ -3181,6 +3183,26 @@ def create_app(
                 out.append({"request_id": req.id, "session_id": session.id,
                             "agent_id": session.agent_id, "provider": session.provider})
         return out
+
+    def unobserved_to_look_for() -> List[Dict[str, object]]:
+        out = []
+        for req in db.unobserved_deliveries():
+            session = db.get_session(req.recipient_session_id)
+            if session is not None:
+                out.append({"request_id": req.id, "session_id": session.id,
+                            "agent_id": session.agent_id, "provider": session.provider})
+        return out
+
+    @app.post("/api/bridge/requests/{request_id}/observed", response_model=RequestModel)
+    async def bridge_observed(request_id: int, who: Principal = Depends(principal)):
+        """The message was found in the recipient's conversation: the agent read it, so its execution started."""
+        require_bridge(who)
+        req = get_or_404(request_id)
+        if (req.status != RequestStatus.EXECUTING or req.delivery != "accepted"
+                or not db.set_execution(request_id, "started", actor=who.actor, source="transcript")):
+            raise ProductError(409, "request.not_unobserved", "This request's execution is already known.")
+        notify_change(request_id)
+        return get_or_404(request_id)
 
     @app.post("/api/bridge/sessions/{session_id}/take")
     async def bridge_take_session_message(session_id: str, who: Principal = Depends(principal)):
