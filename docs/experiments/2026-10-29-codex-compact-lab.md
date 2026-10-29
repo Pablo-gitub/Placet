@@ -1,9 +1,10 @@
 # Codex compaction laboratory — October 29, 2026
 
-Status: **partial**. Genuine compaction is verified in a dedicated app-server
-runtime and in the native interactive CLI. The desktop queue trial is negative:
-slash text is an ordinary message, and no accessible genuine desktop control
-was established. No product code or provider configuration was changed.
+Status (updated after follow-up): **genuine desktop compaction verified through
+an experimental coordination-bus adapter**, as well as owned app-server and
+native CLI control. The initial negative access finding below is retained as
+history and superseded by the final follow-up section. Literal queue slash text
+still does not compact. No product code or global configuration was changed.
 
 ## Boundaries and versions
 
@@ -14,8 +15,9 @@ was established. No product code or provider configuration was changed.
   `.worktrees/codex-compact`.
 - The runtime selected its configured default, `gpt-6-luna`, effort `high`;
   the probe did not override the model.
-- New dedicated threads only. No existing user thread was resumed, no second
-  runtime wrote the same thread, no private proxy or GUI automation was used.
+- Dedicated laboratory threads only, including the existing desktop laboratory
+  selected explicitly by the human. No second runtime resumed or wrote an
+  existing conversation; no private proxy or GUI automation was used.
 - Provider state was written only by Codex itself through its normal interfaces.
   Rollouts were read; a derived prefix was written only into laboratory scratch.
   No credentials or conversation exports are included in this document.
@@ -174,7 +176,7 @@ idle/input checks, shared delivery lock, fresh rollout boundary and completion
 verification. A CLI without an owned terminal/control channel is not remotely
 controlled merely by knowing its thread ID.
 
-## Recommendation and remaining scope
+## Initial recommendation and remaining scope (superseded below)
 
 - **Available:** same-instance compaction for a session owned by Placet's
   app-server connection, with an explicit completion signal and a successful
@@ -197,3 +199,98 @@ controlled merely by knowing its thread ID.
 - [Official hooks](https://learn.chatgpt.com/docs/hooks): documented SessionStart
   compaction context, distinct from the locally observed hook-run metadata.
 - [Provider integration experiments](provider-integration.md).
+
+## Follow-up: desktop compaction through the coordination bus
+
+**This supersedes the earlier access conclusion:** a genuine same-runtime
+Codex desktop compaction channel was found and tested after the first report.
+The negative result for a literal queue slash command remains valid.
+
+### Mechanism and discovery
+
+Read-only inspection of the installed application package (0.159.2 runtime)
+found the desktop's coordination request `thread-follower-compact-thread`.
+The owner handler calls its own `compactThread`, which delegates to the owning
+app-server's `thread/compact/start`. This is different from intercepting or
+proxying that server's private stdio connection.
+
+The existing Unix socket `~/.codex/ipc/ipc.sock` is a coordination **router**.
+The process owning the listening socket need not own the conversation: other
+clients, including the desktop, can register with that router. Consequently,
+the earlier assumption that an extension-owned socket cannot reach the desktop
+was incorrect. No router or daemon was started by the probe.
+
+The observed wire format is a four-byte little-endian length followed by UTF-8
+JSON. A client registers with an `initialize` request and uses the returned
+client ID. The probe called only:
+
+1. `thread-owner-discovery`, version 1, with `hostId: local` and the exact
+   authorized laboratory conversation ID;
+2. `thread-follower-compact-thread`, version 1, with that conversation ID and
+   `targetClientId` bound to the owner returned by discovery.
+
+No other client was impersonated. No request handler, conversation runtime,
+proxy, hook or application configuration was installed. The probe validated
+socket/directory ownership and permissions, connected directly to the existing
+router, and closed its own client connection normally.
+
+### Same-instance result
+
+The desktop laboratory thread remained
+`01a1467c-2982-78a0-8246-61283d1c3e80`. Its desktop state was idle before the
+operation. Owner discovery succeeded. The targeted compaction request returned
+`resultType: success`, `result: {ok: true}`, from that same owner client.
+This reply is **dispatch acceptance**, not sufficient evidence of completion.
+
+The existing thread's rollout then recorded:
+
+- 21:10:39.635 UTC: `task_started`;
+- 21:10:59.641 UTC: a genuine `compacted` record;
+- token usage, `item_completed` and 21:10:59.686 UTC: `task_complete`.
+
+A single ordinary follow-up message, delivered with the existing queue channel,
+returned `DESKTOP-COMPACT-IPC-OK` and completed on the desktop. No second runtime
+loaded or wrote that conversation. Placet's last-input metric was 42,516 tokens
+before the operation, zero immediately after, and 29,466 on the following model
+call. The zero again demonstrates the post-compaction measurement caveat.
+
+The raw Codex hook input was not captured in this desktop trial. In particular,
+a `SessionStart` source of `compact` is not established for this provider. The
+Claude-specific request-binding fix must not be assumed to cover Codex unless
+that event shape is separately verified; the observed rollout completion is the
+evidence used here.
+
+### Integration risks and scope
+
+This is an **experimental, undocumented adapter**, not a stable public API.
+The installed package locations and request versions are version-specific.
+The relevant installed program modules were
+`.vite/build/bootstrap-B7ariqxX.js` (router/client and owner dispatch),
+`.vite/build/src-ghAWefM3.js` (request versions), and
+`.vite/build/application-network-startup-D74LEWDz.js` (framing/socket checks).
+Only program files were inspected; provider databases were not edited.
+
+A production adapter should:
+
+- restrict commands to the exact authorized session and discovered owner;
+- verify socket ownership, restrictive modes and peer identity; never create or
+  unlink the application's socket or start an alternative router;
+- rediscover ownership per operation and fail closed on protocol mismatch;
+- require idle, use the delivery barrier and bound all frames/timeouts;
+- distinguish accepted, completed, failed and uncertain; never retry dispatch
+  after a timeout without reconciling the known operation;
+- correlate new rollout events from a captured boundary; an unrelated native
+  or user-triggered compaction must not be blindly attributed to this request;
+- handle owner disconnects and unloaded conversations explicitly.
+
+Only a loaded idle desktop laboratory conversation was compacted. Busy,
+unloaded, owner-disconnect and application-update cases remain separate tests.
+The same-UID bus also carries more powerful requests: Placet must expose only
+the fixed compaction operation, never a generic IPC passthrough.
+
+For a context threshold, Placet can use this channel when its own measurement
+and policy require compaction, then wait for completion before releasing the
+work message. No slash text or second inference runtime is needed.
+
+For the successful Claude Desktop countercheck, its setup and different trigger
+semantics, see [desktop compaction alternatives](2026-10-29-desktop-compact-alternatives.md).
