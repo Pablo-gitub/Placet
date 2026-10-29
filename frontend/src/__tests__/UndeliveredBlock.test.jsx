@@ -77,3 +77,17 @@ describe("deliveries blocked by the channel", () => {
     await i18n.changeLanguage("it");
   });
 });
+
+describe("a configuration that is there but can not be read", () => {
+  beforeEach(async () => { await i18n.changeLanguage("it"); });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("uses the general words, not the 'does not expose the configuration' ones", async () => {
+    serve([item(1, { block: block({ code: "user_config_unreadable", failed_attempts: 2 }) })]);
+    render(<Undelivered requests={[]} sessions={sessions} />);
+    const note = await screen.findByTestId("delivery-block-ag1");
+    expect(note).toHaveTextContent("Consegna bloccata: la consegna a questa sessione non riesce");
+    expect(note).not.toHaveTextContent("non espone la configurazione");
+    expect(note).toHaveTextContent("2 tentativi falliti");
+  });
+});
