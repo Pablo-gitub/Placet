@@ -27,12 +27,18 @@ export function useTranscript(sessionId, refreshKey) {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const cursors = useRef({ before: null, end: null });
   const busy = useRef(false);
+  // Changes with the conversation: an answer that comes back for an earlier one is dropped.
+  const epoch = useRef(0);
   const [attempt, setAttempt] = useState(0);
   // RF-61: model, effort and context, from the newest page.
   const [meta, setMeta] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
+    epoch.current += 1;
+    busy.current = false;
+    // oxlint-disable-next-line react/set-state-in-effect
+    setLoadingOlder(false);
     cursors.current = { before: null, end: null };
     // Data fetching: state changes when the page arrives.
     // oxlint-disable-next-line react/set-state-in-effect
@@ -85,19 +91,24 @@ export function useTranscript(sessionId, refreshKey) {
     if (busy.current || before === null || before === undefined) return false;
     busy.current = true;
     setLoadingOlder(true);
+    const mine = epoch.current;
     try {
       const page = await fetchPage(sessionId, { before: String(before) });
+      if (mine !== epoch.current) return false;          // another conversation in the meantime
       cursors.current.before = page.before;
       setEntries((prev) => mergeEntries(page.messages, prev));
       setError(null);
       setHasOlder(page.before !== null && page.before !== undefined);
       return true;
     } catch (e) {
+      if (mine !== epoch.current) return false;
       setError(e.display || { key: "errors.transcriptConnection" });
       return false;
     } finally {
-      busy.current = false;
-      setLoadingOlder(false);
+      if (mine === epoch.current) {
+        busy.current = false;
+        setLoadingOlder(false);
+      }
     }
   }, [sessionId]);
 
