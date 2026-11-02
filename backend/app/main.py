@@ -1858,7 +1858,10 @@ def create_app(
                 if (
                     old is not None
                     and old.agent_id == who.id
-                    and old.cwd == (payload.cwd or session.cwd)
+                    # Same project: the desktop app may continue a worktree session from the project root.
+                    and (old.cwd == (payload.cwd or session.cwd)
+                         or (old.project_root is not None
+                             and old.project_root == (payload.project_root or session.project_root)))
                     and old.continued_to is None
                 ):
                     if db.continue_session(old.id, session_id):

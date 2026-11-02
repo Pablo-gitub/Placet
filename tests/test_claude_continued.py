@@ -245,3 +245,45 @@ async def test_continuation_ignored_if_different_agent_or_cwd_or_self(setup):
 
     assert db.get_session(self_id).continued_to is None
     assert db.get_session(self_id).ended_at is None
+
+
+@pytest.mark.asyncio
+async def test_continuation_from_a_worktree_of_the_same_project(setup):
+    """The desktop app may continue a session started in a linked worktree from the project root."""
+    app, db = setup
+    old_id = "11111111-1111-1111-1111-111111111111"
+    new_id = "22222222-2222-2222-2222-222222222222"
+    root = "/home/paolo/my-project"
+    worktree = root + "/.worktrees/feature"
+
+    async with agent_client(app, "tok-claude") as claude:
+        await claude.post(f"/api/sessions/{old_id}/events", json={
+            "event": "start", "cwd": worktree, "project_root": root, "provider": "claude-code"})
+    async with human_client(app) as human:
+        await human.post("/api/nodes", json={"name": "Coordinator", "session_id": old_id})
+
+    async with agent_client(app, "tok-claude") as claude:
+        await claude.post(f"/api/sessions/{new_id}/events", json={
+            "event": "start", "start_source": "fork", "cwd": root, "project_root": root, "provider": "claude-code"})
+        await claude.post(f"/api/sessions/{new_id}/events", json={
+            "event": "prompt", "cwd": root, "project_root": root, "continues": old_id})
+
+    assert db.get_session(old_id).continued_to == new_id
+    assert db.get_session(new_id).node_name == "Coordinator"
+
+
+@pytest.mark.asyncio
+async def test_continuation_ignored_across_different_projects(setup):
+    app, db = setup
+    old_id = "11111111-1111-1111-1111-111111111111"
+    new_id = "22222222-2222-2222-2222-222222222222"
+
+    async with agent_client(app, "tok-claude") as claude:
+        await claude.post(f"/api/sessions/{old_id}/events", json={
+            "event": "start", "cwd": "/p/a/.worktrees/x", "project_root": "/p/a", "provider": "claude-code"})
+        await claude.post(f"/api/sessions/{new_id}/events", json={
+            "event": "start", "cwd": "/p/b", "project_root": "/p/b", "provider": "claude-code"})
+        await claude.post(f"/api/sessions/{new_id}/events", json={
+            "event": "prompt", "cwd": "/p/b", "project_root": "/p/b", "continues": old_id})
+
+    assert db.get_session(old_id).continued_to is None
