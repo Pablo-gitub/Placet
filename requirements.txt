@@ -8,4 +8,4 @@ pyyaml>=6.0.3
 mcp>=2.3.0
 pytest>=8.0.0
 pytest-asyncio>=1.4.0
-pywebpush>=2.0.0
+pywebpush>=2.5.0
