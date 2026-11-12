@@ -4,7 +4,7 @@ fastapi==0.143.0
 uvicorn==0.54.0
 # Versions exercised by the administrative tests. Keep changes separate from
 # application dependency updates; wheels are installed only as DynamicUser.
-starlette==1.8.0
+starlette==1.9.0
 pydantic==2.14.1
 pydantic-core==2.50.1
 annotated-types==0.8.0
