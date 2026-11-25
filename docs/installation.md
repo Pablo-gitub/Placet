@@ -2,8 +2,7 @@
 
 > **A single point of human supervision and a cross-session communication bus for AI agents.**
 
-Placet lets agents running in different sessions (Claude Code, Gemini CLI /
-Antigravity, OpenAI Codex) cooperate by exchanging tasks and prompts, and gives
+Placet lets Claude Code and Codex sessions cooperate by exchanging tasks and prompts, and gives
 you a control point on your phone (through Tailscale and Web Push
 notifications) to review, edit and approve every prompt before it runs.
 
@@ -32,8 +31,8 @@ notifications) to review, edit and approve every prompt before it runs.
                 │                          │
         ┌───────┴───────┐          ┌───────┴───────┐
         ▼               ▼          ▼               ▼
-   [agent-claude]  [agent-gemini] [agent-claude]  [agent-gemini]
-    Claude Code     Gemini CLI     Claude Code     Gemini CLI
+   [agent-claude]  [agent-codex]  [agent-claude]  [agent-codex]
+    Claude Code     Codex          Claude Code     Codex
 ```
 
 The full design is in the [architecture](architecture.md).
@@ -67,7 +66,7 @@ cd ..
 | Variable | Meaning |
 |---|---|
 | `PLACET_ALLOWED_USERS` | Tailscale logins allowed to use the PWA, comma separated (e.g. `you@github`). If empty, nobody can use the PWA |
-| `PLACET_TOKEN_CLAUDE`, `PLACET_TOKEN_GEMINI`, `PLACET_TOKEN_CODEX` | Agent tokens, interpolated into `AGENTS.md`. An agent without a token cannot authenticate |
+| `PLACET_TOKEN_CLAUDE`, `PLACET_TOKEN_CODEX` | Agent tokens, interpolated into `AGENTS.md`. An agent without a token cannot authenticate |
 | `PLACET_HOST` / `PLACET_PORT` | TCP listener for the agents (default `127.0.0.1:8000`) |
 | `PLACET_HUMAN_SOCKET` | Unix socket for the PWA (default `$XDG_RUNTIME_DIR/placet/human.sock`) |
 | `PLACET_CORS_ORIGINS` | Origins allowed through CORS, only for a separate dev server (default: none) |
@@ -76,7 +75,7 @@ cd ..
 | `PLACET_BRIDGE_TOKEN` | Bridge token, accepted only on the `/api/bridge/*` endpoints |
 | `PLACET_API_URL` | For the bridge and the MCP server: the backend address (default `http://127.0.0.1:8000`) |
 | `PLACET_CODEX_BIN` | For the bridge: the `codex` binary with the `queue` command (default: the app's own, `/usr/lib/chatgpt/resources/codex`, then the one in `PATH`) |
-| `PLACET_CLAUDE_BIN` | For the bridge: the Claude Code CLI binary used for credential renewal (default: `PATH`, then `~/.local/bin/claude`) |
+| `PLACET_EXPERIMENTAL_CLAUDE_DESKTOP` | Backend setting. `1` enables experimental Claude Desktop deep links and local app-state reads. Default: disabled |
 | `PLACET_TRANSCRIPTS_LOCAL` | `1` = the backend reads session conversations itself instead of asking the bridge. Single-process development only (`run_all.py` sets it); never in production, where the backend has no access to the user's files |
 | `PLACET_BASE_URL` | PWA address as seen from the phone (e.g. `https://server.tail1234.ts.net`), used in notification links |
 | `PLACET_NTFY_URL`, `PLACET_NTFY_TOPIC`, `PLACET_NTFY_TOKEN` | ntfy server, topic and access token. Without URL, topic and `PLACET_BASE_URL`, notifications are off |
@@ -179,7 +178,7 @@ Nothing to configure on the server: the VAPID keys are generated on first use an
 Create tmux sessions with the names defined in `AGENTS.md`. `PLACET_HOOK_AGENT` tells the hooks (see below) which agent the session belongs to:
 ```bash
 tmux new -s agent-claude -e PLACET_HOOK_AGENT=claude claude
-tmux new -s agent-gemini gemini
+tmux new -s agent-codex codex
 ```
 
 ### 1a. Desktop app and CLI sessions (hook channel, recommended)
@@ -192,15 +191,14 @@ Claude Code sessions, from the desktop app (Code tab) and from the CLI, connect 
 
 **Present but silent.** With the hooks installed, every session registers with Placet but stays silent: it only reports when a turn starts and ends, writes nothing into the conversation, and its last reply is recorded only if the turn was a Placet request. A session "activates" when a Placet message reaches it (from you or another session) and goes back to silent at the end of the turn. In the desktop app you work as usual. To exclude a project entirely, create a `.placet-off` file in its folder: it also covers subfolders.
 
-To install the hooks in every session of every provider (Claude, Codex, Antigravity) use the installer. It touches only Placet's entries, backs up every file before changing it, and can be run again safely:
+To install the Claude Code and Codex hooks, use the installer. It touches only Placet's entries, backs up every file before changing it, and can be run again safely:
 ```bash
 python3 /opt/placet/hooks/install.py
 ```
 - **Claude Code** (`~/.claude/settings.json`): registration, turn state, implicit reply, "Now" delivery and the waiter that wakes the session.
 - **Codex** (`~/.codex/hooks.json`): the same script (`claude_code.py --provider codex`), because Codex passes hooks the same fields as Claude. Codex has no asynchronous hooks: the bridge wakes its sessions with `codex queue`. The hooks must be approved once: open `codex` in a terminal and accept them with `/hooks`.
-- **Antigravity 2.0** (`~/.gemini/config/hooks.json`): `antigravity.py`. At the end of a turn the last reply is read from the conversation file. The bridge wakes its sessions through the app's internal API.
 
-`--dry-run` shows what would change, `--uninstall` removes only Placet's entries, `--providers claude,codex` picks the providers.
+`--dry-run` shows what would change, `--uninstall` removes Placet's entries, and `--providers claude,codex` selects the providers. Antigravity is paused. Running the installer without a provider selection also removes obsolete Placet entries from Antigravity's user-level hook configuration. For that cleanup alone, run `python3 /opt/placet/hooks/install.py --uninstall --providers antigravity` as the desktop user.
 
 Placet's MCP tools are also needed in every session:
 ```bash
@@ -212,11 +210,12 @@ The tmux channel (below) remains available, for CLIs without hooks and for tmux 
 **Writing to a session from the phone.** At the bottom of a session's conversation there is a field to write to it. The message needs no approval. It arrives through the session's channel:
 - **Claude:** the waiter;
 - **Codex:** `codex queue`, with the `codex` shipped with the app (from 0.159; otherwise set the path with `PLACET_CODEX_BIN`);
-- **Antigravity:** the app's language-server API. It is undocumented: if an update changes it, the bridge logs it with the app version and the message keeps waiting.
 
 If the session is working, the message waits for the end of the turn. In the conversation it appears as yours, marked "from the phone".
 
-**Suspended sessions.** The Codex and Claude desktop apps unload idle conversations. Placet then shows the session as suspended and, when a message is waiting for it, reopens the conversation through the app's own link (`codex://threads/<id>`, `claude://code/continue?session=<id>`); the app may come to the front on the PC. Details: [Codex](providers/codex-wake.md), [Claude](providers/claude-wake.md).
+**Suspended sessions.** Placet can reopen a suspended Codex conversation when a message is waiting. For Claude Desktop, open the conversation in Claude so its hook can receive queued messages. Claude Desktop deep links and local app-state reads are experimental and disabled by default. The backend environment setting `PLACET_EXPERIMENTAL_CLAUDE_DESKTOP=1` explicitly enables them. Details: [Codex](providers/codex-wake.md), [Claude](providers/claude-wake.md).
+
+**Claude usage.** Check your quota with `/usage` in Claude Code. Live quota display, quota-based review, and reset-based scheduling in Placet use Codex data.
 
 ### 1b. Claude Code hooks: state, acknowledgement, implicit reply
 
@@ -267,7 +266,7 @@ The empty-prompt patterns are in `idle_patterns` in `AGENTS.md`, and the ones pr
 Try four situations: agent idle, agent working, while you type, and with a menu open. Only the first must be reported as free.
 
 ### 3. Configure the Placet MCP server
-Add Placet to your client's MCP configuration (e.g. `claude_desktop_config.json`, `.claude.json` or the Antigravity configuration):
+Add Placet to your client's MCP configuration (e.g. `claude_desktop_config.json`, `.claude.json` or Codex's `config.toml`):
 
 ```json
 {
@@ -288,7 +287,7 @@ Add Placet to your client's MCP configuration (e.g. `claude_desktop_config.json`
 
 `PLACET_AGENT_ID` is optional: the identity comes from the token, and if the ID is set the backend checks that it matches.
 
-Once the hooks are installed, Placet checks at each session start whether the client's configuration lists a `placet` server (Claude Code: `~/.claude.json` and `.mcp.json`; Codex: `~/.codex/config.toml`; Antigravity: `~/.gemini/config/mcp_config.json`, not `~/.gemini/antigravity/`). A session where none is found shows "Placet MCP non rilevato" in the PWA (the same warning appears when a Placet turn ends without any Placet tool call having been seen); check the client's MCP configuration and its available tools, add the entry above if it is missing and start a new session. A server provided by a plugin or managed settings is not looked for and can trigger a false warning.
+Once the hooks are installed, Placet checks at each session start whether the client's configuration lists a `placet` server (Claude Code: `~/.claude.json` and `.mcp.json`; Codex: `~/.codex/config.toml`). A session where none is found shows "Placet MCP non rilevato" in the PWA (the same warning appears when a Placet turn ends without any Placet tool call having been seen); check the client's MCP configuration and its available tools, add the entry above if it is missing and start a new session. A server provided by a plugin or managed settings is not looked for and can trigger a false warning.
 
 ---
 

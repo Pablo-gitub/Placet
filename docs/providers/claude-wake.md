@@ -1,5 +1,10 @@
 # Reopening Claude Desktop conversations
 
+This experimental feature is disabled by default. The backend setting
+`PLACET_EXPERIMENTAL_CLAUDE_DESKTOP=1` enables the behavior described here.
+With the default configuration, open the conversation in Claude Desktop to
+let its hook receive queued messages.
+
 When deliverable mail exists for an idle Claude Desktop session with no recent
 waiter heartbeat, `/api/bridge/work` lists it in `claude_wake_sessions`.
 Sessions that are definitively closed or busy, excluded projects and CLI

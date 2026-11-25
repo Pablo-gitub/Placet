@@ -39,6 +39,12 @@ class PlacetConfig(BaseModel):
     agents: Dict[str, AgentSpec] = Field(default_factory=dict)
     rules: Dict[str, RouteRule] = Field(default_factory=dict)
     description_markdown: str = ""
+    antigravity_paused: bool = False
+    live_usage_providers: Optional[frozenset[str]] = None
+    claude_desktop_experimental: bool = True
+
+    def provider_available(self, provider: Optional[str], agent_id: Optional[str] = None) -> bool:
+        return not self.antigravity_paused or (provider != "antigravity" and agent_id != "gemini")
 
     def get_agent(self, agent_id: str) -> Optional[AgentSpec]:
         return self.agents.get(agent_id)
@@ -138,3 +144,21 @@ def load_agents_config(file_path: Optional[str] = None) -> PlacetConfig:
         rules=rules,
         description_markdown=markdown_part.strip(),
     )
+
+
+def load_runtime_config() -> PlacetConfig:
+    """Apply the release's provider policy even to an existing installed registry."""
+    config = load_agents_config()
+    agents = {
+        agent_id: spec.model_copy(update={"allowed_targets": [t for t in spec.allowed_targets if t != "gemini"]})
+        for agent_id, spec in config.agents.items() if agent_id != "gemini"
+    }
+    rules = {route: rule for route, rule in config.rules.items()
+             if "gemini" not in (party.strip() for party in route.split("->"))}
+    return config.model_copy(update={
+        "agents": agents,
+        "rules": rules,
+        "antigravity_paused": True,
+        "live_usage_providers": frozenset({"codex"}),
+        "claude_desktop_experimental": os.environ.get("PLACET_EXPERIMENTAL_CLAUDE_DESKTOP") == "1",
+    })

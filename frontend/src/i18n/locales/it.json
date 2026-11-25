@@ -152,7 +152,6 @@
     "uploadFailed": "Trasferimento degli allegati non riuscito. Messaggio non inviato.",
     "bridgeOffline": "Il PC non risponde: il bridge non è attivo. Riprova quando torna connesso.",
     "bridgeTimeout": "Il PC non ha risposto in tempo. Riprova.",
-    "claudeRenewFailed": "Impossibile rinnovare l'accesso a Claude. Apri Claude Code in un terminale per autenticarti.",
     "messageUnavailable": "Sessione non più disponibile: messaggio non inviato.",
     "connection": "Errore di connessione.",
     "transcriptConnection": "Impossibile caricare la conversazione. Controlla la connessione e riprova.",
@@ -474,13 +473,7 @@
     "minutes": "{{m}} min",
     "hoursMinutes": "{{h}}h{{m}}",
     "daysHours": "{{d}}g {{h}}h",
-    "stale": "Ultimo aggiornamento: {{time}}.",
-    "staleClaude": "Ultimo aggiornamento: {{time}}. Apri una volta Claude Code nel terminale per rinnovare l'accesso, poi Placet torna a leggere i consumi.",
-    "autoRenew": "Rinnova automaticamente l'accesso di Claude",
-    "claudeOptions": "Opzioni Claude",
-    "renewClaude": "Rinnova accesso Claude",
-    "renewing": "Rinnovo in corso…",
-    "renewSuccess": "Accesso Claude rinnovato."
+    "stale": "Ultimo aggiornamento: {{time}}."
   },
   "node": {
     "title": "Nome del nodo",
@@ -666,8 +659,7 @@
     "guard7d": "Finestra 7 giorni",
     "guardRange": "Le soglie vanno da 50 a 100%.",
     "guardActive": "Ora in revisione per i consumi: {{providers}}.",
-    "guardClaudeWarning": "Per Claude serve il rinnovo automatico dell'accesso: senza, dopo circa 8 ore Placet non legge più i suoi consumi e il controllo non vale per Claude.",
-    "renewHint": "Rinnova l'accesso di Claude Code quando scade, senza usare il modello, così i suoi consumi restano aggiornati.",
+    "claudeUsageUnavailable": "Per vedere i consumi di Claude, usa /usage in Claude Code. In Placet la programmazione e la revisione basate sulle quote si applicano a Codex.",
     "deliverAtResetTitle": "Recapita al refresh",
     "deliverAtResetHint": "Se il destinatario o il mittente supera la soglia, programma la consegna per il reset successivo anziché bloccare in revisione manuale.",
     "save": "Salva",

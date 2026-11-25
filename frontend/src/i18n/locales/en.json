@@ -152,7 +152,6 @@
     "uploadFailed": "Attachment transfer failed. Your message was not sent.",
     "bridgeOffline": "The PC is not responding: the bridge is offline. Try again when it is connected.",
     "bridgeTimeout": "The PC did not respond in time. Try again.",
-    "claudeRenewFailed": "Unable to renew Claude access. Open Claude Code in a terminal to authenticate.",
     "messageUnavailable": "The session became unavailable. Your message was not sent.",
     "connection": "Connection error. Try again.",
     "transcriptConnection": "Unable to load the conversation. Check the connection and try again.",
@@ -474,13 +473,7 @@
     "minutes": "{{m}} min",
     "hoursMinutes": "{{h}}h{{m}}",
     "daysHours": "{{d}}d {{h}}h",
-    "stale": "Last updated {{time}}.",
-    "staleClaude": "Last updated {{time}}: open Claude Code in a terminal once to renew its login, then Placet can read the usage again.",
-    "autoRenew": "Renew Claude access automatically",
-    "claudeOptions": "Claude options",
-    "renewClaude": "Renew Claude access",
-    "renewing": "Renewing…",
-    "renewSuccess": "Claude access renewed."
+    "stale": "Last updated {{time}}."
   },
   "node": {
     "title": "Node name",
@@ -666,8 +659,7 @@
     "guard7d": "7-day window",
     "guardRange": "Thresholds go from 50 to 100%.",
     "guardActive": "Now reviewed because of usage: {{providers}}.",
-    "guardClaudeWarning": "Claude needs automatic login renewal: without it, after about 8 hours Placet can no longer read its usage and the guard does not apply to Claude.",
-    "renewHint": "Renews Claude Code's login when it expires, without using the model, so its usage stays current.",
+    "claudeUsageUnavailable": "To check Claude usage, run /usage in Claude Code. Quota-based scheduling and review in Placet apply to Codex.",
     "deliverAtResetTitle": "Deliver at reset",
     "deliverAtResetHint": "When recipient or sender is over limit, schedule delivery for the next reset instead of requiring manual review.",
     "save": "Save",

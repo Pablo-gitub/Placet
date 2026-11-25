@@ -332,4 +332,4 @@ class AntigravityChannel:
 
 
 def default_channels() -> Dict[str, object]:
-    return {"codex": CodexChannel(), "antigravity": AntigravityChannel()}
+    return {"codex": CodexChannel()}

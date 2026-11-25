@@ -17,11 +17,13 @@ it: `python3 antigravity.py --agent gemini --event Stop`.
   user to approve in the app. Such a Stop carries `pause`, and the next turn,
   started by the task's completion message or by the approval, `resumes`.
 
-Hooks are synchronous and Antigravity expects a JSON object on stdout: this
-script always prints "{}" and exits 0, so a Placet problem never blocks
-the agent. Events go to the local queue (spool.py), forwarded by the bridge.
-A `.placet-off` file in the project keeps it out of Placet.
+This integration is paused. A hook still registered on an older installation
+receives an empty JSON response. The parser is retained for offline tests.
 """
+if __name__ == "__main__":
+    print("{}")
+    raise SystemExit(0)
+
 import json
 import os
 import re
@@ -32,7 +34,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mcp_check  # noqa: E402
 import placet_common  # noqa: E402
-import spool  # noqa: E402
 
 PLACET_REQUEST = re.compile(r"\[Placet Request #(\d+)\b")
 MAX_MESSAGE_CHARS = 20000
@@ -200,33 +201,3 @@ def with_project_root(body: dict) -> dict:
     """The project root next to the raw cwd (a worktree reports its main repository)."""
     root = placet_common.project_root(body.get("cwd"))
     return {**body, "project_root": root} if root else body
-
-
-def main() -> None:
-    agent = placet_common.agent_id(sys.argv)
-    event_name = placet_common.option(sys.argv, "--event") or ""
-    try:
-        payload = json.load(sys.stdin)
-    except ValueError:
-        return
-    if not agent or not isinstance(payload, dict):
-        return
-    session_id = payload.get("conversationId")
-    body = build_event(event_name, payload)
-    if not session_id or body is None or not placet_common.active(body.get("cwd")):
-        return
-    body = with_mcp_state(body)
-    body = with_project_root(body)
-    try:
-        spool.write_event(agent, session_id, {k: v for k, v in body.items() if v is not None})
-    except Exception:
-        pass
-
-
-if __name__ == "__main__":
-    try:
-        main()
-    finally:
-        print("{}")
-        sys.stdout.flush()
-        os._exit(0)

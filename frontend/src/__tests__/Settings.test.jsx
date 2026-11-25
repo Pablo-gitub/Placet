@@ -4,13 +4,12 @@ import { afterEach, describe, it, expect, vi } from "vitest";
 import i18n from "../i18n";
 import Settings from "../Settings";
 
-function serve({ guard = { enabled: false, five_hour: 90, seven_day: 95, guarded: [] }, renew = false, notifications = { needs_you: true, problems: true, turn_end: "placet" }, putError = false } = {}) {
+function serve({ guard = { enabled: false, five_hour: 90, seven_day: 95, guarded: [] }, notifications = { needs_you: true, problems: true, turn_end: "placet" }, putError = false } = {}) {
   const calls = [];
   global.fetch = vi.fn((url, opts = {}) => {
     calls.push({ url, method: opts.method || "GET", body: opts.body && JSON.parse(opts.body) });
     let data = {};
     if (url === "/api/settings/usage-guard") data = opts.method === "PUT" ? { ...JSON.parse(opts.body), guarded: guard.guarded } : guard;
-    else if (url === "/api/settings/claude-renew") data = { enabled: opts.method === "PUT" ? JSON.parse(opts.body).enabled : renew };
     else if (url === "/api/settings/deliver-at-reset") data = { enabled: opts.method === "PUT" ? JSON.parse(opts.body).enabled : (guard.deliver_at_reset || false) };
     else if (url === "/api/settings/language") data = { language: "it" };
     else if (url === "/api/settings/notifications") {
@@ -43,19 +42,16 @@ describe("usage guard settings", () => {
   });
 
   it("shows which providers are reviewed now", async () => {
-    serve({ guard: { enabled: true, five_hour: 90, seven_day: 95, guarded: ["codex"] }, renew: true });
+    serve({ guard: { enabled: true, five_hour: 90, seven_day: 95, guarded: ["codex"] } });
     render(<Settings />);
     expect(await screen.findByTestId("usage-guard-active")).toHaveTextContent("Codex");
   });
 
-  it("warns that Claude needs automatic renewal, and offers it right there", async () => {
-    const calls = serve({ guard: { enabled: true, five_hour: 90, seven_day: 95, guarded: [] }, renew: false });
+  it("explains that Claude usage is available from Claude Code", async () => {
+    const calls = serve();
     render(<Settings />);
-    expect(await screen.findByTestId("usage-guard-claude-warning")).toHaveTextContent(i18n.t("settings.guardClaudeWarning"));
-    const renew = screen.getByTestId("toggle-claude-auto-renew");
-    fireEvent.click(renew);
-    await waitFor(() => expect(calls.some((c) => c.method === "PUT" && c.url === "/api/settings/claude-renew" && c.body.enabled === true)).toBe(true));
-    await waitFor(() => expect(screen.queryByTestId("usage-guard-claude-warning")).toBeNull());
+    expect(await screen.findByText(i18n.t("settings.claudeUsageUnavailable"))).toBeInTheDocument();
+    expect(calls.some((c) => c.url === "/api/settings/claude-renew")).toBe(false);
   });
 
   it("toggles deliver at reset option", async () => {

@@ -96,7 +96,6 @@ PLACET_PORT=8000
 
 # Agent tokens, referenced as \${PLACET_TOKEN_*} in $ETC_DIR/AGENTS.md.
 PLACET_TOKEN_CLAUDE=$(token)
-PLACET_TOKEN_GEMINI=$(token)
 PLACET_TOKEN_CODEX=$(token)
 PLACET_BRIDGE_TOKEN=$(token)
 
@@ -126,7 +125,6 @@ if [[ ! -f "$OWNER_CONF/agent-tokens.env" ]]; then
   as_owner bash -c "umask 077; cat > '$OWNER_CONF/agent-tokens.env'" <<EOF
 # Use these as PLACET_API_TOKEN in each agent's MCP configuration.
 PLACET_TOKEN_CLAUDE=$(get_env PLACET_TOKEN_CLAUDE)
-PLACET_TOKEN_GEMINI=$(get_env PLACET_TOKEN_GEMINI)
 PLACET_TOKEN_CODEX=$(get_env PLACET_TOKEN_CODEX)
 EOF
 fi

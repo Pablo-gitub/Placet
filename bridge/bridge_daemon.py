@@ -24,14 +24,7 @@ from bridge.transcripts import locate as _locate
 from bridge.claude_interrupts import last_turn_interrupted
 from bridge import steer as steer_files
 from bridge.titles import codex_titles
-from bridge.usage import (
-    CLAUDE_EVERY_SECONDS,
-    CLAUDE_RENEW_COOLDOWN_SECONDS,
-    claude_token_needs_renew,
-    claude_usage,
-    read_all as read_usage,
-    renew_claude_credentials,
-)
+from bridge.usage import read_all as read_usage
 from bridge.claude_desktop import ClaudeDesktopWake
 from hooks.placet_common import active
 from bridge.flags import mirror_flag
@@ -57,7 +50,7 @@ def locate_transcript(provider: str, session_id: str):
     return _locate(provider, session_id)
 # How long after an accepted Claude Desktop open the app's log is read for the cause.
 WAKE_DIAGNOSIS_SECONDS = 180.0
-# How often Codex and Antigravity titles are read (they change on rename).
+# How often Codex titles are read (they change on rename).
 TITLES_EVERY_SECONDS = 30.0
 # How often usage windows are read (RF-60).
 USAGE_EVERY_SECONDS = 60.0
@@ -102,9 +95,6 @@ class BridgeDaemon:
         self._excluded: Optional[Set[str]] = None
         self._titles_at = -TITLES_EVERY_SECONDS
         self._usage_at = -USAGE_EVERY_SECONDS
-        self._claude_usage_at = -CLAUDE_EVERY_SECONDS
-        self._claude_renew_at = -CLAUDE_RENEW_COOLDOWN_SECONDS
-        self._claude_usage: Optional[dict] = None
         # "now" messages left for a turn that ended, and since when (monotonic)
         self._steer_orphans: Dict[int, float] = {}
         # One lock per tmux session: a normal delivery and a session command
@@ -319,6 +309,8 @@ class BridgeDaemon:
         marked = 0
         now = time.monotonic()
         for item in unobserved:
+            if item.get("provider") == "antigravity" and "antigravity" not in self.channels:
+                continue
             request_id = item["request_id"]
             if now - self._observed_at.get(request_id, -RECONCILE_EVERY_SECONDS) < RECONCILE_EVERY_SECONDS:
                 continue
@@ -347,6 +339,8 @@ class BridgeDaemon:
         settled = 0
         now = time.monotonic()
         for item in uncertain:
+            if item.get("provider") == "antigravity" and "antigravity" not in self.channels:
+                continue
             request_id = item["request_id"]
             if now - self._reconciled_at.get(request_id, -RECONCILE_EVERY_SECONDS) < RECONCILE_EVERY_SECONDS:
                 continue
@@ -380,51 +374,30 @@ class BridgeDaemon:
         return excluded
 
     def refresh_titles(self, sessions: List[dict]) -> Dict[str, str]:
-        """Reads the titles of Codex and Antigravity sessions and reports them."""
+        """Reads and reports Codex session titles."""
         now = time.monotonic()
         if not sessions or now - self._titles_at < TITLES_EVERY_SECONDS:
             return {}
         self._titles_at = now
         titles: Dict[str, str] = {}
         titles.update(codex_titles(s["id"] for s in sessions if s.get("provider") == "codex"))
-        agy = [s["id"] for s in sessions if s.get("provider") == "antigravity"]
-        channel = self.channels.get("antigravity")
-        if agy and hasattr(channel, "titles"):
-            try:
-                titles.update(channel.titles(agy))
-            except Exception as e:
-                logger.debug(f"Antigravity titles: {e}")
         if titles:
             self.store.report_titles(titles)
         return titles
 
-    def refresh_usage(self, auto_renew: bool = False) -> List[dict]:
+    def refresh_usage(self) -> List[dict]:
         """Reads the providers' usage windows and reports them (RF-60)."""
         now = time.monotonic()
-        if auto_renew and now - self._claude_renew_at >= CLAUDE_RENEW_COOLDOWN_SECONDS:
-            if claude_token_needs_renew():
-                self._claude_renew_at = now
-                if renew_claude_credentials():
-                    self._claude_usage_at = -CLAUDE_EVERY_SECONDS
-                    self._usage_at = -USAGE_EVERY_SECONDS
         if now - self._usage_at < USAGE_EVERY_SECONDS:
             return []
         self._usage_at = now
-        usage = read_usage(antigravity=self.channels.get("antigravity"), claude=self._claude_cached)
+        usage = read_usage()
         if usage:
             try:
                 self.store.report_usage(usage)
             except Exception as e:
                 logger.debug(f"Usage report: {e}")
         return usage
-
-    def _claude_cached(self) -> Optional[dict]:
-        """Claude's usage is asked to Anthropic at most every few minutes; the last answer is reused."""
-        now = time.monotonic()
-        if now - self._claude_usage_at >= CLAUDE_EVERY_SECONDS:
-            self._claude_usage_at = now
-            self._claude_usage = claude_usage()
-        return self._claude_usage
 
     def process_steer(self, steer: List[dict], waiting: List[dict]) -> int:
         """
@@ -435,6 +408,8 @@ class BridgeDaemon:
         inserted = 0
         for item in steer:
             provider, session_id = item.get("provider"), item["session_id"]
+            if provider == "antigravity" and provider not in self.channels:
+                continue
             if provider == "claude-code" and (steer_files.steer_dir() / f"{session_id}.json").exists():
                 continue  # one at a time per session
             taken = self.store.take_steer(item["request_id"])
@@ -631,15 +606,16 @@ class BridgeDaemon:
         mirror_flag(work.session_credentials, self.flags_dir)
         self.check_folders(work.folders)
         self.refresh_titles(work.titles)
-        self.refresh_usage(auto_renew=work.claude_auto_renew)
-        self.diagnose_wakes()
-        self.refresh_desktop_state()
+        self.refresh_usage()
+        if work.claude_desktop_experimental:
+            self.diagnose_wakes()
+            self.refresh_desktop_state()
+            for sid, outcome in self.wake_claude_sessions(work.claude_wake_sessions).items():
+                try:
+                    self.store.report_wake(sid, outcome)
+                except Exception as exc:
+                    logger.warning('Could not report the wake-up of %s (%s).', sid, type(exc).__name__)
         self.check_interrupts(work.claude_busy)
-        for sid, outcome in self.wake_claude_sessions(work.claude_wake_sessions).items():
-            try:
-                self.store.report_wake(sid, outcome)
-            except Exception as exc:
-                logger.warning('Could not report the wake-up of %s (%s).', sid, type(exc).__name__)
         busy_sessions: Set[str] = set()
         busy_agents = set(work.busy_agents)
         delivered = self.process_pending_results(busy_sessions, work.results, busy_agents)
@@ -655,6 +631,8 @@ class BridgeDaemon:
     def handle_job(self, job: dict) -> dict:
         """The result of one job, never an exception: the backend is waiting."""
         kind = job.get("kind")
+        if (job.get("provider") == "antigravity" or job.get("agent_id") == "gemini"):
+            return {"ok": False, "error": "not_found", "message": "Session not found."}
         try:
             if kind == "transcript":
                 if not active(job.get("cwd")):
@@ -685,20 +663,6 @@ class BridgeDaemon:
                                    identity={k: job.get(k) for k in ("tmux_server", "agent_pid", "agent_started")},
                                    procs=self.procs, deadline=job.get("deadline"))
                 page = {"sent": line, "needs_confirmation": needs_confirmation}
-            elif kind == "claude_renew":
-                ok = renew_claude_credentials()
-                if not ok:
-                    return {"ok": False, "error": "failed", "message": "Claude renewal failed."}
-                self._claude_usage_at = -CLAUDE_EVERY_SECONDS
-                self._usage_at = -USAGE_EVERY_SECONDS
-                usage = claude_usage()
-                if usage:
-                    self._claude_usage = usage
-                    try:
-                        self.store.report_usage([usage])
-                    except Exception as e:
-                        logger.debug(f"Usage report: {e}")
-                page = {"renewed": True, "usage": usage}
             else:
                 return {"ok": False, "error": "unknown_job", "message": f"Unknown job {kind!r}."}
             return {"ok": True, "page": page}

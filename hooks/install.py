@@ -5,14 +5,15 @@ so that each new session registers by itself:
 
 - Claude Code (app and CLI): ~/.claude/settings.json
 - Codex (app and CLI):       ~/.codex/hooks.json   (approve once with /hooks in Codex)
-- Antigravity (app and agy): ~/.gemini/config/hooks.json
+- Antigravity is paused: remove only Placet hooks from ~/.gemini/config/hooks.json
 
 Only Placet's own entries are touched: they are recognised by the hook
 scripts they run, replaced on every run (so running it twice changes
 nothing) and removed with --uninstall. Each file is backed up before it
 changes.
 
-Usage: python3 install.py [--providers claude,codex,antigravity]
+Usage: python3 install.py [--providers claude,codex]
+       python3 install.py --uninstall --providers antigravity
                           [--hooks-dir /opt/placet/hooks] [--uninstall] [--dry-run]
 """
 import argparse
@@ -148,6 +149,8 @@ def load(path: Path) -> dict:
 
 
 def apply(provider: str, hooks_dir: str, uninstall: bool, dry_run: bool, home: Path = HOME) -> str:
+    if provider == "antigravity" and not uninstall:
+        raise ValueError("integration paused; use --uninstall to remove existing Placet hooks")
     path, ours, merge = PROVIDERS[provider]
     path = home / path.relative_to(HOME)
     current = load(path)
@@ -164,26 +167,32 @@ def apply(provider: str, hooks_dir: str, uninstall: bool, dry_run: bool, home: P
     return f"{provider}: {path} {'Placet hooks removed' if uninstall else 'updated'}"
 
 
-def main(argv=None) -> int:
+def main(argv=None, *, home: Path = HOME) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--providers", default="claude,codex,antigravity")
+    parser.add_argument("--providers", default=None)
     parser.add_argument("--hooks-dir", default="/opt/placet/hooks")
     parser.add_argument("--uninstall", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
     hooks_dir = args.hooks_dir.rstrip("/")
     status = 0
-    for provider in [p.strip() for p in args.providers.split(",") if p.strip()]:
+    providers = args.providers if args.providers is not None else "claude,codex,antigravity"
+    for provider in [p.strip() for p in providers.split(",") if p.strip()]:
+        uninstall = args.uninstall or (args.providers is None and provider == "antigravity")
         if provider not in PROVIDERS:
             print(f"{provider}: unknown provider", file=sys.stderr)
             status = 2
             continue
+        if provider == "antigravity" and not uninstall:
+            print("antigravity: integration paused; use --uninstall to remove existing Placet hooks", file=sys.stderr)
+            status = 2
+            continue
         try:
-            print(apply(provider, hooks_dir, args.uninstall, args.dry_run))
+            print(apply(provider, hooks_dir, uninstall, args.dry_run, home=home))
         except (OSError, ValueError) as e:
             print(f"{provider}: {e}", file=sys.stderr)
             status = 1
-    if not args.uninstall and not args.dry_run and "codex" in args.providers:
+    if not args.uninstall and not args.dry_run and "codex" in providers:
         print("Codex: open a CLI session (`codex`) and review Placet hooks with /hooks.")
     return status
 

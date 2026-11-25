@@ -31,7 +31,7 @@ from backend.app.auth import (
     require_bridge,
     require_human,
 )
-from backend.app.config import PlacetConfig, load_agents_config
+from backend.app.config import PlacetConfig, load_runtime_config
 from backend.app.database import (
     ControlPending,
     Database, NameTaken, NodeNameTaken, ProjectNameTaken,
@@ -180,7 +180,7 @@ class BackgroundLanguage(BaseModel):
     language: Literal["en", "it"]
 
 
-class ClaudeRenewSetting(BaseModel):
+class SessionCredentialsSetting(BaseModel):
     enabled: bool
 
 
@@ -423,7 +423,7 @@ def create_app(
             if not prefs.get("problems", True):
                 return
         req = db.get_request(req_id)
-        if req is None:
+        if req is None or request_provider_paused(req):
             return
         try:
             task = asyncio.get_running_loop().create_task(send_ntfy_alert(req, replace(ntfy, language=db.get_background_language()), text(f"alerts.{problem}", db.get_background_language())))
@@ -489,9 +489,9 @@ def create_app(
         reached the app): one needs-you notification per episode, never repeated, never when the
         user turned that kind off (and then not consumed).
         """
-        if not db.get_notification_preferences().get("needs_you", True):
+        if not config.claude_desktop_experimental or not db.get_notification_preferences().get("needs_you", True):
             return
-        session = db.get_session(session_id)
+        session = active_session(session_id)
         if session is None or not db.claim_wake_alert(session_id):
             return
         lang = db.get_background_language()
@@ -501,7 +501,7 @@ def create_app(
                        text(f"notify.{key}_body", lang), f"/#/sessione/{session_id}", f"wake-{session_id}", "high")
 
     def alert_held_queue(req_id: int, session_id: str, waiting: int) -> None:
-        session = db.get_session(session_id)
+        session = active_session(session_id)
         if session is None:
             return
         lang = db.get_background_language()
@@ -581,7 +581,35 @@ def create_app(
     db.settle_pending_session_controls()
 
     if config is None:
-        config = load_agents_config()
+        config = load_runtime_config()
+
+    db.live_usage_providers = config.live_usage_providers
+
+    def session_available(session: SessionModel) -> bool:
+        return config.provider_available(session.provider, session.agent_id)
+
+    def active_session(session_id: str) -> Optional[SessionModel]:
+        session = db.get_session(session_id)
+        return session if session is not None and session_available(session) else None
+
+    def visible_session(session: SessionModel) -> SessionModel:
+        if config.claude_desktop_experimental or session.entrypoint != "claude-desktop":
+            return session
+        return session.model_copy(update={"wake_state": None, "wake_at": None, "wake_attempts": 0,
+                                          "wake_cause": None, "wake_cause_at": None, "desktop_archived": False})
+
+    def available_target(agent_id: str, session_id: Optional[str]) -> bool:
+        if not config.provider_available(None, agent_id):
+            return False
+        if session_id is None or not config.antigravity_paused:
+            return True
+        session = db.get_session(session_id)
+        return session is None or session_available(session)
+
+    def node_available(node: NodeModel) -> bool:
+        return config.provider_available(node.provider) and (
+            node.session_id is None or active_session(node.session_id) is not None
+        )
 
     if ntfy is None:
         ntfy = NtfyConfig.from_env()
@@ -629,8 +657,8 @@ def create_app(
         """The relation between the nodes of two sessions, if there is one (RFC-04)."""
         if not sender_session_id or not recipient_session_id:
             return None
-        sender = db.get_session(sender_session_id)
-        recipient = db.get_session(recipient_session_id)
+        sender = active_session(sender_session_id)
+        recipient = active_session(recipient_session_id)
         if sender is None or recipient is None:
             return None
         return db.find_relation(sender.node_id, recipient.node_id, type_id)
@@ -651,14 +679,14 @@ def create_app(
 
     def created_sender_session(who: Principal) -> Optional[str]:
         """The session about to create a request: the only busy one of the agent."""
-        busy = [s for s in db.list_sessions(agent_id=who.id) if s.state == "busy"]
+        busy = [s for s in db.list_sessions(agent_id=who.id) if s.state == "busy" and session_available(s)]
         return busy[0].id if len(busy) == 1 else None
 
     def origin_of(req: RequestModel) -> Optional[str]:
         """The sender session, as the notification names it: 'Claude · <title>'."""
         if not req.sender_session_id:
             return None
-        session = db.get_session(req.sender_session_id)
+        session = active_session(req.sender_session_id)
         if session is None:
             return None
         return session_label(session.provider, session.title, session.project_root or session.cwd) or None
@@ -727,14 +755,14 @@ def create_app(
         sessions. An agent with no session at all, or only tmux-driven ones the
         bridge reaches, keeps the old behaviour.
         """
-        sender = db.get_session(sender_session) if sender_session else None
+        sender = active_session(sender_session) if sender_session else None
         # Compare project roots (the main repository when working in a worktree), real paths
         # on both sides; a session that reports none is compared by its working directory.
         folder_of = lambda s: os.path.realpath(s.project_root or s.cwd) if (s.project_root or s.cwd) else None  # noqa: E731
         folder = folder_of(sender) if sender is not None else None
         # The sender is never a candidate: a session cannot receive its own request.
         others = [s for s in db.list_sessions(agent_id=req.recipient_id)
-                  if s.id != sender_session and not s.excluded]
+                  if s.id != sender_session and not s.excluded and session_available(s)]
         reachable = [s for s in others if s.reachable]
         waiting = [s for s in others if not s.reachable and not s.tmux_session]
         here = lambda pool: [s for s in pool if folder is None or folder_of(s) == folder]  # noqa: E731
@@ -757,7 +785,7 @@ def create_app(
         )
 
     def check_target_session(session_id: str, agent_id: str) -> None:
-        session = db.get_session(session_id)
+        session = active_session(session_id)
         if session is None or session.agent_id != agent_id or session.ended_at is not None:
             raise ProductError(
                 422, "session.unavailable", f"Session {session_id} is not an open session of {agent_id}.",
@@ -787,32 +815,19 @@ def create_app(
         response.headers["Cache-Control"] = "no-store"
         return {"language": db.get_background_language()}
 
-    @app.get("/api/settings/session-credentials", response_model=ClaudeRenewSetting)
+    @app.get("/api/settings/session-credentials", response_model=SessionCredentialsSetting)
     async def get_session_credentials_setting(response: Response, who: Principal = Depends(principal)):
         """RS-09: whether new Claude Code sessions get a verified session credential (off by default)."""
         require_human(who)
         response.headers["Cache-Control"] = "no-store"
         return {"enabled": db.get_setting("session_credentials") == "true"}
 
-    @app.put("/api/settings/session-credentials", response_model=ClaudeRenewSetting)
-    async def set_session_credentials_setting(payload: ClaudeRenewSetting, response: Response, who: Principal = Depends(principal)):
+    @app.put("/api/settings/session-credentials", response_model=SessionCredentialsSetting)
+    async def set_session_credentials_setting(payload: SessionCredentialsSetting, response: Response, who: Principal = Depends(principal)):
         require_human(who)
         db.set_setting("session_credentials", "true" if payload.enabled else "false")
         response.headers["Cache-Control"] = "no-store"
         return {"enabled": payload.enabled}
-
-    @app.get("/api/settings/claude-renew", response_model=ClaudeRenewSetting)
-    async def get_claude_renew_setting(response: Response, who: Principal = Depends(principal)):
-        require_human(who)
-        response.headers["Cache-Control"] = "no-store"
-        return {"enabled": db.get_setting("claude_auto_renew") == "true"}
-
-    @app.put("/api/settings/claude-renew", response_model=ClaudeRenewSetting)
-    async def set_claude_renew_setting(payload: ClaudeRenewSetting, response: Response, who: Principal = Depends(principal)):
-        require_human(who)
-        db.set_setting("claude_auto_renew", "true" if payload.enabled else "false")
-        response.headers["Cache-Control"] = "no-store"
-        return {"enabled": db.get_setting("claude_auto_renew") == "true"}
 
     @app.get("/api/settings/notifications", response_model=NotificationSettings)
     async def get_notification_settings(response: Response, who: Principal = Depends(principal)):
@@ -844,7 +859,7 @@ def create_app(
             return None
         for node_id in (relation.from_node, relation.to_node):
             node = db.get_node(node_id)
-            session = db.get_session(node.session_id) if node and node.session_id else None
+            session = active_session(node.session_id) if node and node.session_id else None
             if session is not None and session.provider in guarded:
                 return session.provider
         return None
@@ -919,7 +934,7 @@ def create_app(
         # RFC-08: a node by name stands for its current session and agent.
         if req.target_node:
             node = db.node_by_name(req.target_node.strip())
-            target = db.get_session(node.session_id) if node and node.session_id else None
+            target = active_session(node.session_id) if node and node.session_id else None
             if target is None:
                 raise ProductError(404, "node.not_found", f"No node named {req.target_node!r} with a session.")
             if req.recipient_id not in (None, target.agent_id):
@@ -932,6 +947,8 @@ def create_app(
             req = req.model_copy(update={"relation_type_id": rtype.id})
         if not req.recipient_id:
             raise ProductError(422, "request.no_recipient", "Specify recipient_id or target_node.")
+        if not available_target(req.recipient_id, req.recipient_session_id):
+            raise ProductError(404, "session.not_found", "Session not found")
 
         # The relation is known before anything is created (RFC-04/06).
         bound = bound_session(who, x_placet_session)
@@ -940,7 +957,7 @@ def create_app(
                                f"sender_session_id {req.sender_session_id!r} conflicts with credential's session {bound!r}.")
         sender_session_candidate = bound or req.sender_session_id
         if sender_session_candidate:
-            own = db.get_session(sender_session_candidate)
+            own = active_session(sender_session_candidate)
             if own is None or own.agent_id != who.id:
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                                     detail="sender_session_id is not a session of this agent.")
@@ -1026,7 +1043,7 @@ def create_app(
 
         target_warning = None
         if req.recipient_session_id is not None:
-            target = db.get_session(req.recipient_session_id)
+            target = active_session(req.recipient_session_id)
             is_wakeable_suspended = (
                 target is not None
                 and target.provider in WAKEABLE_SUSPENDED_PROVIDERS
@@ -1089,14 +1106,14 @@ def create_app(
             deliver_at_reset_on = cfg.get("deliver_at_reset", False)
 
             to_node = db.get_node(relation.to_node) if relation.to_node else None
-            rec_session = db.get_session(to_node.session_id) if to_node and to_node.session_id else None
+            rec_session = active_session(to_node.session_id) if to_node and to_node.session_id else None
             rec_provider = rec_session.provider if rec_session else None
             rec_over = rec_provider and db.is_provider_over_limit(
                 rec_provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"]
             )
 
             from_node = db.get_node(relation.from_node) if relation.from_node else None
-            snd_session = db.get_session(from_node.session_id) if from_node and from_node.session_id else None
+            snd_session = active_session(from_node.session_id) if from_node and from_node.session_id else None
             snd_provider = snd_session.provider if snd_session else None
             snd_over = snd_provider and db.is_provider_over_limit(
                 snd_provider, cfg["five_hour"], cfg["seven_day"], check_near_limit=cfg["enabled"]
@@ -1185,7 +1202,8 @@ def create_app(
     ):
         require_human(who)
         expire_and_notify()
-        return db.list_requests(status=status, limit=limit, hide_excluded=True)
+        return db.list_requests(status=status, limit=limit, hide_excluded=True,
+                                hide_antigravity=config.antigravity_paused)
 
     BLOCKED_AFTER = timedelta(minutes=2)
 
@@ -1203,7 +1221,7 @@ def create_app(
             return ("awaiting_refresh" if by_system else "scheduled"), req.scheduled_at
         if req.recipient_session_id and db.get_delivery_block(req.recipient_session_id) is not None:
             return "delivery_blocked", None                  # the channel can not deliver to this session (see `block`)
-        target = db.get_session(req.recipient_session_id) if req.recipient_session_id else None
+        target = active_session(req.recipient_session_id) if req.recipient_session_id else None
         waited = now - (req.updated_at or req.created_at).astimezone(timezone.utc)
         if (target is not None and not target.reachable) or waited > BLOCKED_AFTER:
             return "blocked", None
@@ -1217,11 +1235,13 @@ def create_app(
         now = datetime.now(timezone.utc)
         items = []
         for req in db.undelivered_requests():
+            if request_provider_paused(req):
+                continue
             cause, due_at = undelivered_cause(req, now)
             if cause is None:
                 continue
-            sender = db.get_session(req.sender_session_id) if req.sender_session_id else None
-            target = db.get_session(req.recipient_session_id) if req.recipient_session_id else None
+            sender = active_session(req.sender_session_id) if req.sender_session_id else None
+            target = active_session(req.recipient_session_id) if req.recipient_session_id else None
             block = db.get_delivery_block(req.recipient_session_id) if cause == "delivery_blocked" else None
             items.append(UndeliveredItem(
                 request=req, cause=cause, due_at=due_at,
@@ -1287,7 +1307,7 @@ def create_app(
         """The user sends a prompt that has not been delivered to another open session instead."""
         require_human(who)
         req = undelivered_or_refuse(request_id)
-        target = db.get_session(payload.session_id)
+        target = active_session(payload.session_id)
         if target is None:
             raise ProductError(422, "session.unavailable", f"Session {payload.session_id} is not an open session.")
         if target.id == req.sender_session_id:
@@ -1388,7 +1408,7 @@ def create_app(
         relation = db.get_relation(req.relation_id) if req.relation_id else None
         redirect = None
         if decision.recipient_session_id is not None:
-            target = db.get_session(decision.recipient_session_id)
+            target = active_session(decision.recipient_session_id)
             # The user may send an agent's prompt to a session of another agent.
             redirect_to = (target.agent_id if target is not None and req.recipient_id != "human"
                            and req.question_type == QuestionType.PROMPT_REVIEW
@@ -1401,12 +1421,16 @@ def create_app(
                 # Another recipient: the relation the request came on may no longer apply.
                 relation = relation_of(req.sender_session_id, decision.recipient_session_id)
                 redirect = (redirect_to, relation.id if relation else None)
+        if (decision.status == RequestStatus.APPROVED
+                and not available_target((redirect and redirect[0]) or req.recipient_id,
+                                         decision.recipient_session_id or req.recipient_session_id)):
+            raise ProductError(404, "session.not_found", "Session not found")
         if decision.status == RequestStatus.APPROVED and decision.delivery_mode == "now":
             # Only a delivery still ahead conflicts with "now": a schedule that has passed is just due.
             if req.scheduled_at is not None and req.scheduled_at.astimezone(timezone.utc) > datetime.now(timezone.utc):
                 raise ProductError(422, "schedule.steer_conflict", "A message in 'now' mode cannot be scheduled.")
             target_id = decision.recipient_session_id or req.recipient_session_id
-            target = db.get_session(target_id) if target_id else None
+            target = active_session(target_id) if target_id else None
             if (req.question_type != QuestionType.PROMPT_REVIEW or req.recipient_id == "human"
                     or target is None or target.provider not in STEER_PROVIDERS):
                 raise ProductError(422, "decision.now_target", "Now requires a specific Claude or Antigravity session.")
@@ -1422,10 +1446,10 @@ def create_app(
         effective_schedule = None
         if decision.status == RequestStatus.APPROVED and decision.delivery_mode != "now" and req.recipient_id != "human":
             target_id = decision.recipient_session_id or req.recipient_session_id
-            target_sess = db.get_session(target_id) if target_id else None
+            target_sess = active_session(target_id) if target_id else None
             if target_sess is None and relation and relation.to_node:
                 node = db.get_node(relation.to_node)
-                target_sess = db.get_session(node.session_id) if node and node.session_id else None
+                target_sess = active_session(node.session_id) if node and node.session_id else None
             rec_provider = target_sess.provider if target_sess else None
             if rec_provider is None:
                 rec_provider = AGENT_PROVIDERS.get(req.recipient_id, req.recipient_id)
@@ -1497,7 +1521,7 @@ def create_app(
         sender: a new prompt from the replying agent, already approved; the
         sender gets only a notice (RFC-07b).
         """
-        target = db.get_session(payload.forward_session_id)
+        target = active_session(payload.forward_session_id)
         if not payload.approve or target is None or req.response is None:
             raise ProductError(422, "return.forward_invalid", "Choose an open session to forward the reply to.")
         if target.id in (req.sender_session_id, req.recipient_session_id):
@@ -1802,7 +1826,7 @@ def create_app(
 
     def own_session(who: Principal, session_id: str) -> SessionModel:
         require_agent(who)
-        session = db.get_session(session_id)
+        session = active_session(session_id)
         if session is None or session.agent_id != who.id:
             raise HTTPException(status_code=404, detail="Session not found")
         return session
@@ -1818,6 +1842,10 @@ def create_app(
         to this session), end.
         """
         require_agent(who)
+        previous = db.get_session(session_id) if config.antigravity_paused else None
+        if (not config.provider_available(payload.provider, who.id)
+                or (previous is not None and not session_available(previous))):
+            raise ProductError(404, "session.not_found", "Session not found")
         if payload.event_id and db.session_event_seen(payload.event_id):
             return {"session": session_id, "event": payload.event, "duplicate": True}
         if not db.upsert_session(
@@ -1827,7 +1855,7 @@ def create_app(
             model=payload.model,
         ):
             raise HTTPException(status_code=404, detail="Session not found")
-        session = db.get_session(session_id)
+        session = active_session(session_id)
         result: Dict[str, object] = {"session": session_id, "event": payload.event}
         source = " ".join(filter(None, [payload.provider or session.provider, payload.adapter or "hook"]))
 
@@ -1854,7 +1882,7 @@ def create_app(
                 result["node_id"] = db.reattach_after_clear(session_id)
         elif payload.event == "prompt":
             if session.prompt_count == 0 and payload.continues and payload.continues != session_id:
-                old = db.get_session(payload.continues)
+                old = active_session(payload.continues)
                 if (
                     old is not None
                     and old.agent_id == who.id
@@ -2010,7 +2038,7 @@ def create_app(
                 if first:
                     notify_session(session_id)  # now reachable
                     first = False
-                session = db.get_session(session_id)
+                session = active_session(session_id)
                 if session is None or session.ended_at is not None:
                     return Response(status_code=status.HTTP_410_GONE)
                 taken = db.take_inbox_message(session)
@@ -2040,7 +2068,9 @@ def create_app(
         """Sessions of all agents: for the PWA and for agents choosing a target."""
         if who.kind == "bridge":
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not for the bridge.")
-        return db.list_sessions(agent_id=agent_id, include_ended=include_ended, include_excluded=False)
+        return [visible_session(s) for s in db.list_sessions(
+            agent_id=agent_id, include_ended=include_ended, include_excluded=False
+        ) if session_available(s)]
 
     async def session_command(session_id: str, command: str, level: Optional[str], who: Principal,
                               confirm_uncertain: bool = False) -> Dict[str, object]:
@@ -2050,7 +2080,7 @@ def create_app(
         through the bridge; audited.
         """
         require_human(who)
-        session = db.get_session(session_id)
+        session = active_session(session_id)
         if session is None:
             raise ProductError(404, "session.not_found", "Session not found")
         if session.excluded:
@@ -2179,7 +2209,7 @@ def create_app(
         """
         require_human(who)
         language = db.get_background_language()
-        session = db.get_session(session_id)
+        session = active_session(session_id)
         if session is None:
             raise ProductError(404, "session.not_found", "Session not found")
         if session.excluded:
@@ -2194,7 +2224,7 @@ def create_app(
             if mention.token in mention_tokens and mention_tokens[mention.token] != mention.session_id:
                 raise ProductError(422, "mention.ambiguous", "Ambiguous mention: select the session again.")
             mention_tokens[mention.token] = mention.session_id
-            target = db.get_session(mention.session_id)
+            target = active_session(mention.session_id)
             if mention.token not in body.text:
                 raise ProductError(422, "mention.missing", "The mention is not present in the message.")
             if target is None or target.excluded or target.ended_at is not None:
@@ -2228,7 +2258,7 @@ def create_app(
                  "unsupported": (415, "Unsupported attachment format."), "forbidden": (403, "Unable to store attachments safely.")},
             )
             # Recheck after the transfer: the session may have ended or been excluded.
-            current = db.get_session(session.id)
+            current = active_session(session.id)
             if current is None or current.excluded or current.ended_at is not None:
                 raise ProductError(409, "message.unavailable", "The session became unavailable: message not sent.")
             uploaded = saved.get("files") or []
@@ -2312,7 +2342,7 @@ def create_app(
         if not db.set_session_pinned(session_id, body.pinned):
             raise ProductError(404, "session.not_found", "Session not found")
         notify_session(session_id)
-        return db.get_session(session_id)
+        return visible_session(active_session(session_id))
 
     # --- Nodes (RFC-02) -------------------------------------------------------
 
@@ -2322,12 +2352,14 @@ def create_app(
     @app.get("/api/nodes", response_model=List[NodeModel])
     async def list_nodes(who: Principal = Depends(principal)):
         require_human(who)
-        return db.list_nodes()
+        return [node for node in db.list_nodes() if node_available(node)]
 
     @app.post("/api/nodes", response_model=NodeModel, status_code=201)
     async def create_node(body: NodeCreate, who: Principal = Depends(principal)):
         """Names a session: it becomes a node other sessions can address."""
         require_human(who)
+        if active_session(body.session_id) is None:
+            raise ProductError(404, "session.not_found", "Session not found")
         try:
             node = db.create_node(body.name.strip(), body.session_id)
         except NodeNameTaken:
@@ -2365,6 +2397,8 @@ def create_app(
     async def attach_session(session_id: str, body: NodeAttach, who: Principal = Depends(principal)):
         """Attaches a session to an existing node, or detaches it (node_id null)."""
         require_human(who)
+        if active_session(session_id) is None:
+            raise ProductError(404, "session.not_found", "Session not found")
         outcome = db.attach_session(session_id, body.node_id)
         if outcome == "session":
             raise ProductError(404, "session.not_found", "Session not found")
@@ -2373,7 +2407,7 @@ def create_app(
         if outcome == "provider":
             raise ProductError(409, "node.other_provider", "The node belongs to another provider.")
         notify_session(session_id)
-        return db.get_session(session_id)
+        return visible_session(active_session(session_id))
 
     # --- Relation types and relations (RFC-03, RFC-04) ------------------------
 
@@ -2496,7 +2530,7 @@ def create_app(
         """
         require_agent(who)
         sid = session_id or created_sender_session(who)
-        session = db.get_session(sid) if sid else None
+        session = active_session(sid) if sid else None
         if session is not None and session.agent_id != who.id:
             session = None
         if session is not None:
@@ -2511,7 +2545,9 @@ def create_app(
         else:
             for rel in db.outgoing_relations(session.node_id):
                 node = db.get_node(rel.to_node)
-                target = db.get_session(node.session_id) if node and node.session_id else None
+                if node is not None and not node_available(node):
+                    continue
+                target = active_session(node.session_id) if node and node.session_id else None
                 policy = db.get_relation_effective_policy(rel.id)
                 out["relations"].append({
                     **relation_brief(rel),
@@ -2527,12 +2563,21 @@ def create_app(
     @app.get("/api/relations", response_model=List[RelationModel])
     async def list_relations(node_id: Optional[int] = None, who: Principal = Depends(principal)):
         require_human(who)
-        return db.list_relations(node_id)
+        relations = db.list_relations(node_id)
+        if not config.antigravity_paused:
+            return relations
+        nodes = {node.id for node in db.list_nodes() if node_available(node)}
+        return [rel for rel in relations if rel.from_node in nodes and rel.to_node in nodes]
 
     @app.post("/api/relations", response_model=RelationModel, status_code=201)
     async def create_relation(body: RelationCreate, who: Principal = Depends(principal)):
         """A relation A -> B of a type; `automatic` delivers without review (RFC-05)."""
         require_human(who)
+        if config.antigravity_paused and any(
+            node is not None and not node_available(node) for node in
+            (db.get_node(body.from_node), db.get_node(body.to_node))
+        ):
+            raise ProductError(404, "node.not_found", "Node not found")
         outcome = db.create_relation(body.from_node, body.to_node, body.type_id, body.approval, body.reply_approval)
         if outcome == "nodes":
             raise ProductError(404, "node.not_found", "Node not found")
@@ -2589,6 +2634,12 @@ def create_app(
         p = db.get_project(project_id)
         if not p:
             raise ProductError(404, "project.not_found", "Project not found")
+        if config.antigravity_paused:
+            nodes = [node for node in p.nodes if node_available(node)]
+            node_ids = {node.id for node in nodes}
+            p = p.model_copy(update={"nodes": nodes, "relations": [
+                rel for rel in p.relations if rel.from_node in node_ids and rel.to_node in node_ids
+            ]})
         return p
 
     @app.patch("/api/projects/{project_id}", response_model=ProjectModel)
@@ -2664,7 +2715,7 @@ def create_app(
             raise ProductError(403, "coordinator.credential_required",
                                "The coordinator view needs a verified session credential (session_token).")
         session_id = bound_session(who, x_placet_session)
-        session = db.get_session(session_id) if session_id else None
+        session = active_session(session_id) if session_id else None
         node = db.get_node(session.node_id) if session is not None and session.node_id else None
         project = db.get_project(project_id)
         if project is not None:
@@ -2809,7 +2860,7 @@ def create_app(
         ones with `before`, new ones with `after` (the `end` of a page).
         """
         require_human(who)
-        session = db.get_session(session_id)
+        session = active_session(session_id)
         if session is None:
             raise ProductError(404, "session.not_found", "Session not found")
         if session.excluded:
@@ -2837,7 +2888,7 @@ def create_app(
         (never a path), read on demand through the bridge: no copy is kept.
         """
         require_human(who)
-        session = db.get_session(session_id)
+        session = active_session(session_id)
         if session is None:
             raise ProductError(404, "session.not_found", "Session not found")
         if session.excluded:
@@ -2904,28 +2955,29 @@ def create_app(
             settled_after=now - timedelta(seconds=RESULT_MAX_AGE_SECONDS),
         )
         injections, results, busy = db.tmux_work_filter(
-            db.injections_ready(),
-            results,
+            [req for req in db.injections_ready() if available_target(req.recipient_id, req.recipient_session_id)],
+            [req for req in results if available_target(req.sender_id, req.sender_session_id)],
             lambda agent_id: getattr(config.get_agent(agent_id), "tmux_session", None),
         )
         return {
             "language": db.get_background_language(),
             "injections": injections,
             "results": results,
-            "busy_agents": sorted(set(db.busy_agents(AGENT_BUSY_TTL_SECONDS)) | set(busy)),
+            "busy_agents": sorted(agent_id for agent_id in set(db.busy_agents(AGENT_BUSY_TTL_SECONDS)) | set(busy)
+                                  if config.provider_available(None, agent_id)),
             "claude_wake_sessions": [
                 {"id": s.id, "cwd": s.cwd, **({"force": True} if db.wake_forced(s.id) else {})}
-                for s in db.claude_sessions_to_wake()
+                for s in (db.claude_sessions_to_wake() if config.claude_desktop_experimental else [])
             ],
             # Sessions the bridge wakes itself (Codex, Antigravity) with mail.
             "sessions": [
                 {"id": s.id, "agent_id": s.agent_id, "provider": s.provider, **({"probing": True} if s.id in probing else {})}
-                for s in db.bridge_sessions_with_mail()
+                for s in db.bridge_sessions_with_mail() if session_available(s)
             ],
             "wake_sessions": [
                 {"id": s.id, "provider": s.provider, "suspended": True, **({"probing": True} if s.id in probing else {})}
                 for s in db.bridge_sessions_with_mail(include_suspended=True)
-                if s.suspended_at is not None
+                if s.suspended_at is not None and session_available(s)
             ],
             # Uncertain deliveries: the bridge looks for them in the conversation.
             "uncertain": uncertain_to_reconcile(),
@@ -2935,17 +2987,18 @@ def create_app(
             "folders": db.known_folders(),
             # "Now" messages for running turns, and those whose turn ended first.
             "steer": [{"request_id": r.id, "session_id": s.id, "provider": s.provider}
-                      for r, s in db.steer_candidates()],
+                      for r, s in db.steer_candidates() if session_available(s)],
             "steer_waiting": [{"request_id": r.id, "session_id": s.id, "provider": s.provider}
-                              for r, s in db.steers_waiting()],
+                              for r, s in db.steers_waiting() if session_available(s)],
             # Codex and Antigravity sessions: the bridge reads their titles.
-            "titles": [{"id": s.id, "provider": s.provider} for s in db.untitled_bridge_sessions()],
-            "claude_auto_renew": db.get_setting("claude_auto_renew") == "true",
+            "titles": [{"id": s.id, "provider": s.provider} for s in db.untitled_bridge_sessions() if session_available(s)],
+            "claude_desktop_experimental": config.claude_desktop_experimental,
             "session_credentials": db.get_setting("session_credentials") == "true",
             # RFC-16: busy Claude Code sessions, whose conversation the bridge reads for a user interrupt.
             "claude_busy": [{"id": s.id, "since": s.activity_at.isoformat() if s.activity_at else None}
                             for s in db.list_sessions()
-                            if s.provider == "claude-code" and s.state == "busy" and s.ended_at is None],
+                            if (s.provider == "claude-code" and s.state == "busy"
+                                and s.ended_at is None and session_available(s))],
         }
 
     @app.post("/api/bridge/requests/{request_id}/steer")
@@ -2953,7 +3006,7 @@ def create_app(
         """Takes a "now" message for its session's running turn, with the text to insert."""
         require_bridge(who)
         req = get_or_404(request_id)
-        session = db.get_session(req.recipient_session_id) if req.recipient_session_id else None
+        session = active_session(req.recipient_session_id) if req.recipient_session_id else None
         if session is None or session.excluded or session.state != "busy" or req.delivery_mode != "now":
             raise HTTPException(status_code=409, detail="Not a running turn.")
         claimed = db.claim_steer(request_id, session.id, actor=who.actor)
@@ -2973,7 +3026,8 @@ def create_app(
         not mean the session started) or certainly not. Counts against the episode's budget.
         """
         require_bridge(who)
-        if not db.report_wake(session_id, body.outcome):
+        if (not config.claude_desktop_experimental or active_session(session_id) is None
+                or not db.report_wake(session_id, body.outcome)):
             raise HTTPException(status_code=404, detail="Session not found")
         notify_session(session_id)
         if db.get_session(session_id).wake_state == "wake_failed":
@@ -2992,7 +3046,8 @@ def create_app(
         a closed code only, for the current attempt. Informs the notice; it changes nothing.
         """
         require_bridge(who)
-        if not db.report_wake_cause(session_id, body.cause, body.observed_at, body.attempt_at):
+        if (not config.claude_desktop_experimental
+                or not db.report_wake_cause(session_id, body.cause, body.observed_at, body.attempt_at)):
             raise HTTPException(status_code=404, detail="Session not found")
         notify_session(session_id)
         return {"session": session_id, "cause": body.cause}
@@ -3007,7 +3062,7 @@ def create_app(
         interrupt newer than the start of the running turn ends it: no reply, the request stays open.
         """
         require_bridge(who)
-        session = db.get_session(session_id)
+        session = active_session(session_id)
         if session is None:
             raise HTTPException(status_code=404, detail="Session not found")
         when = body.at if body.at.tzinfo else body.at.replace(tzinfo=timezone.utc)
@@ -3030,10 +3085,11 @@ def create_app(
         message waiting for it is untouched.
         """
         require_human(who)
-        session = db.get_session(session_id)
+        session = active_session(session_id)
         if session is None:
             raise ProductError(404, "session.not_found", "Session not found")
-        if session.provider != "claude-code" or session.entrypoint != "claude-desktop":
+        if (not config.claude_desktop_experimental or session.provider != "claude-code"
+                or session.entrypoint != "claude-desktop"):
             raise ProductError(409, "session.wake_unsupported", "Only a Claude Desktop session can be opened this way.")
         if session.excluded:
             raise ProductError(409, "session.excluded", "This project is excluded from Placet (.placet-off).")
@@ -3064,6 +3120,8 @@ def create_app(
     async def bridge_desktop_state(body: DesktopStateReport, who: Principal = Depends(principal)):
         """What the Claude Desktop app records, read by the bridge: archived conversations (RF-34)."""
         require_bridge(who)
+        if not config.claude_desktop_experimental:
+            return {"changed": [], "suspended": []}
         changed = db.set_desktop_archived(body.archived, body.not_archived)
         for session_id in changed:
             notify_session(session_id)
@@ -3079,13 +3137,16 @@ def create_app(
         """Loaded Claude Desktop engines against the app's cap, as the bridge last counted (empty if never)."""
         require_human(who)
         response.headers["Cache-Control"] = "no-store"
-        return db.get_desktop_capacity()
+        return db.get_desktop_capacity() if config.claude_desktop_experimental else {}
 
     @app.post("/api/bridge/titles")
     async def bridge_titles(payload: TitlesReport, who: Principal = Depends(principal)):
         """Session titles the bridge read from the providers' apps."""
         require_bridge(who)
-        changed = db.set_session_titles(payload.titles)
+        changed = db.set_session_titles({
+            session_id: title for session_id, title in payload.titles.items()
+            if not config.antigravity_paused or active_session(session_id) is not None
+        })
         for session_id in changed:
             notify_session(session_id)
         return {"changed": changed}
@@ -3094,35 +3155,18 @@ def create_app(
     async def bridge_usage(payload: UsageReport, who: Principal = Depends(principal)):
         """Usage windows per provider (RF-60), read by the bridge every minute."""
         require_bridge(who)
-        for item in payload.providers:
+        reports = [item for item in payload.providers
+                   if config.live_usage_providers is None or item.provider in config.live_usage_providers]
+        for item in reports:
             db.set_usage(item.provider, item.model_dump_json())
             db.record_usage_samples(item.provider, item.buckets, item.observed_at)
         _broadcast(("usage", None))
-        return {"providers": [p.provider for p in payload.providers]}
+        return {"providers": [item.provider for item in reports]}
 
     @app.get("/api/usage", response_model=List[ProviderUsage])
     async def get_usage(who: Principal = Depends(principal)):
         require_human(who)
         return stored_usage()
-
-    @app.post("/api/usage/claude/renew")
-    async def renew_claude_usage(who: Principal = Depends(principal)):
-        require_human(who)
-
-        def local():
-            from bridge.usage import renew_claude_credentials, claude_usage, reset_usage_caches
-            if not renew_claude_credentials():
-                raise ProductError(502, "claude_renew.failed", "Claude credential renewal failed.")
-            reset_usage_caches()
-            row = claude_usage()
-            if row is not None:
-                db.set_usage(row.provider, row.model_dump_json())
-                db.record_usage_samples(row.provider, row.buckets, row.observed_at)
-                _broadcast(("usage", None))
-            return {"renewed": True}
-
-        errors = {"failed": (502, "Claude credential renewal failed.")}
-        return await bridge_call("claude_renew", {}, local, errors)
 
     @app.get("/api/stats")
     async def get_stats_endpoint(
@@ -3182,7 +3226,7 @@ def create_app(
     def uncertain_to_reconcile() -> List[Dict[str, object]]:
         out = []
         for req in db.uncertain_deliveries():
-            session = db.get_session(req.recipient_session_id)
+            session = active_session(req.recipient_session_id)
             if session is not None:
                 out.append({"request_id": req.id, "session_id": session.id,
                             "agent_id": session.agent_id, "provider": session.provider})
@@ -3191,7 +3235,7 @@ def create_app(
     def unobserved_to_look_for() -> List[Dict[str, object]]:
         out = []
         for req in db.unobserved_deliveries():
-            session = db.get_session(req.recipient_session_id)
+            session = active_session(req.recipient_session_id)
             if session is not None:
                 out.append({"request_id": req.id, "session_id": session.id,
                             "agent_id": session.agent_id, "provider": session.provider})
@@ -3215,7 +3259,7 @@ def create_app(
         Antigravity), with the text to queue into its app; 204 if none.
         """
         require_bridge(who)
-        session = db.get_session(session_id)
+        session = active_session(session_id)
         if session is None or session.provider not in BRIDGE_PROVIDERS:
             raise HTTPException(status_code=404, detail="Session not found")
         if session_id in db.delivery_block_states()[0]:
@@ -3251,7 +3295,7 @@ def create_app(
     async def bridge_report_delivery_block(session_id: str, body: DeliveryBlockReport, who: Principal = Depends(principal)):
         """The bridge could not deliver to this session and stops trying until the returned time (once per episode the user is told)."""
         require_bridge(who)
-        session = db.get_session(session_id)
+        session = active_session(session_id)
         if session is None or session.provider not in BRIDGE_PROVIDERS:
             raise HTTPException(status_code=404, detail="Session not found")
         block, _new = db.report_delivery_block(session_id, body.code, body.phase, body.deterministic, body.attempts)
@@ -3360,7 +3404,13 @@ def create_app(
         db.clear_delivered(request_id, actor=who.actor)
         return {"id": request_id, "delivered": False}
 
+    def request_provider_paused(req: RequestModel) -> bool:
+        return not (available_target(req.sender_id, req.sender_session_id)
+                    and available_target(req.recipient_id, req.recipient_session_id))
+
     def request_excluded(req: RequestModel) -> bool:
+        if request_provider_paused(req):
+            return True
         for session_id in (req.sender_session_id, req.recipient_session_id):
             session = db.get_session(session_id) if session_id else None
             if session is not None and session.excluded:
@@ -3385,9 +3435,9 @@ def create_app(
                         yield {"event": "automation_update", "data": json.dumps(db.get_automation())}
                         continue
                     if kind == "session":
-                        session = db.get_session(key)
+                        session = active_session(key)
                         if session:
-                            yield {"event": "session_update", "data": session.model_dump_json()}
+                            yield {"event": "session_update", "data": visible_session(session).model_dump_json()}
                         continue
                     req = db.get_request(key)
                     if req and not request_excluded(req):

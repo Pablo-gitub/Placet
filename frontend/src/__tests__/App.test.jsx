@@ -126,7 +126,7 @@ describe("Placet PWA", () => {
     await waitFor(() => expect(screen.getByTestId("session-row-cx1")).toBeInTheDocument());
     const call = fetchMock.mock.calls.find(([url, o]) => url === "/api/sessions/cx1/pin" && o.method === "PUT");
     expect(JSON.parse(call[1].body)).toEqual({ pinned: true });
-    expect(within(dialog).getByTestId("provider-tab-antigravity")).toHaveTextContent("0");
+    expect(within(dialog).queryByTestId("provider-tab-antigravity")).toBeNull();
   });
 
   it("lets the user remove a closed followed session without changing another session with the same title", async () => {

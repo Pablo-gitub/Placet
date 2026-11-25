@@ -1366,26 +1366,6 @@ body.chat-open { overflow: hidden; }
   border: 1px solid var(--border-color); background: var(--bg-card, transparent); color: var(--text-main); }
 .usage-stale { grid-column: 1 / -1; font-size: 0.72rem; color: var(--text-muted); }
 .usage-unknown .usage-value { color: var(--text-muted); }
-.btn-renew-claude {
-  margin-left: 0.5rem;
-  padding: 0.15rem 0.45rem;
-  font-size: 0.72rem;
-  border-radius: 4px;
-  border: 1px solid var(--border-color);
-  background: var(--bg-card, transparent);
-  color: var(--text-main);
-  cursor: pointer;
-}
-.btn-renew-claude:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-.usage-renew-error {
-  grid-column: 1 / -1;
-  font-size: 0.72rem;
-  color: var(--danger, #ef4444);
-}
-
 /* RFC-09, RF-44: Projects and Relation Types views */
 .projects-header {
   display: flex;
@@ -1875,7 +1855,6 @@ body.chat-open { overflow: hidden; }
 .percent-input input { width: 4.2rem; padding: 0.35rem 0.45rem; background: #090d16; border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-main); font: inherit; }
 .usage-guard-thresholds .btn { padding: 0.4rem 0.9rem; font-size: 0.82rem; }
 .usage-guard-active { margin: 0 0 0.5rem; font-size: 0.8rem; color: var(--warning); }
-.usage-guard-warning { margin: 0 0 0.5rem; padding: 0.5rem 0.65rem; font-size: 0.78rem; border-left: 3px solid var(--warning); background: rgba(245, 158, 11, 0.08); border-radius: 6px; }
 .automation-usage { margin: 0.35rem 0 0; font-size: 0.78rem; color: var(--warning); }
 .settings-turn-end { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.55rem 0 0.25rem; border-top: 1px solid var(--border-color); min-width: 0; }
 .settings-options { display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; }
