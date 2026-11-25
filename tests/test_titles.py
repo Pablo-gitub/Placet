@@ -1,4 +1,4 @@
-"""Titles of Codex and Antigravity sessions, read by the bridge (their hooks carry none)."""
+"""Codex title reporting and offline coverage of the paused Antigravity adapter."""
 import json
 from unittest.mock import MagicMock
 
@@ -43,16 +43,16 @@ async def test_the_bridge_reports_titles_and_the_pwa_gets_them(setup, monkeypatc
     for agent, sid, provider in (("codex", "cx1", "codex"), ("gemini", "ag1", "antigravity")):
         async with agent_client(app, f"tok-{agent}") as client:
             await client.post(f"/api/sessions/{sid}/events", json={"event": "start", "provider": provider})
-    monkeypatch.setattr("bridge.bridge_daemon.codex_titles", lambda ids: {i: "Rispondi ok" for i in ids})
+    reader = MagicMock(side_effect=lambda ids: {i: "Rispondi ok" for i in ids})
+    monkeypatch.setattr("bridge.bridge_daemon.codex_titles", reader)
     agy = MagicMock()
-    agy.titles.return_value = {"ag1": "Saluto"}
     daemon = BridgeDaemon(store=HttpStore(token="tok-bridge", client=TestClient(app)),
                           tmux=MagicMock(), channels={"antigravity": agy, "codex": MagicMock()})
     daemon.run_loop_step()
     assert db.get_session("cx1").title == "Rispondi ok"
-    assert db.get_session("ag1").title == "Saluto"
-    agy.titles.assert_called_once_with(["ag1"])
+    assert db.get_session("ag1").title is None
+    agy.titles.assert_not_called()
     daemon.run_loop_step()  # not again within the interval
-    assert agy.titles.call_count == 1
+    assert reader.call_count == 1
     async with agent_client(app, "tok-codex") as codex:
         assert (await codex.post("/api/bridge/titles", json={"titles": {}})).status_code == 403

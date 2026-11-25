@@ -224,7 +224,7 @@ def test_the_bridge_job_reads_and_honours_placet_off(tmp_path, monkeypatch):
     from bridge.bridge_daemon import BridgeDaemon
     monkeypatch.setattr("bridge.bridge_daemon.read_attachment", lambda *a, **k: ("image/png", png()))
     daemon = BridgeDaemon(store=MagicMock(), tmux=MagicMock(), channels={})
-    job = {"id": "j", "kind": "attachment", "provider": "antigravity", "session_id": SID,
+    job = {"id": "j", "kind": "attachment", "provider": "codex", "session_id": SID,
            "attachment_id": "0:0:0", "cwd": str(tmp_path)}
     result = daemon.handle_job(job)
     assert result["ok"] and base64.b64decode(result["page"]["data"]) == png()

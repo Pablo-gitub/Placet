@@ -17,13 +17,14 @@ from typing import Dict, List, Optional, Protocol
 import httpx
 
 from backend.app import envelopes
-from backend.app.config import PlacetConfig, load_agents_config
+from backend.app.config import PlacetConfig, load_runtime_config
 from backend.app.database import Database
 from backend.app.models import (
     AGENT_BUSY_TTL_SECONDS,
     RESULT_GRACE_SECONDS,
     RESULT_MAX_AGE_SECONDS,
     RequestModel,
+    SessionModel,
 )
 from bridge.tmux_controller import SessionSpec
 
@@ -64,7 +65,7 @@ class Work:
     claude_wake_sessions: List[dict] = field(default_factory=list)
     # RFC-16: busy Claude Code sessions ({"id", "since"}), read for a user interrupt.
     claude_busy: List[dict] = field(default_factory=list)
-    claude_auto_renew: bool = False
+    claude_desktop_experimental: bool = False
     # RS-09: the user switched the session credential on in the PWA (the bridge mirrors it for the hooks).
     session_credentials: bool = False
 
@@ -127,53 +128,68 @@ def _session_spec(spec) -> SessionSpec:
 class LocalStore:
     def __init__(self, db: Optional[Database] = None, config: Optional[PlacetConfig] = None):
         self.db = db or Database(os.environ.get("PLACET_DB_PATH", "placet.db"))
-        self.config = config or load_agents_config()
+        self.config = config or load_runtime_config()
+        self.db.live_usage_providers = self.config.live_usage_providers
+
+    def _session_available(self, session: SessionModel) -> bool:
+        return self.config.provider_available(session.provider, session.agent_id)
+
+    def _target_available(self, agent_id: str, session_id: Optional[str]) -> bool:
+        if not self.config.provider_available(None, agent_id):
+            return False
+        if session_id is None or not self.config.antigravity_paused:
+            return True
+        session = self.db.get_session(session_id)
+        return session is None or self._session_available(session)
 
     def work(self) -> Work:
         now = datetime.now(timezone.utc)
         injections, results, busy = self.db.tmux_work_filter(
-            self.db.injections_ready(),
-            self.db.list_undelivered_results(
+            [r for r in self.db.injections_ready() if self._target_available(r.recipient_id, r.recipient_session_id)],
+            [r for r in self.db.list_undelivered_results(
                 settled_before=now - timedelta(seconds=RESULT_GRACE_SECONDS),
                 settled_after=now - timedelta(seconds=RESULT_MAX_AGE_SECONDS),
-            ),
+            ) if self._target_available(r.sender_id, r.sender_session_id)],
             lambda agent_id: getattr(self.config.get_agent(agent_id), "tmux_session", None),
         )
         return Work(
             language=self.db.get_background_language(),
             claude_wake_sessions=[{"id": s.id, "cwd": s.cwd}
-                                 for s in self.db.claude_sessions_to_wake()],
+                                 for s in (self.db.claude_sessions_to_wake()
+                                           if self.config.claude_desktop_experimental else [])],
             claude_busy=[{"id": s.id, "since": s.activity_at.isoformat() if s.activity_at else None}
                          for s in self.db.list_sessions()
-                         if s.provider == "claude-code" and s.state == "busy" and s.ended_at is None],
+                         if (s.provider == "claude-code" and s.state == "busy"
+                             and s.ended_at is None and self._session_available(s))],
             wake_sessions=[{"id": s.id, "provider": s.provider, "suspended": True}
                            for s in self.db.bridge_sessions_with_mail(include_suspended=True)
-                           if s.suspended_at is not None],
+                           if s.suspended_at is not None and self._session_available(s)],
             injections=injections,
             results=results,
-            busy_agents=sorted(set(self.db.busy_agents(AGENT_BUSY_TTL_SECONDS)) | set(busy)),
+            busy_agents=sorted(agent_id for agent_id in set(self.db.busy_agents(AGENT_BUSY_TTL_SECONDS)) | set(busy)
+                               if self.config.provider_available(None, agent_id)),
             sessions=[
                 {"id": s.id, "agent_id": s.agent_id, "provider": s.provider,
                  **({"probing": True} if s.id in self.db.delivery_block_states()[1] else {})}
-                for s in self.db.bridge_sessions_with_mail()
+                for s in self.db.bridge_sessions_with_mail() if self._session_available(s)
             ],
             uncertain=[
                 {"request_id": r.id, "session_id": s.id, "agent_id": s.agent_id, "provider": s.provider}
                 for r in self.db.uncertain_deliveries()
-                if (s := self.db.get_session(r.recipient_session_id)) is not None
+                if (s := self.db.get_session(r.recipient_session_id)) is not None and self._session_available(s)
             ],
             unobserved=[
                 {"request_id": r.id, "session_id": s.id, "agent_id": s.agent_id, "provider": s.provider}
                 for r in self.db.unobserved_deliveries()
-                if (s := self.db.get_session(r.recipient_session_id)) is not None
+                if (s := self.db.get_session(r.recipient_session_id)) is not None and self._session_available(s)
             ],
             folders=self.db.known_folders(),
-            titles=[{"id": s.id, "provider": s.provider} for s in self.db.untitled_bridge_sessions()],
+            titles=[{"id": s.id, "provider": s.provider} for s in self.db.untitled_bridge_sessions() if self._session_available(s)],
             steer=[{"request_id": r.id, "session_id": s.id, "provider": s.provider}
-                   for r, s in self.db.steer_candidates()],
+                   for r, s in self.db.steer_candidates() if self._session_available(s)],
             steer_waiting=[{"request_id": r.id, "session_id": s.id, "provider": s.provider}
-                           for r, s in self.db.steers_waiting()],
-            claude_auto_renew=self.db.get_setting("claude_auto_renew") == "true",
+                           for r, s in self.db.steers_waiting() if self._session_available(s)],
+            claude_desktop_experimental=self.config.claude_desktop_experimental,
             session_credentials=self.db.get_setting("session_credentials") == "true",
         )
 
@@ -185,7 +201,7 @@ class LocalStore:
 
     def take_session_mail(self, session_id: str) -> Optional[SessionMail]:
         session = self.db.get_session(session_id)
-        if session is None or session_id in self.db.delivery_block_states()[0]:
+        if session is None or not self._session_available(session) or session_id in self.db.delivery_block_states()[0]:
             return None
         taken = self.db.take_inbox_message(session, actor=BRIDGE_ACTOR, via="bridge")
         if taken is None:
@@ -243,13 +259,15 @@ class LocalStore:
 
     def report_usage(self, providers: List[dict]) -> None:
         from backend.app.models import UsageReport
+        allowed = self.config.live_usage_providers
         for item in UsageReport(providers=providers).providers:
-            self.db.set_usage(item.provider, item.model_dump_json())
+            if allowed is None or item.provider in allowed:
+                self.db.set_usage(item.provider, item.model_dump_json())
 
     def take_steer(self, request_id: int) -> Optional[dict]:
         req = self.db.get_request(request_id)
         session = self.db.get_session(req.recipient_session_id) if req and req.recipient_session_id else None
-        if session is None or session.state != "busy":
+        if session is None or not self._session_available(session) or session.state != "busy":
             return None
         claimed = self.db.claim_steer(request_id, session.id, actor=BRIDGE_ACTOR)
         if claimed is None:
@@ -312,7 +330,7 @@ class HttpStore:
             titles=list(data.get("titles", [])),
             steer=list(data.get("steer", [])),
             steer_waiting=list(data.get("steer_waiting", [])),
-            claude_auto_renew=bool(data.get("claude_auto_renew", False)),
+            claude_desktop_experimental=bool(data.get("claude_desktop_experimental", False)),
             session_credentials=bool(data.get("session_credentials", False)),
         )
 

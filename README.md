@@ -2,14 +2,14 @@
 
 <p align="center">
   <strong>Your AI coding agents, in your pocket — and talking to each other, with your approval.</strong><br>
-  A self-hosted hub for Claude Code, OpenAI Codex and Google Antigravity: follow every session from your phone,
+  A self-hosted hub for Claude Code and OpenAI Codex: follow every session from your phone,
   answer their questions, write to them, and let them hand work to one another only when you say so.
 </p>
 
 <p align="center">
   <a href="https://github.com/Pablo-gitub/Placet/actions/workflows/checks.yml"><img src="https://github.com/Pablo-gitub/Placet/actions/workflows/checks.yml/badge.svg?branch=main" alt="Checks"></a>
   <img src="https://img.shields.io/badge/status-alpha-orange" alt="Status: alpha">
-  <img src="https://img.shields.io/badge/agents-Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20Antigravity-6366f1" alt="Agents: Claude Code, Codex, Antigravity">
+  <img src="https://img.shields.io/badge/agents-Claude%20Code%20%C2%B7%20Codex-6366f1" alt="Agents: Claude Code and Codex">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="License: Apache 2.0"></a>
 </p>
 
@@ -23,7 +23,7 @@
 
 ## Why
 
-If you run Claude Code, Codex and Antigravity side by side, you know the problems:
+If you run Claude Code and Codex side by side, you know the problems:
 
 - **You are tied to the desk.** An agent stops to ask "may I run the migration?" and waits until you are back.
 - **The agents cannot talk to each other.** You copy a plan from Claude into Codex for a review, then paste the review back.
@@ -63,7 +63,7 @@ Placet sits between your agents and your phone. Every session registers itself; 
   </tr>
 </table>
 
-- **One inbox for all your agents.** Questions from Claude, Codex and Antigravity arrive as cards in a PWA you add to your home screen, with push notifications that open it on the request (Web Push) and, optionally, through a self-hosted [ntfy](https://ntfy.sh).
+- **One inbox for all your agents.** Questions from Claude and Codex arrive as cards in a PWA you add to your home screen, with push notifications that open it on the request (Web Push) and, optionally, through a self-hosted [ntfy](https://ntfy.sh).
 - **Read and write to any session.** The conversation as you see it on the PC: Markdown, highlighted code, tool calls collapsed into one line. Write a message and it wakes the session, as if you had typed it at the desk.
 - **An approval bus between agents.** `placet_send_to_agent` lets an agent ask another one for a review, a test run or a second opinion. You approve, edit, reject or send it to another session; the reply returns after your separate approval, or you forward it elsewhere.
 - **Relations, projects and automation.** Name sessions as stable nodes and group them into projects. Connect nodes with typed relations, each `manual` or `automatic`. Projects can have their own rules, shared project and role instructions, and stricter anti-loop limits. Agents see the policy, read your effective rule before every automatic send, and stop at loop limits; **Stop all** pauses everything. Near a provider's 5-hour or weekly usage limit, its automatic relations can fall back to your review.
@@ -85,26 +85,30 @@ flowchart LR
         subgraph agents["Agent sessions"]
             claude["Claude Code"]
             codex["Codex"]
-            agy["Antigravity"]
         end
     end
     phone <-- "Tailscale (HTTPS)" --> backend
     agents -- "hooks → local queue" --> bridge
     agents -- "ask · send · reply · share" --> mcp --> backend
     bridge <-- "jobs, events" --> backend
-    bridge -- "wake: waiter · codex queue · app API" --> agents
+    bridge -- "wake: waiter · codex queue" --> agents
 ```
 
 - **Backend** — runs as its own system user, keeps requests and the audit log, and is reachable from your phone only through your [Tailscale](https://tailscale.com) network. It never stores your conversations.
 - **Bridge** — runs as you: it reads conversations on demand, wakes sessions, forwards hook events from the local queue and checks which projects are excluded.
-- **Hooks** — every Claude Code, Codex and Antigravity session registers itself and reports when a turn starts and ends. Sessions stay quiet until a Placet message arrives; a `.placet-off` file keeps a project out entirely.
+- **Hooks** — every integrated Claude Code and Codex session registers itself and reports when a turn starts and ends. Sessions stay quiet until a Placet message arrives; a `.placet-off` file keeps a project out entirely.
 - **MCP tools** — `placet_ask_human`, `placet_send_to_agent`, `placet_list_relations`, `placet_reply`, `placet_share_file` and friends, available to every agent.
 
 | Provider | Registers with | Woken by |
 |---|---|---|
 | Claude Code (desktop app and CLI) | hooks | a background waiter (`asyncRewake`) |
 | OpenAI Codex (desktop app and CLI) | hooks | `codex queue` |
-| Google Antigravity 2.0 | hooks | the app's language server |
+
+## Provider changes
+
+- **Antigravity is paused.** Placet keeps existing sessions and requests in the database. The bridge stops reading or delivering to those sessions, and the PWA omits them from the session picker. Running the hook installer during an upgrade removes obsolete Placet hooks from Antigravity's user settings.
+- **Claude usage.** Placet no longer reads or renews Claude Code's OAuth credentials. Use `/usage` in Claude Code to check your quota. Placet's live usage display, quota-based review and delivery at reset now use Codex data.
+- **Claude Desktop.** Open a suspended conversation in Claude Desktop so its hook can pick up queued messages. Automatic reopening and local app-state reading are experimental and disabled by default. [Claude Desktop wake-up](docs/providers/claude-wake.md)
 
 ## Security, briefly
 
@@ -122,7 +126,7 @@ Placet targets **Linux** with **Python 3.11+**, **Node.js 22.13+** and [Tailscal
 ```bash
 git clone <this repository> placet && cd placet
 sudo deploy/install.sh                  # backend service, bridge service, PWA build
-python3 /opt/placet/hooks/install.py    # hooks for Claude Code, Codex and Antigravity
+python3 /opt/placet/hooks/install.py    # hooks for Claude Code and Codex
 sudo tailscale serve --bg unix:/run/placet/human.sock
 ```
 
@@ -135,10 +139,10 @@ The complete guide — environment variables, notifications, MCP setup, the tmux
 Placet is **alpha**, used every day by its author on one machine. The interface supports English and Italian, covering approvals, history, session selection, chat controls, delivery feedback and image/PDF viewers. Notifications and generated Placet messages have a separate shared language setting. See [localization scope and contributor rules](docs/localization.md).
 
 - ✅ Questions and approvals from the phone, push notifications, audit log
-- ✅ Sessions on the phone: read, write, wake (Claude Code, Codex, Antigravity)
+- ✅ Sessions on the phone: read and write Claude Code and Codex sessions
 - ✅ Reliability: local event queue, delivery / execution / reply, one request at a time
 - ✅ Attachments: viewing, `placet_share_file`, uploads from the phone; `@` mentions
-- ✅ "Now" messages inside a running turn (Claude Code, Antigravity); scheduled messages and delivery at the provider's usage reset
+- ✅ "Now" messages inside a running Claude Code turn, scheduled messages, and delivery at the Codex usage reset
 - ✅ Undelivered messages with cancel/forward; turns stopped by API errors or interrupted in the app
 - ✅ Nodes, typed relations with manual / automatic policy, a general rule for automatic relations, loop limits and Stop all; change of recipient on approval
 - ✅ Projects with per-project rules, limits and instructions; a live relations diagram; usage guard

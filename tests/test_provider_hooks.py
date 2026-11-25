@@ -99,21 +99,23 @@ OTHER_CLAUDE = {
 
 
 def run_install(home, *args):
-    return [install.apply(p, "/opt/placet/hooks", "--uninstall" in args, "--dry-run" in args, home=home)
-            for p in ("claude", "codex", "antigravity")]
+    return install.main(args, home=home)
 
 
 def read(home, rel):
     return json.loads((home / rel).read_text())
 
 
-def test_install_merges_and_is_idempotent(tmp_path):
+def test_install_merges_and_is_idempotent(tmp_path, capsys):
     (tmp_path / ".claude").mkdir()
     (tmp_path / ".claude" / "settings.json").write_text(json.dumps(OTHER_CLAUDE))
     (tmp_path / ".gemini" / "config").mkdir(parents=True)
     (tmp_path / ".gemini" / "config" / "hooks.json").write_text(json.dumps({
-        "lint": {"PostToolUse": [{"matcher": "run_command", "hooks": [{"command": "./lint.sh"}]}]}}))
-    run_install(tmp_path)
+        "lint": {"PostToolUse": [{"matcher": "run_command", "hooks": [{"command": "./lint.sh"}]}]},
+        **install.antigravity_hooks("/opt/placet/hooks"),
+    }))
+    assert run_install(tmp_path) == 0
+    capsys.readouterr()
 
     claude = read(tmp_path, ".claude/settings.json")
     assert claude["model"] == "opus"
@@ -129,11 +131,11 @@ def test_install_merges_and_is_idempotent(tmp_path):
     assert not any(h.get("async") for g in codex["hooks"].values() for x in g for h in x["hooks"])
 
     agy = read(tmp_path, ".gemini/config/hooks.json")
-    assert set(agy) == {"lint", "placet"}
-    assert agy["placet"]["Stop"][0]["command"].endswith("antigravity.py --agent gemini --event Stop")
+    assert set(agy) == {"lint"}
 
     # A second run changes nothing, and makes no backup.
-    assert all("already up to date" in line for line in run_install(tmp_path))
+    assert run_install(tmp_path) == 0
+    assert capsys.readouterr().out.count("already up to date") == 3
     backups = list(tmp_path.rglob("*.bak-placet-*"))
     assert len(backups) == 2  # claude and antigravity existed before the first run
 
@@ -141,11 +143,11 @@ def test_install_merges_and_is_idempotent(tmp_path):
 def test_uninstall_removes_only_placet(tmp_path):
     (tmp_path / ".claude").mkdir()
     (tmp_path / ".claude" / "settings.json").write_text(json.dumps(OTHER_CLAUDE))
-    run_install(tmp_path)
-    run_install(tmp_path, "--uninstall")
+    assert run_install(tmp_path) == 0
+    assert run_install(tmp_path, "--uninstall") == 0
     assert read(tmp_path, ".claude/settings.json") == OTHER_CLAUDE
     assert read(tmp_path, ".codex/hooks.json") == {}
-    assert read(tmp_path, ".gemini/config/hooks.json") == {}
+    assert not (tmp_path / ".gemini/config/hooks.json").exists()
 
 
 def test_a_broken_file_is_never_overwritten(tmp_path):
@@ -156,9 +158,9 @@ def test_a_broken_file_is_never_overwritten(tmp_path):
     assert (tmp_path / ".claude" / "settings.json").read_text() == "{ broken"
 
 
-def test_dry_run_writes_nothing(tmp_path):
-    out = run_install(tmp_path, "--dry-run")
-    assert all("would be updated" in line for line in out)
+def test_dry_run_writes_nothing(tmp_path, capsys):
+    assert run_install(tmp_path, "--dry-run") == 0
+    assert capsys.readouterr().out.count("would be updated") == 2
     assert not list(tmp_path.rglob("*.json"))
 
 

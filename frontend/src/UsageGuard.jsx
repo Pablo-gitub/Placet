@@ -13,20 +13,17 @@ async function call(url, method = "GET", body) {
 
 /**
  * Near a provider's usage limit, its automatic relations (both directions)
- * are reviewed by the user until usage goes down. Claude's usage is known only
- * while its login is valid, hence the automatic renewal next to it.
+ * are reviewed by the user until usage goes down.
  */
 export default function UsageGuard() {
   const { t } = useTranslation();
   const [saved, setSaved] = useState(null);
   const [form, setForm] = useState(null);
-  const [renew, setRenew] = useState(null);
   const [deliverAtReset, setDeliverAtReset] = useState(null);
   const [error, setError] = useState(false);
 
   useEffect(() => {
     call("/api/settings/usage-guard").then((g) => { setSaved(g); setForm(g); }).catch(() => setError(true));
-    call("/api/settings/claude-renew").then((r) => setRenew(r.enabled)).catch(() => {});
     call("/api/settings/deliver-at-reset").then((d) => setDeliverAtReset(d.enabled)).catch(() => {});
   }, []);
 
@@ -41,12 +38,6 @@ export default function UsageGuard() {
         { enabled: form.enabled, five_hour: form.five_hour, seven_day: form.seven_day });
       setSaved(out); setForm(out);
     } catch { setError(true); }
-  };
-  const toggleRenew = async () => {
-    const next = !renew;
-    setRenew(next);
-    try { setRenew((await call("/api/settings/claude-renew", "PUT", { enabled: next })).enabled); }
-    catch { setRenew(!next); }
   };
   const toggleDeliverAtReset = async () => {
     const next = !deliverAtReset;
@@ -93,17 +84,7 @@ export default function UsageGuard() {
           {t("settings.guardActive", { providers: saved.guarded.map((p) => providerOf({ provider: p }).label).join(", ") })}
         </p>
       )}
-      {saved.enabled && renew === false && (
-        <p className="usage-guard-warning" data-testid="usage-guard-claude-warning">{t("settings.guardClaudeWarning")}</p>
-      )}
-      <label className="settings-row settings-check">
-        <span className="settings-row-text">
-          <strong>{t("usage.autoRenew")}</strong>
-          <small>{t("settings.renewHint")}</small>
-        </span>
-        <input type="checkbox" data-testid="toggle-claude-auto-renew" checked={!!renew} disabled={renew === null}
-          onChange={toggleRenew} />
-      </label>
+      <p className="composer-note">{t("settings.claudeUsageUnavailable")}</p>
       <label className="settings-row settings-check">
         <span className="settings-row-text">
           <strong>{t("settings.deliverAtResetTitle")}</strong>

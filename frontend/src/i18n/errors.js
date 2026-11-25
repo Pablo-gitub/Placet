@@ -73,7 +73,6 @@ export function apiErrorDescriptor(body, status) {
     "project.name_taken": "errors.projectNameTaken",
     "project.not_found": "errors.notFound",
     "project.node_not_in_project": "errors.nodeNotInProject",
-    "claude_renew.failed": "errors.claudeRenewFailed",
     "session.busy": "errors.sessionBusy",
     "session.control_pc_only": "errors.controlPcOnly",
     "session.control_unsupported": "errors.controlUnsupported",

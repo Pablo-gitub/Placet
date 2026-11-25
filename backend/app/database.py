@@ -149,6 +149,7 @@ class Database:
     def __init__(self, db_path: str = "placet.db"):
         self.db_path = db_path
         self._last_usage_purge_time = 0.0
+        self.live_usage_providers: Optional[frozenset[str]] = None
 
     @contextmanager
     def _get_connection(self) -> Iterator[sqlite3.Connection]:
@@ -1139,6 +1140,7 @@ class Database:
         limit: int = 50,
         oldest_first: bool = False,
         hide_excluded: bool = False,
+        hide_antigravity: bool = False,
     ) -> List[RequestModel]:
         """
         Newest first by default (what a UI wants); the bridge asks for
@@ -1148,6 +1150,13 @@ class Database:
         conditions = ["r.status = ?"] if status else []
         if hide_excluded:
             conditions.append(_NOT_EXCLUDED_SQL)
+        if hide_antigravity:
+            conditions.append(
+                "r.sender_id != 'gemini' AND r.recipient_id != 'gemini'"
+                " AND NOT EXISTS (SELECT 1 FROM sessions paused"
+                " WHERE paused.id IN (r.sender_session_id, r.recipient_session_id)"
+                " AND (paused.provider = 'antigravity' OR paused.agent_id = 'gemini'))"
+            )
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         params = ([status.value] if status else []) + [limit]
         with self._get_connection() as conn:
@@ -2966,9 +2975,12 @@ class Database:
 
     def list_usage(self) -> List[str]:
         with self._get_connection() as conn:
-            return [r["data"] for r in conn.execute("SELECT data FROM provider_usage ORDER BY provider")]
+            return [r["data"] for r in conn.execute("SELECT provider, data FROM provider_usage ORDER BY provider")
+                    if self.live_usage_providers is None or r["provider"] in self.live_usage_providers]
 
     def get_usage(self, provider: str) -> Optional[str]:
+        if self.live_usage_providers is not None and provider not in self.live_usage_providers:
+            return None
         with self._get_connection() as conn:
             row = conn.execute("SELECT data FROM provider_usage WHERE provider = ?", (provider,)).fetchone()
             return row["data"] if row else None

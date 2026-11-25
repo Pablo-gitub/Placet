@@ -439,7 +439,7 @@ Future Commands screen exposes only administrator-enabled human-reserved actions
 
 ## 9. Usage and session metadata
 
-The bridge reports normalized 5-hour/weekly windows to `POST /api/bridge/usage`; the human-only `GET /api/usage` and `usage_update` SSE feed the Home usage bar. Claude uses its undocumented OAuth usage endpoint every five minutes, sending Claude Code's existing token only to Anthropic and never refreshing it. Codex reads the latest rollout limits; Antigravity queries its private quota summary, grouped by model family. Local readers run approximately once per minute. Missing data is unavailable, not zero usage.
+The bridge reports normalized 5-hour and weekly Codex windows from local rollouts to `POST /api/bridge/usage` about once per minute. The human-only `GET /api/usage` and `usage_update` SSE feed the Home usage bar. Claude usage is available through `/usage` in Claude Code. Antigravity is paused. Previously stored Claude and Antigravity readings are excluded from live quota decisions.
 
 Account-wide 100% windows with future timezone-aware reset timestamps hold provider delivery until reset. Per-model-group limits do not hold an entire provider. These are observations, not a guarantee that the provider will accept the next request.
 
@@ -447,7 +447,7 @@ Newest transcript pages carry optional model/effort/context metadata for Claude 
 
 ### Usage history recording and retention (RF-64b)
 
-The bridge reports quota windows to `POST /api/bridge/usage`, and Claude manual renew calls `/api/usage/claude/renew`. To track utilization over time without unbounded growth, samples are recorded in `usage_samples` (`provider`, `bucket_id`, `window`, `bucket_group`, `used_percent`, `resets_at`, `observed_at`) under four criteria:
+The bridge reports quota windows to `POST /api/bridge/usage`. To track utilization over time without unbounded growth, samples are recorded in `usage_samples` (`provider`, `bucket_id`, `window`, `bucket_group`, `used_percent`, `resets_at`, `observed_at`) under four criteria:
 1. Significant change in `used_percent` compared to the previous recorded sample for that bucket.
 2. The turn boundaries of any active conversation (first sample after `executing_since` or `completed_at`).
 3. Transition across the configured usage guard threshold.

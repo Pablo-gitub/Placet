@@ -12,14 +12,15 @@ const CLIENT_LABELS = {
 export const PROVIDERS = [
   { key: "claude-code", label: "Claude", agent: "claude" },
   { key: "codex", label: "Codex", agent: "codex" },
-  { key: "antigravity", label: "Antigravity", agent: "gemini" },
 ];
 
 /** The provider of a session; old sessions may lack it, so guess from the agent. */
 export function providerOf(session) {
   return (
     PROVIDERS.find((p) => p.key === session.provider) ||
-    PROVIDERS.find((p) => p.agent === session.agent_id) || {
+    PROVIDERS.find((p) => p.agent === session.agent_id) ||
+    ((session.provider === "antigravity" || (!session.provider && session.agent_id === "gemini"))
+      ? { key: "antigravity", label: "Antigravity", agent: "gemini" } : null) || {
       key: session.provider || session.agent_id,
       label: session.provider || session.agent_id,
       agent: session.agent_id,

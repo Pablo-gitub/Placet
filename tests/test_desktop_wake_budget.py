@@ -145,7 +145,7 @@ def test_the_loop_reports_the_outcome_to_the_backend():
     from bridge.stores import Work
     waker = MagicMock()
     bridge, store = daemon(waker)
-    store.work.return_value = Work(claude_wake_sessions=[{"id": SID, "cwd": "/lab"}])
+    store.work.return_value = Work(claude_desktop_experimental=True, claude_wake_sessions=[{"id": SID, "cwd": "/lab"}])
     bridge.run_loop_step()
     store.report_wake.assert_called_once_with(SID, "open_requested")
     store.report_wake.side_effect = RuntimeError("backend down")      # a failed report must not stop the loop

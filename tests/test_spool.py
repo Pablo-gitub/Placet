@@ -36,7 +36,7 @@ def test_a_full_queue_drops_new_events(tmp_path, monkeypatch):
     assert spool.write_event("claude", "s1", {"event": "stop"}, folder) is None
 
 
-def test_hooks_write_to_the_queue_without_network(tmp_path):
+def test_claude_hook_spools_without_network_and_paused_antigravity_hook_does_not(tmp_path):
     env = {"PATH": "/usr/bin", "HOME": str(tmp_path), "PLACET_SPOOL_DIR": str(tmp_path / "q"),
            "PLACET_API_URL": "http://127.0.0.1:9"}
     claude = {"hook_event_name": "Stop", "session_id": "c1", "cwd": str(tmp_path),
@@ -48,13 +48,13 @@ def test_hooks_write_to_the_queue_without_network(tmp_path):
                    input=json.dumps(agy), text=True, env=env, timeout=10, check=True)
     events = [json.loads((tmp_path / "q" / n).read_text()) for n in queued(tmp_path / "q")]
     assert {(e["agent"], e["session_id"], e["body"]["event"]) for e in events} == {
-        ("claude", "c1", "stop"), ("gemini", "g1", "start")}
-    assert [e for e in events if e["agent"] == "claude"][0]["body"]["last_message"] == "FATTO"
+        ("claude", "c1", "stop")}
+    assert events[0]["body"]["last_message"] == "FATTO"
 
     (tmp_path / ".placet-off").touch()
     subprocess.run([sys.executable, str(HOOKS / "claude_code.py"), "--agent", "claude"],
                    input=json.dumps(claude), text=True, env=env, timeout=10, check=True)
-    assert len(queued(tmp_path / "q")) == 2
+    assert len(queued(tmp_path / "q")) == 1
 
 
 class Backend:
